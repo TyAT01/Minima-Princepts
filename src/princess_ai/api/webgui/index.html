@@ -44,6 +44,9 @@
     <nav class="tabs">
       <button class="tab active" data-tab="text">Text Chat</button>
       <button class="tab" data-tab="voice">Voice Channel</button>
+      <button class="tab" data-tab="telemetry">Telemetry</button>
+      <button class="tab" data-tab="controls">Controls</button>
+      <button class="tab" data-tab="memory">Memory</button>
       <button class="tab" data-tab="errors">Errors</button>
     </nav>
 
@@ -93,10 +96,125 @@
     </section>
 
     <section class="tab-panel" id="tab-errors">
-      <div class="card">
-        <h2>Errors (Realtime)</h2>
-        <div class="error-window" id="error-window">
-          <div class="empty">No errors reported.</div>
+      <div class="panel-grid">
+        <div class="card">
+          <h2>Errors (Realtime)</h2>
+          <div class="error-window" id="error-window">
+            <div class="empty">No errors reported.</div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Log Timeline</h2>
+          <div class="controls">
+            <input id="log-search" type="text" placeholder="Search logs (tool, safety, memory)" />
+          </div>
+          <div class="error-window" id="log-window">
+            <div class="empty">No logs yet.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-telemetry">
+      <div class="panel-grid">
+        <div class="card">
+          <h2>Live Voice Telemetry</h2>
+          <div class="metric-list">
+            <div><span class="label">Listening</span> <span id="telemetry-listening">No</span></div>
+            <div><span class="label">Speaking</span> <span id="telemetry-speaking">No</span></div>
+            <div><span class="label">Barge-In</span> <span id="telemetry-barge">No</span></div>
+            <div><span class="label">Emotion</span> <span id="telemetry-emotion">warm</span></div>
+          </div>
+          <div class="subsection">
+            <h3>Latest Transcript</h3>
+            <div id="telemetry-transcript" class="mono-block">No transcript yet.</div>
+            <h3>Last Final Transcript</h3>
+            <div id="telemetry-final" class="mono-block">No final transcript yet.</div>
+            <h3>TTS Queue</h3>
+            <ul id="telemetry-tts" class="presence-list"></ul>
+          </div>
+        </div>
+        <div class="card">
+          <h2>LLM Stream</h2>
+          <div id="telemetry-tokens" class="token-stream">Waiting for tokens…</div>
+          <div class="subsection">
+            <h3>QoS Metrics</h3>
+            <ul class="metric-list">
+              <li><span class="label">TTFT</span> <span id="metric-ttft">–</span></li>
+              <li><span class="label">End-to-End</span> <span id="metric-e2e">–</span></li>
+              <li><span class="label">Dropped Frames</span> <span id="metric-dropped">0</span></li>
+              <li><span class="label">Reconnects</span> <span id="metric-reconnects">0</span></li>
+            </ul>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Adapters</h2>
+          <table class="adapter-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Last Event</th>
+                <th>Reconnects</th>
+              </tr>
+            </thead>
+            <tbody id="adapter-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-controls">
+      <div class="panel-grid">
+        <div class="card">
+          <h2>Runtime Controls</h2>
+          <div class="controls vertical">
+            <label>
+              Stream Mode
+              <button class="toggle" id="control-stream">Toggle</button>
+            </label>
+            <label>
+              Mute Output
+              <button class="toggle" id="control-mute">Toggle</button>
+            </label>
+            <label>
+              Persona
+              <input id="control-persona" type="text" placeholder="streamer" />
+              <button class="primary" id="control-persona-set">Apply</button>
+            </label>
+            <label>
+              Model
+              <input id="control-model" type="text" placeholder="llama3" />
+              <button class="primary" id="control-model-set">Apply</button>
+            </label>
+            <label>
+              Manual Message
+              <input id="control-manual" type="text" placeholder="Send a hint to Aurelia" />
+              <button class="primary" id="control-manual-send">Send</button>
+            </label>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Session Snapshot</h2>
+          <pre id="session-snapshot" class="mono-block">Loading session…</pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-memory">
+      <div class="panel-grid">
+        <div class="card">
+          <h2>Memory Store</h2>
+          <div class="controls">
+            <button class="primary" id="memory-refresh">Refresh</button>
+          </div>
+          <ul class="presence-list" id="memory-list"></ul>
+        </div>
+        <div class="card">
+          <h2>Memory Events</h2>
+          <div class="error-window" id="memory-events">
+            <div class="empty">No memory events logged.</div>
+          </div>
         </div>
       </div>
     </section>

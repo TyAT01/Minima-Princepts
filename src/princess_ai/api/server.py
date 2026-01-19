@@ -21,6 +21,7 @@ from princess_ai.memory.store import MemoryRecord, MemoryStore
 from princess_ai.runtime.presence import PresenceTracker
 from princess_ai.runtime.control import ControlHub
 from princess_ai.runtime.session import SessionManager
+from princess_ai.runtime.telemetry import TelemetryHub
 
 
 def create_app(
@@ -28,11 +29,13 @@ def create_app(
     memory_store: MemoryStore,
     control_hub: ControlHub | None = None,
     log_store: InMemoryLogStore | None = None,
+    telemetry: TelemetryHub | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Aurelia Vale AI API")
     logger = logging.getLogger(__name__)
     control = control_hub or ControlHub()
     logs = log_store or InMemoryLogStore()
+    telemetry_hub = telemetry or TelemetryHub()
     attach_error_log_handler(logs)
     presence = PresenceTracker()
     web_root = Path(__file__).parent / "webgui"
@@ -85,9 +88,9 @@ def create_app(
             return {"error": "Unable to set module"}
 
     @app.get("/memories")
-    def list_memories(limit: int = 50) -> dict:
+    def list_memories(limit: int = 50, scope: str | None = None) -> dict:
         try:
-            memories = _serialize_memories(memory_store.list_memories(limit=limit))
+            memories = _serialize_memories(memory_store.list_memories(limit=limit, scope=scope))
             return {"memories": memories}
         except Exception as exc:  # noqa: BLE001 - keep API resilient
             logger.exception("Failed to list memories: %s", exc)
@@ -101,6 +104,22 @@ def create_app(
         except Exception as exc:  # noqa: BLE001 - keep API resilient
             logger.exception("Failed to list logs: %s", exc)
             return {"logs": []}
+
+    @app.get("/telemetry")
+    def get_telemetry() -> dict:
+        try:
+            snapshot = telemetry_hub.snapshot()
+            return {
+                "adapters": {name: asdict(status) for name, status in snapshot.adapters.items()},
+                "voice": asdict(snapshot.voice),
+                "llm_tokens": snapshot.llm_tokens,
+                "qos": asdict(snapshot.qos),
+                "emotion": asdict(snapshot.emotion),
+                "last_updated": snapshot.last_updated,
+            }
+        except Exception as exc:  # noqa: BLE001 - keep API resilient
+            logger.exception("Failed to fetch telemetry: %s", exc)
+            return {"adapters": {}, "voice": {}, "llm_tokens": [], "qos": {}}
 
     @app.post("/controls/adapters/{name}")
     def set_adapter(name: str, enabled: bool) -> dict:
@@ -188,6 +207,7 @@ def create_app(
         await socket.accept()
         try:
             while True:
+                snapshot = telemetry_hub.snapshot()
                 payload = {
                     "logs": _serialize_logs(logs.snapshot()),
                     "presence": [
@@ -198,6 +218,16 @@ def create_app(
                         }
                         for item in presence.snapshot()
                     ],
+                    "telemetry": {
+                        "adapters": {name: asdict(status) for name, status in snapshot.adapters.items()},
+                        "voice": asdict(snapshot.voice),
+                        "llm_tokens": snapshot.llm_tokens,
+                        "qos": asdict(snapshot.qos),
+                        "emotion": asdict(snapshot.emotion),
+                        "last_updated": snapshot.last_updated,
+                    },
+                    "session": asdict(session_manager.snapshot()),
+                    "controls": asdict(control.snapshot()),
                 }
                 await socket.send_json(payload)
                 await asyncio.sleep(0.5)
@@ -217,6 +247,7 @@ def _serialize_memories(records: Iterable[MemoryRecord]) -> list[dict]:
                 "text": record.text,
                 "importance": record.importance,
                 "timestamp": record.timestamp,
+                "scope": record.scope,
             }
             for record in records
         ]

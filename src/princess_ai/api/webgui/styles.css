@@ -132,6 +132,27 @@ body {
   color: #e7edf8;
 }
 
+.controls.vertical {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.controls.vertical label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+
+button.toggle {
+  background: #1f273d;
+  color: #e7edf8;
+  border: 1px solid #2b324a;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
 button.primary {
   background: #5c7cfa;
   color: #fff;
@@ -162,6 +183,54 @@ button.ghost {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.mono-block {
+  font-family: "Fira Code", monospace;
+  background: rgba(231, 237, 248, 0.08);
+  border: 1px solid rgba(231, 237, 248, 0.15);
+  border-radius: 12px;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 8px 0 12px;
+}
+
+.metric-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.token-stream {
+  min-height: 120px;
+  max-height: 180px;
+  overflow-y: auto;
+  border-radius: 12px;
+  background: #0b0f1a;
+  border: 1px solid #2b324a;
+  padding: 12px;
+  font-size: 14px;
+  color: #d6e4ff;
+}
+
+.adapter-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.adapter-table th,
+.adapter-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid #2b324a;
+}
+
+.adapter-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .voice-status {

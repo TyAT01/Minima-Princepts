@@ -6,13 +6,17 @@ import asyncio
 import importlib.util
 import logging
 import os
+import time
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Iterable, Optional
 
+from princess_ai.audio.pcm import chunk_pcm, ensure_pcm_format
 from princess_ai.audio.pipeline import AudioFrame, AudioPipeline
 from princess_ai.audio.stt import DummyStreamingSTT, STTConfig, VoskStreamingSTT
 from princess_ai.audio.tts import DummyTTS, PyTTSx3Engine, TTSConfig
 from princess_ai.input_adapters.base import InputAdapter
+from princess_ai.runtime.telemetry import TelemetryHub
 from princess_ai.schemas.events import Event
 
 
@@ -27,6 +31,7 @@ class DiscordVoiceAdapter(InputAdapter):
         username_fallback: str = "discord_user",
         stt_config: STTConfig | None = None,
         tts_config: TTSConfig | None = None,
+        telemetry: TelemetryHub | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._username_fallback = username_fallback
@@ -35,6 +40,7 @@ class DiscordVoiceAdapter(InputAdapter):
         self._channel_id = channel_id or self._get_env_int("PRINCESS_DISCORD_CHANNEL_ID")
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()
+        self._telemetry = telemetry
         self._pipeline = AudioPipeline(
             stt=VoskStreamingSTT(stt_config) if self._has_vosk() else DummyStreamingSTT(),
             tts=PyTTSx3Engine(tts_config) if self._has_tts() else DummyTTS(),
@@ -42,6 +48,10 @@ class DiscordVoiceAdapter(InputAdapter):
         )
         self._client = None
         self._voice_client = None
+        self._audio_queue: Queue[bytes] = Queue(maxsize=400)
+        self._audio_source = None
+        self._dropped_audio_frames = 0
+        self._tts_lock = asyncio.Lock()
         self._ensure_client()
 
     def poll(self) -> Iterable[Event]:
@@ -67,6 +77,11 @@ class DiscordVoiceAdapter(InputAdapter):
             for chunk in self._pipeline.ingest(frame):
                 if not chunk.text:
                     continue
+                if self._telemetry:
+                    if chunk.is_final:
+                        self._telemetry.update_voice(last_final_transcript=chunk.text)
+                    else:
+                        self._telemetry.update_voice(last_transcript=chunk.text)
                 event = Event(
                     source="discord",
                     user_id=user_id or self._username_fallback,
@@ -81,6 +96,14 @@ class DiscordVoiceAdapter(InputAdapter):
                 self._queue.put_nowait(event)
         except Exception as exc:  # noqa: BLE001 - keep audio ingestion resilient
             self._logger.exception("Failed to ingest Discord audio frame: %s", exc)
+        finally:
+            if self._telemetry:
+                self._telemetry.update_voice(
+                    listening=self._pipeline.state.listening,
+                    speaking=self._pipeline.state.speaking,
+                    barge_in=self._pipeline.state.barge_in_detected,
+                    tts_queue=list(self._pipeline.state.tts_queue),
+                )
 
     def start(self) -> None:
         if not self._client or not self._token:
@@ -95,6 +118,23 @@ class DiscordVoiceAdapter(InputAdapter):
         if not self._client:
             return
         self._loop.create_task(self._client.close())
+
+    def speak(self, text: str) -> None:
+        if not text.strip():
+            return
+        if not self._loop.is_running():
+            self._logger.warning("Event loop not running; unable to speak.")
+            return
+        self._loop.create_task(self._enqueue_tts(text))
+
+    def interrupt(self) -> None:
+        self._pipeline.stop_tts()
+        self._clear_audio_queue()
+        if self._voice_client and getattr(self._voice_client, "is_playing", lambda: False)():
+            try:
+                self._voice_client.stop()
+            except Exception as exc:  # noqa: BLE001 - keep stop resilient
+                self._logger.exception("Failed to stop Discord playback: %s", exc)
 
     @staticmethod
     def _get_env_int(key: str) -> int | None:
@@ -128,6 +168,8 @@ class DiscordVoiceAdapter(InputAdapter):
             @self._client.event
             async def on_ready() -> None:  # type: ignore[override]
                 self._logger.info("Discord voice adapter connected as %s", self._client.user)
+                if self._telemetry:
+                    self._telemetry.update_adapter("discord", connected=True)
                 await self._join_voice()
 
             @self._client.event
@@ -142,9 +184,13 @@ class DiscordVoiceAdapter(InputAdapter):
                     metadata={"mode": "text"},
                 )
                 await self._queue.put(event)
+                if self._telemetry:
+                    self._telemetry.update_adapter("discord", last_event_at=time.time())
         except Exception as exc:  # noqa: BLE001 - keep adapter resilient
             self._logger.exception("Failed to initialize Discord client: %s", exc)
             self._client = None
+            if self._telemetry:
+                self._telemetry.update_adapter("discord", connected=False, last_error=str(exc))
 
     async def _join_voice(self) -> None:
         if not self._client or not self._guild_id or not self._channel_id:
@@ -160,13 +206,132 @@ class DiscordVoiceAdapter(InputAdapter):
                 self._logger.warning("Discord channel %s not found.", self._channel_id)
                 return
             if hasattr(channel, "connect"):
-                self._voice_client = await channel.connect()
+                voice_client = await self._connect_voice(channel)
+                self._voice_client = voice_client
                 self._logger.info("Joined Discord voice channel %s", self._channel_id)
         except Exception as exc:  # noqa: BLE001 - keep adapter resilient
             self._logger.exception("Failed to join Discord voice: %s", exc)
+            if self._telemetry:
+                self._telemetry.update_adapter("discord", last_error=str(exc))
 
     def _handle_barge_in(self) -> None:
         self._logger.info("Barge-in detected; pausing TTS output.")
+        if self._telemetry:
+            self._telemetry.update_voice(barge_in=True)
+        self.interrupt()
+
+    async def _enqueue_tts(self, text: str) -> None:
+        async with self._tts_lock:
+            for frame in self._pipeline.enqueue_tts(text):
+                pcm = ensure_pcm_format(frame, target_rate=48000, target_channels=2)
+                for chunk in chunk_pcm(pcm, 3840):
+                    if not self._try_enqueue_audio(chunk):
+                        self._dropped_audio_frames += 1
+                        if self._telemetry:
+                            self._telemetry.update_qos(dropped_audio_frames=self._dropped_audio_frames)
+                        break
+            self._ensure_playback()
+            if self._telemetry:
+                self._telemetry.update_voice(
+                    speaking=self._pipeline.state.speaking,
+                    tts_queue=list(self._pipeline.state.tts_queue),
+                )
+
+    def _ensure_playback(self) -> None:
+        if not self._voice_client:
+            return
+        is_playing = getattr(self._voice_client, "is_playing", lambda: False)()
+        if is_playing:
+            return
+        source = self._get_audio_source()
+        try:
+            self._voice_client.play(source)
+        except Exception as exc:  # noqa: BLE001 - keep playback resilient
+            self._logger.exception("Failed to start Discord playback: %s", exc)
+
+    def _get_audio_source(self) -> "DiscordPCMSource":
+        if self._audio_source is None:
+            self._audio_source = DiscordPCMSource(self._audio_queue)
+        return self._audio_source
+
+    def _try_enqueue_audio(self, data: bytes) -> bool:
+        try:
+            self._audio_queue.put_nowait(data)
+            return True
+        except Exception:
+            return False
+
+    def _clear_audio_queue(self) -> None:
+        try:
+            while True:
+                self._audio_queue.get_nowait()
+        except Empty:
+            return
+
+    async def _connect_voice(self, channel) -> object:
+        voice_recv_spec = importlib.util.find_spec("discord.ext.voice_recv")
+        if voice_recv_spec:
+            from discord.ext import voice_recv  # type: ignore
+
+            voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
+            try:
+                voice_client.listen(DiscordAudioSink(self))
+            except Exception as exc:  # noqa: BLE001 - keep receiver resilient
+                self._logger.exception("Failed to attach voice receiver: %s", exc)
+            return voice_client
+        return await channel.connect()
+
+
+class DiscordAudioSink:
+    """Voice receiver sink for discord.ext.voice_recv."""
+
+    def __init__(self, adapter: DiscordVoiceAdapter) -> None:
+        self._adapter = adapter
+
+    def wants_opus(self) -> bool:
+        return False
+
+    def write(self, user, data) -> None:
+        try:
+            pcm = getattr(data, "pcm", data)
+            if not pcm:
+                return
+            username = getattr(user, "display_name", None) or getattr(user, "name", None)
+            user_id = str(getattr(user, "id", ""))
+            self._adapter.ingest_audio_frame(
+                pcm,
+                sample_rate=48000,
+                channels=2,
+                user_id=user_id or None,
+                username=username or None,
+            )
+            if self._adapter._telemetry:
+                self._adapter._telemetry.update_adapter(
+                    "discord",
+                    last_event_at=time.time(),
+                )
+        except Exception as exc:  # noqa: BLE001 - keep sink resilient
+            self._adapter._logger.exception("Discord audio sink failed: %s", exc)
+            if self._adapter._telemetry:
+                self._adapter._telemetry.update_adapter("discord", last_error=str(exc))
+
+
+class DiscordPCMSource:
+    """Audio source reading PCM frames from a queue."""
+
+    def __init__(self, queue: Queue[bytes], frame_size: int = 3840) -> None:
+        self._queue = queue
+        self._frame_size = frame_size
+        self._silence = b"\x00" * frame_size
+
+    def read(self) -> bytes:
+        try:
+            return self._queue.get_nowait()
+        except Empty:
+            return self._silence
+
+    def is_opus(self) -> bool:
+        return False
 
 
 class DiscordTranscriptAdapter(InputAdapter):

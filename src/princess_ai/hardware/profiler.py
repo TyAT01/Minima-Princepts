@@ -89,3 +89,16 @@ class AdaptiveResourceManager:
         except Exception as exc:  # noqa: BLE001 - keep auto tuning resilient
             self._logger.exception("Failed to auto-tune profile: %s", exc)
             return self._active_profile
+
+    def tune_for_latency(self, latency_ms: float | None) -> str:
+        try:
+            if latency_ms is None:
+                return self._active_profile
+            if latency_ms > 4500:
+                self._active_profile = "low_spec"
+            elif latency_ms < 2000:
+                self._active_profile = "default"
+            return self._active_profile
+        except Exception as exc:  # noqa: BLE001 - keep tuning resilient
+            self._logger.exception("Failed to tune for latency: %s", exc)
+            return self._active_profile

@@ -22,10 +22,12 @@ from princess_ai.personality.layer import PersonalityLayer
 from princess_ai.runtime.control import ControlHub
 from princess_ai.runtime.event_router import EventRouter
 from princess_ai.runtime.session import SessionManager
+from princess_ai.runtime.telemetry import TelemetryHub
 from princess_ai.safety.filter import SafetyFilter
 from princess_ai.schemas.events import Event, OutputMessage
 from princess_ai.thought.inner import InnerThought
 from princess_ai.tools.router import ToolCall, ToolRouter
+from princess_ai.output.voice import VoiceOutputManager, VoiceOutputPacket
 
 
 @dataclass(slots=True)
@@ -46,6 +48,8 @@ class RuntimeDependencies:
     session_manager: SessionManager
     control_hub: ControlHub
     log_store: InMemoryLogStore
+    telemetry: TelemetryHub
+    voice_output: VoiceOutputManager | None = None
     use_streaming: bool = False
     persona: Persona = field(default_factory=Persona)
 
@@ -96,7 +100,15 @@ class RuntimeOrchestrator:
             events = self._deps.event_router.select(events, mode=self._deps.session_manager.snapshot().mode)
             for event in events:
                 try:
+                    original_text = event.text
                     event.text = self._deps.safety_filter.filter_input(event.text)
+                    if original_text != event.text:
+                        self._deps.log_store.add(
+                            LogEntry(
+                                name="safety_rewrite",
+                                payload={"source": event.source, "before": original_text, "after": event.text},
+                            )
+                        )
                 except Exception as exc:  # noqa: BLE001 - keep runtime alive
                     self._logger.exception("Safety filter failed for input: %s", exc)
                 self._deps.session_manager.upsert_channel(
@@ -119,8 +131,13 @@ class RuntimeOrchestrator:
             self._logger.warning("No recent events available to respond to.")
             return
         last_event = recent_events[-1]
-        memories = list(self._deps.memory_store.list_memories())
+        scope_key = f"{last_event.source}:{last_event.metadata.get('channel', last_event.user_id)}"
+        memories = list(self._deps.memory_store.list_memories(scope=scope_key))
         retrieved = self._deps.memory_retriever.retrieve(last_event.text, memories)
+        if retrieved:
+            self._deps.log_store.add(
+                LogEntry(name="memory_retrieved", payload={"items": [item.text for item in retrieved]})
+            )
         session = self._deps.session_manager.snapshot()
         stream_mode = self._deps.control_hub.snapshot().stream_mode
         safety_rules = ["No explicit content", "Avoid ban-worthy topics"]
@@ -141,7 +158,11 @@ class RuntimeOrchestrator:
         )
         intent = self._deps.inner_thought.plan(context)
         tool_call = self._deps.tool_router.select_tool(intent)
-        tool_result = self._execute_tool(tool_call, last_event.text) if tool_call else None
+        if tool_call:
+            self._deps.log_store.add(
+                LogEntry(name="tool_call", payload={"name": tool_call.name, "payload": tool_call.payload})
+            )
+        tool_result = self._execute_tool(tool_call, last_event.text, scope_key) if tool_call else None
         if tool_result:
             context = context.replace(
                 self._persona.response_marker,
@@ -151,12 +172,28 @@ class RuntimeOrchestrator:
         response = self._generate_response(context)
         response = self._deps.personality_layer.apply(response)
         response = self._deps.emotion_engine.express(response)
-        output = self._deps.safety_filter.filter_output(
-            OutputMessage(text=response, intent=intent.goal)
+        emotion_state = self._deps.emotion_engine.state
+        self._deps.telemetry.update_emotion(
+            mood=emotion_state.mood,
+            valence=emotion_state.valence,
+            arousal=emotion_state.arousal,
         )
+        output = self._deps.safety_filter.filter_output(OutputMessage(text=response, intent=intent.goal))
+        if output.text != response:
+            self._deps.log_store.add(
+                LogEntry(name="safety_rewrite", payload={"source": "output", "before": response, "after": output.text})
+            )
         if not self._deps.session_manager.snapshot().muted:
             print(output.text)
         self._deps.log_store.add(LogEntry(name="output", payload={"text": output.text}))
+        if self._deps.voice_output:
+            self._deps.voice_output.speak(
+                VoiceOutputPacket(
+                    text=output.text,
+                    source=last_event.source,
+                    channel=last_event.metadata.get("channel"),
+                )
+            )
 
     def _should_emit_autonomous_event(self) -> bool:
         return (time.monotonic() - self._last_activity) >= self._idle_interval
@@ -174,14 +211,17 @@ class RuntimeOrchestrator:
             metadata={"autonomous": True},
         )
 
-    def _execute_tool(self, tool_call: ToolCall, last_message: str) -> str | None:
+    def _execute_tool(self, tool_call: ToolCall, last_message: str, scope_key: str) -> str | None:
         try:
             if tool_call.name == "store_memory":
                 text = tool_call.payload.get("text", last_message).strip()
                 if not text:
                     return "No memory stored (empty message)."
                 importance = self._deps.memory_policy.reinforce(text, 1.0)
-                self._deps.memory_policy.store_memory(text, importance)
+                self._deps.memory_policy.store_memory(text, importance, scope=scope_key)
+                self._deps.log_store.add(
+                    LogEntry(name="memory_saved", payload={"text": text, "importance": importance})
+                )
                 return f"Saved memory: {text}"
             if tool_call.name == "get_time":
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -208,10 +248,24 @@ class RuntimeOrchestrator:
         config = GenerationConfig()
         try:
             if not self._deps.use_streaming:
-                return self._deps.llm.generate(context, config)
+                start = time.monotonic()
+                response = self._deps.llm.generate(context, config)
+                elapsed = (time.monotonic() - start) * 1000
+                self._deps.telemetry.update_qos(end_to_end_latency_ms=elapsed)
+                return response
+            self._deps.telemetry.reset_llm_tokens()
             tokens = []
+            start = time.monotonic()
+            first_token_at = None
             for token in self._deps.llm.stream(context, config):
                 tokens.append(token)
+                self._deps.telemetry.add_llm_token(token)
+                if first_token_at is None:
+                    first_token_at = time.monotonic()
+                    self._deps.telemetry.update_qos(
+                        time_to_first_token_ms=(first_token_at - start) * 1000
+                    )
+            self._deps.telemetry.update_qos(end_to_end_latency_ms=(time.monotonic() - start) * 1000)
             return "".join(tokens)
         except Exception as exc:  # noqa: BLE001 - keep runtime alive
             self._logger.exception("LLM response generation failed: %s", exc)

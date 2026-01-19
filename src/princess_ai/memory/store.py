@@ -14,6 +14,7 @@ class MemoryRecord:
     text: str
     importance: float
     timestamp: float
+    scope: str | None = None
 
 
 class MemoryStore:
@@ -31,10 +32,15 @@ class MemoryStore:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         text TEXT NOT NULL,
                         importance REAL NOT NULL,
-                        timestamp REAL NOT NULL
+                        timestamp REAL NOT NULL,
+                        scope TEXT
                     )
                     """
                 )
+                try:
+                    conn.execute("ALTER TABLE memories ADD COLUMN scope TEXT")
+                except sqlite3.OperationalError:
+                    pass
         except sqlite3.Error as exc:
             self._logger.error("Failed to ensure memory schema: %s", exc)
 
@@ -45,26 +51,41 @@ class MemoryStore:
                 return
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute(
-                    "INSERT INTO memories (text, importance, timestamp) VALUES (?, ?, ?)",
-                    (record.text, record.importance, record.timestamp),
+                    "INSERT INTO memories (text, importance, timestamp, scope) VALUES (?, ?, ?, ?)",
+                    (record.text, record.importance, record.timestamp, record.scope),
                 )
         except sqlite3.Error as exc:
             self._logger.error("Failed to store memory: %s", exc)
 
-    def list_memories(self, limit: int = 50) -> Iterable[MemoryRecord]:
+    def list_memories(self, limit: int = 50, scope: str | None = None) -> Iterable[MemoryRecord]:
         try:
             if limit <= 0:
                 self._logger.warning("Memory list limit must be positive. Got %s.", limit)
                 return []
             with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute(
-                    "SELECT text, importance, timestamp FROM memories ORDER BY timestamp DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+                if scope:
+                    rows = conn.execute(
+                        """
+                        SELECT text, importance, timestamp, scope
+                        FROM memories
+                        WHERE scope IS NULL OR scope = ?
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                        """,
+                        (scope, limit),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT text, importance, timestamp, scope FROM memories ORDER BY timestamp DESC LIMIT ?",
+                        (limit,),
+                    ).fetchall()
         except sqlite3.Error as exc:
             self._logger.error("Failed to list memories: %s", exc)
             return []
-        return [MemoryRecord(text=row[0], importance=row[1], timestamp=row[2]) for row in rows]
+        return [
+            MemoryRecord(text=row[0], importance=row[1], timestamp=row[2], scope=row[3])
+            for row in rows
+        ]
 
     def decay_importance(self, amount: float) -> int:
         try:

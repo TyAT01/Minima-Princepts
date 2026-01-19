@@ -6,12 +6,15 @@ import asyncio
 import json
 import logging
 import os
+import time
+from collections import deque
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from princess_ai.input_adapters.base import InputAdapter
+from princess_ai.runtime.telemetry import TelemetryHub
 from princess_ai.schemas.events import Event
 
 
@@ -23,6 +26,7 @@ class YouTubeChatAdapter(InputAdapter):
         api_key: str | None = None,
         live_chat_id: str | None = None,
         username_fallback: str = "youtube_user",
+        telemetry: TelemetryHub | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._api_key = api_key or os.getenv("PRINCESS_YOUTUBE_API_KEY", "").strip()
@@ -31,6 +35,9 @@ class YouTubeChatAdapter(InputAdapter):
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()
         self._next_page_token: str | None = None
+        self._telemetry = telemetry
+        self._recent_ids = deque(maxlen=300)
+        self._reconnects = 0
         if self._api_key and self._live_chat_id:
             if self._loop.is_running():
                 self._loop.create_task(self._run())
@@ -56,6 +63,15 @@ class YouTubeChatAdapter(InputAdapter):
                 backoff = 1
             except Exception as exc:  # noqa: BLE001 - keep adapter resilient
                 self._logger.exception("YouTube adapter error: %s", exc)
+                self._reconnects += 1
+                if self._telemetry:
+                    self._telemetry.update_adapter(
+                        "youtube",
+                        connected=False,
+                        last_error=str(exc),
+                        reconnects=self._reconnects,
+                    )
+                    self._telemetry.update_qos(reconnect_count=self._reconnects)
                 await asyncio.sleep(min(backoff, 30))
                 backoff *= 2
 
@@ -71,6 +87,9 @@ class YouTubeChatAdapter(InputAdapter):
         url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?{urlencode(query)}"
         with urlopen(url, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
+        if self._telemetry:
+            self._telemetry.update_adapter("youtube", connected=True, reconnects=self._reconnects)
+            self._telemetry.update_qos(reconnect_count=self._reconnects)
         self._next_page_token = payload.get("nextPageToken")
         polling_ms = payload.get("pollingIntervalMillis", 2000)
         for item in payload.get("items", []):
@@ -79,14 +98,25 @@ class YouTubeChatAdapter(InputAdapter):
             text = snippet.get("displayMessage", "")
             if not text:
                 continue
+            message_id = item.get("id")
+            if message_id:
+                if message_id in self._recent_ids:
+                    continue
+                self._recent_ids.append(message_id)
             event = Event(
                 source="youtube",
                 user_id=author.get("channelId", self._username_fallback),
                 username=author.get("displayName", self._username_fallback),
                 text=text,
-                metadata={"message_type": snippet.get("type"), "channel": self._live_chat_id},
+                metadata={
+                    "message_type": snippet.get("type"),
+                    "channel": self._live_chat_id,
+                    "message_id": message_id,
+                },
             )
             await self._queue.put(event)
+            if self._telemetry:
+                self._telemetry.update_adapter("youtube", last_event_at=time.time())
         await asyncio.sleep(polling_ms / 1000)
 
 
