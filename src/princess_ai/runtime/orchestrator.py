@@ -12,7 +12,7 @@ from princess_ai.context.builder import ContextBuilder, ContextInputs, Persona
 from princess_ai.emotion.engine import EmotionEngine
 from princess_ai.input_adapters.base import InputAdapter
 from princess_ai.learning.controller import LearningController
-from princess_ai.logging.telemetry import InMemoryLogStore, LogEntry
+from princess_ai.app_logging.telemetry import InMemoryLogStore, LogEntry
 from princess_ai.llm.engine import GenerationConfig, LLMEngine
 from princess_ai.memory.policy import MemoryPolicy
 from princess_ai.memory.retrieval import MemoryRetriever
