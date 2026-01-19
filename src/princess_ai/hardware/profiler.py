@@ -65,6 +65,7 @@ class AdaptiveResourceManager:
     def __init__(self, profiler: HardwareProfiler) -> None:
         self._profiler = profiler
         self._logger = logging.getLogger(__name__)
+        self._active_profile = "default"
 
     def choose_profile(self) -> str:
         try:
@@ -75,3 +76,16 @@ class AdaptiveResourceManager:
         except Exception as exc:  # noqa: BLE001 - keep runtime resilient
             self._logger.exception("Failed to choose profile: %s", exc)
             return "default"
+
+    def auto_tune(self) -> str:
+        try:
+            if self._profiler._psutil:
+                cpu = self._profiler._psutil.cpu_percent(interval=0.1)
+                if cpu > 85:
+                    self._active_profile = "low_spec"
+                else:
+                    self._active_profile = "default"
+            return self._active_profile
+        except Exception as exc:  # noqa: BLE001 - keep auto tuning resilient
+            self._logger.exception("Failed to auto-tune profile: %s", exc)
+            return self._active_profile

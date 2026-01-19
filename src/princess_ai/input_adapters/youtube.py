@@ -1,18 +1,97 @@
-"""YouTube live chat adapter using a log-backed input stream."""
+"""YouTube live chat adapters."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from princess_ai.input_adapters.base import InputAdapter
 from princess_ai.schemas.events import Event
 
 
 class YouTubeChatAdapter(InputAdapter):
-    """YouTube chat adapter that tails a local log file."""
+    """Native YouTube live chat adapter using polling."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        live_chat_id: str | None = None,
+        username_fallback: str = "youtube_user",
+    ) -> None:
+        self._logger = logging.getLogger(__name__)
+        self._api_key = api_key or os.getenv("PRINCESS_YOUTUBE_API_KEY", "").strip()
+        self._live_chat_id = live_chat_id or os.getenv("PRINCESS_YOUTUBE_LIVE_CHAT_ID", "").strip()
+        self._username_fallback = username_fallback
+        self._queue: asyncio.Queue[Event] = asyncio.Queue()
+        self._loop = asyncio.get_event_loop()
+        self._next_page_token: str | None = None
+        if self._api_key and self._live_chat_id:
+            if self._loop.is_running():
+                self._loop.create_task(self._run())
+            else:
+                self._logger.warning("Event loop not running; YouTube adapter idle.")
+        else:
+            self._logger.warning("YouTube adapter missing API key or liveChatId.")
+
+    def poll(self) -> Iterable[Event]:
+        events: list[Event] = []
+        while True:
+            try:
+                events.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return events
+
+    async def _run(self) -> None:
+        backoff = 1
+        while True:
+            try:
+                await self._poll()
+                backoff = 1
+            except Exception as exc:  # noqa: BLE001 - keep adapter resilient
+                self._logger.exception("YouTube adapter error: %s", exc)
+                await asyncio.sleep(min(backoff, 30))
+                backoff *= 2
+
+    async def _poll(self) -> None:
+        query = {
+            "liveChatId": self._live_chat_id,
+            "part": "snippet,authorDetails",
+            "maxResults": 200,
+            "key": self._api_key,
+        }
+        if self._next_page_token:
+            query["pageToken"] = self._next_page_token
+        url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?{urlencode(query)}"
+        with urlopen(url, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        self._next_page_token = payload.get("nextPageToken")
+        polling_ms = payload.get("pollingIntervalMillis", 2000)
+        for item in payload.get("items", []):
+            snippet = item.get("snippet", {})
+            author = item.get("authorDetails", {})
+            text = snippet.get("displayMessage", "")
+            if not text:
+                continue
+            event = Event(
+                source="youtube",
+                user_id=author.get("channelId", self._username_fallback),
+                username=author.get("displayName", self._username_fallback),
+                text=text,
+                metadata={"message_type": snippet.get("type"), "channel": self._live_chat_id},
+            )
+            await self._queue.put(event)
+        await asyncio.sleep(polling_ms / 1000)
+
+
+class YouTubeLogAdapter(InputAdapter):
+    """Fallback adapter that tails a local log file."""
 
     def __init__(self, log_path: Path | None = None, username_fallback: str = "youtube_user") -> None:
         self._logger = logging.getLogger(__name__)
@@ -21,10 +100,10 @@ class YouTubeChatAdapter(InputAdapter):
         self._offset = 0
         if not self._log_path:
             self._logger.warning(
-                "YouTubeChatAdapter disabled; set PRINCESS_YOUTUBE_CHAT_LOG to enable file input."
+                "YouTubeLogAdapter disabled; set PRINCESS_YOUTUBE_CHAT_LOG to enable file input."
             )
         else:
-            self._logger.info("YouTubeChatAdapter watching %s", self._log_path)
+            self._logger.info("YouTubeLogAdapter watching %s", self._log_path)
 
     def poll(self) -> Iterable[Event]:
         if not self._log_path:

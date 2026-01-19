@@ -7,6 +7,9 @@ dependencies = ["pyyaml>=6.0"]
 
 [project.optional-dependencies]
 api = ["fastapi>=0.110.0", "uvicorn>=0.23.0"]
+voice = ["discord.py>=2.3.0", "vosk>=0.3.45", "pyttsx3>=2.90"]
+streaming = []
+memory = ["faiss-cpu>=1.8.0", "numpy>=1.26.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
