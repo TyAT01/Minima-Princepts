@@ -104,5 +104,4 @@ venv.bak
 # Local files
 *.log
 memory.sqlite
-requirements.txt
 aurelia_sheet_suggestions.md
