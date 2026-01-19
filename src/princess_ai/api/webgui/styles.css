@@ -238,6 +238,63 @@ button.ghost {
   font-weight: 500;
 }
 
+.muted {
+  color: #9fb4d6;
+  margin-top: 0;
+}
+
+.connection-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.connection-card {
+  border-radius: 14px;
+  border: 1px solid #2b324a;
+  background: #0f1525;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.connection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.connection-title {
+  font-weight: 600;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ff6b6b;
+  box-shadow: 0 0 8px rgba(255, 107, 107, 0.4);
+}
+
+.status-dot.connected {
+  background: #4cd964;
+  box-shadow: 0 0 8px rgba(76, 217, 100, 0.5);
+}
+
+.connection-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #9fb4d6;
+}
+
+.connection-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .presence-list {
   list-style: none;
   padding-left: 0;

@@ -34,6 +34,7 @@ const sessionSnapshot = document.getElementById("session-snapshot");
 const memoryList = document.getElementById("memory-list");
 const memoryEvents = document.getElementById("memory-events");
 const memoryRefresh = document.getElementById("memory-refresh");
+const connectionGrid = document.getElementById("connection-grid");
 
 const state = {
   logs: [],
@@ -50,6 +51,13 @@ const state = {
   controls: {},
   logFilter: "",
 };
+
+const connectionTargets = [
+  { name: "youtube", label: "YouTube Stream" },
+  { name: "twitch", label: "Twitch Stream" },
+  { name: "discord", label: "Discord Voice" },
+  { name: "discord_stream", label: "Discord Stream" },
+];
 
 const setActiveTab = (tabName) => {
   tabs.forEach((tab) => {
@@ -225,6 +233,55 @@ const renderTelemetry = () => {
   });
 };
 
+const renderConnections = () => {
+  if (!connectionGrid) return;
+  connectionGrid.innerHTML = "";
+  const adapters = state.telemetry.adapters || {};
+  const controls = state.controls.adapters || {};
+  connectionTargets.forEach((target) => {
+    const adapter = adapters[target.name];
+    const connected = adapter?.connected === true;
+    const enabled = controls[target.name] === true;
+    const card = document.createElement("div");
+    card.classList.add("connection-card");
+    const statusLabel = connected ? "Connected" : "Disconnected";
+    const modeLabel = enabled ? "Enabled" : "Disabled";
+    const lastEvent = adapter?.last_event_at
+      ? new Date(adapter.last_event_at * 1000).toLocaleTimeString()
+      : "–";
+    card.innerHTML = `
+      <div class="connection-header">
+        <div>
+          <div class="connection-title">${target.label}</div>
+          <div class="label">${statusLabel}</div>
+        </div>
+        <span class="status-dot ${connected ? "connected" : ""}"></span>
+      </div>
+      <div class="connection-actions">
+        <button class="primary" data-action="connect" data-name="${target.name}">Connect</button>
+        <button class="ghost" data-action="disconnect" data-name="${target.name}">Disconnect</button>
+      </div>
+      <div class="connection-footer">
+        <span>${modeLabel}</span>
+        <span>Last event: ${lastEvent}</span>
+      </div>
+    `;
+    connectionGrid.appendChild(card);
+  });
+  connectionGrid.querySelectorAll("button[data-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      const name = event.currentTarget.dataset.name;
+      const action = event.currentTarget.dataset.action;
+      const enabled = action === "connect";
+      try {
+        await postControl(`/controls/adapters/${name}`, { enabled });
+      } catch (error) {
+        console.error("Failed to toggle adapter", error);
+      }
+    });
+  });
+};
+
 const renderSession = () => {
   sessionSnapshot.textContent = JSON.stringify(state.session, null, 2);
 };
@@ -283,6 +340,7 @@ const syncFromPayload = (payload) => {
   renderErrors();
   renderLogs();
   renderTelemetry();
+  renderConnections();
   renderSession();
   renderMemoryEvents();
 };

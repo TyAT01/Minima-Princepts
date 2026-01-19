@@ -21,6 +21,7 @@ from princess_ai.memory.store import MemoryStore
 from princess_ai.personality.layer import PersonalityLayer
 from princess_ai.runtime.control import ControlHub
 from princess_ai.runtime.event_router import EventRouter
+from princess_ai.runtime.idle import IdleActivityPlanner
 from princess_ai.runtime.session import SessionManager
 from princess_ai.runtime.telemetry import TelemetryHub
 from princess_ai.safety.filter import SafetyFilter
@@ -63,13 +64,8 @@ class RuntimeOrchestrator:
         self._last_activity = time.monotonic()
         self._idle_interval = 6.0
         self._logger = logging.getLogger(__name__)
-        self._autonomous_prompts = [
-            "Reflect on the recent conversation and share a helpful thought.",
-            "Scan the conversation history and propose a next best action.",
-            "Offer a proactive check-in or suggestion based on current goals.",
-            "Summarize what you've learned recently and how it affects your plan.",
-        ]
-        self._autonomous_index = 0
+        self._idle_planner = IdleActivityPlanner()
+        self._last_idle_activity: str | None = None
 
     async def run(self) -> None:
         self._running = True
@@ -199,16 +195,14 @@ class RuntimeOrchestrator:
         return (time.monotonic() - self._last_activity) >= self._idle_interval
 
     def _build_autonomous_event(self) -> Event:
-        prompt = self._autonomous_prompts[self._autonomous_index]
-        self._autonomous_index = (self._autonomous_index + 1) % len(
-            self._autonomous_prompts
-        )
+        activity, prompt = self._idle_planner.choose(self._last_idle_activity)
+        self._last_idle_activity = activity
         return Event(
             source="autonomous",
             user_id="system",
             username="system",
             text=prompt,
-            metadata={"autonomous": True},
+            metadata={"autonomous": True, "idle_activity": activity},
         )
 
     def _execute_tool(self, tool_call: ToolCall, last_message: str, scope_key: str) -> str | None:

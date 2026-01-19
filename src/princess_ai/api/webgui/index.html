@@ -44,6 +44,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="text">Text Chat</button>
       <button class="tab" data-tab="voice">Voice Channel</button>
+      <button class="tab" data-tab="connections">Connections</button>
       <button class="tab" data-tab="telemetry">Telemetry</button>
       <button class="tab" data-tab="controls">Controls</button>
       <button class="tab" data-tab="memory">Memory</button>
@@ -91,6 +92,27 @@
         <div class="card">
           <h2>Voice Activity</h2>
           <ul id="voice-participants" class="presence-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-connections">
+      <div class="panel-grid">
+        <div class="card">
+          <h2>Stream & Voice Connections</h2>
+          <p class="muted">
+            Use the controls below to connect or disconnect each stream/voice channel.
+            Status indicators update in realtime based on adapter telemetry.
+          </p>
+          <div class="connection-grid" id="connection-grid"></div>
+        </div>
+        <div class="card">
+          <h2>Connection Notes</h2>
+          <ul>
+            <li>Each channel toggles independently and keeps its own status light.</li>
+            <li>Green indicates connected, red indicates disconnected.</li>
+            <li>Manual toggles will still show as "enabled" even if the adapter is offline.</li>
+          </ul>
         </div>
       </div>
     </section>
