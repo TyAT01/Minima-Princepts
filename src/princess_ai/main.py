@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from princess_ai.config import ProfileLoader
@@ -22,6 +23,10 @@ from princess_ai.tools.router import ToolRouter
 
 
 async def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     profiler = HardwareProfiler()
     resource_manager = AdaptiveResourceManager(profiler)
     profiles = ProfileLoader(Path(__file__).parent / "config" / "profiles.json").load()
@@ -47,4 +52,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("Shutting down Princess AI.")

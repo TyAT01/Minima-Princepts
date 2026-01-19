@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
-from typing import Iterable
 
 from princess_ai.context.builder import ContextBuilder, ContextInputs, Persona
 from princess_ai.emotion.engine import EmotionEngine
@@ -17,7 +17,7 @@ from princess_ai.memory.state import ConversationState
 from princess_ai.memory.store import MemoryRecord, MemoryStore
 from princess_ai.personality.layer import PersonalityLayer
 from princess_ai.safety.filter import SafetyFilter
-from princess_ai.schemas.events import OutputMessage
+from princess_ai.schemas.events import Event, OutputMessage
 from princess_ai.thought.inner import InnerThought
 from princess_ai.tools.router import ToolCall, ToolRouter
 
@@ -43,18 +43,44 @@ class RuntimeOrchestrator:
         self._conversation = ConversationState()
         self._persona = Persona()
         self._running = False
+        self._last_activity = time.monotonic()
+        self._idle_interval = 6.0
+        self._logger = logging.getLogger(__name__)
+        self._autonomous_prompts = [
+            "Reflect on the recent conversation and share a helpful thought.",
+            "Scan the conversation history and propose a next best action.",
+            "Offer a proactive check-in or suggestion based on current goals.",
+            "Summarize what you've learned recently and how it affects your plan.",
+        ]
+        self._autonomous_index = 0
 
     async def run(self) -> None:
         self._running = True
         while self._running:
-            events = list(self._deps.adapter.poll())
-            if not events:
-                await asyncio.sleep(0.1)
+            try:
+                events = list(self._deps.adapter.poll())
+            except Exception as exc:  # noqa: BLE001 - keep runtime alive
+                self._logger.exception("Adapter polling failed: %s", exc)
+                await asyncio.sleep(0.2)
                 continue
+            if not events:
+                if self._should_emit_autonomous_event():
+                    events = [self._build_autonomous_event()]
+                else:
+                    await asyncio.sleep(0.1)
+                    continue
             for event in events:
-                event.text = self._deps.safety_filter.filter_input(event.text)
+                try:
+                    event.text = self._deps.safety_filter.filter_input(event.text)
+                except Exception as exc:  # noqa: BLE001 - keep runtime alive
+                    self._logger.exception("Safety filter failed for input: %s", exc)
             self._conversation.add_events(events)
-            await self._respond()
+            self._last_activity = time.monotonic()
+            try:
+                await self._respond()
+            except Exception as exc:  # noqa: BLE001 - keep runtime alive
+                self._logger.exception("Response generation failed: %s", exc)
+                await asyncio.sleep(0.2)
 
     async def _respond(self) -> None:
         recent_events = self._conversation.recent()
@@ -85,6 +111,22 @@ class RuntimeOrchestrator:
             OutputMessage(text=response, intent=intent.goal)
         )
         print(output.text)
+
+    def _should_emit_autonomous_event(self) -> bool:
+        return (time.monotonic() - self._last_activity) >= self._idle_interval
+
+    def _build_autonomous_event(self) -> Event:
+        prompt = self._autonomous_prompts[self._autonomous_index]
+        self._autonomous_index = (self._autonomous_index + 1) % len(
+            self._autonomous_prompts
+        )
+        return Event(
+            source="autonomous",
+            user_id="system",
+            username="system",
+            text=prompt,
+            metadata={"autonomous": True},
+        )
 
     def _execute_tool(self, tool_call: ToolCall, last_message: str) -> str | None:
         if tool_call.name == "store_memory":
