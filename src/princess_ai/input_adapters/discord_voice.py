@@ -9,7 +9,7 @@ import os
 import time
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Iterable, Optional
+from typing import Iterable
 
 from princess_ai.audio.pcm import chunk_pcm, ensure_pcm_format
 from princess_ai.audio.pipeline import AudioFrame, AudioPipeline
