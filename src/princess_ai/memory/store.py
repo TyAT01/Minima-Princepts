@@ -65,3 +65,24 @@ class MemoryStore:
             self._logger.error("Failed to list memories: %s", exc)
             return []
         return [MemoryRecord(text=row[0], importance=row[1], timestamp=row[2]) for row in rows]
+
+    def decay_importance(self, amount: float) -> int:
+        try:
+            if amount <= 0:
+                self._logger.warning("Decay amount must be positive. Got %s.", amount)
+                return 0
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE memories
+                    SET importance = CASE
+                        WHEN importance - ? < 0 THEN 0
+                        ELSE importance - ?
+                    END
+                    """,
+                    (amount, amount),
+                )
+                return cursor.rowcount
+        except sqlite3.Error as exc:
+            self._logger.error("Failed to decay memory importance: %s", exc)
+            return 0

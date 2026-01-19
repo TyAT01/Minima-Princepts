@@ -39,10 +39,14 @@ class MemoryPolicy:
             self._logger.exception("Failed to store memory: %s", exc)
 
     def decay_memories(self) -> None:
-        """Decay memory importance over time (no-op for SQLite store)."""
+        """Decay memory importance over time."""
         try:
-            # Placeholder: implement importance decay if store supports updates.
-            return None
+            if self._config.decay_rate <= 0:
+                self._logger.warning(
+                    "Decay rate must be positive. Got %s.", self._config.decay_rate
+                )
+                return
+            self._store.decay_importance(self._config.decay_rate)
         except Exception as exc:  # noqa: BLE001 - keep decay resilient
             self._logger.exception("Failed to decay memories: %s", exc)
 

@@ -22,9 +22,11 @@ class MemoryRetriever:
         self._vector_backend = self._init_vector_backend()
 
     def retrieve(self, query: str, memories: Iterable[MemoryRecord], limit: int = 5) -> list[RetrievedMemory]:
-        logger = logging.getLogger(__name__)
         scored: list[RetrievedMemory] = []
         try:
+            if limit <= 0:
+                self._logger.warning("Memory retrieval limit must be positive. Got %s.", limit)
+                return []
             memories_list = list(memories)
             if not memories_list:
                 return []
@@ -41,7 +43,7 @@ class MemoryRetriever:
             scored.sort(key=lambda item: item.score, reverse=True)
             return scored[:limit]
         except Exception as exc:  # noqa: BLE001 - keep retrieval resilient
-            logger.exception("Failed to score memories: %s", exc)
+            self._logger.exception("Failed to score memories: %s", exc)
             return scored[:limit]
 
     def _init_vector_backend(self) -> "FaissMemoryIndex | None":
@@ -58,6 +60,7 @@ class FaissMemoryIndex:
 
     def __init__(self, dims: int = 256) -> None:
         self._dims = dims
+        self._logger = logging.getLogger(__name__)
         import faiss  # type: ignore
 
         self._faiss = faiss
@@ -66,6 +69,14 @@ class FaissMemoryIndex:
         self, query: str, memories: List[MemoryRecord], limit: int = 5
     ) -> list[RetrievedMemory]:
         try:
+            if limit <= 0:
+                self._logger.warning("FAISS search limit must be positive. Got %s.", limit)
+                return []
+            if not memories:
+                return []
+            if not importlib.util.find_spec("numpy"):
+                self._logger.warning("NumPy not installed; skipping FAISS memory retrieval.")
+                return []
             vectors = [self._embed(record.text) for record in memories]
             query_vec = self._embed(query)
             index = self._faiss.IndexFlatIP(self._dims)
@@ -77,7 +88,8 @@ class FaissMemoryIndex:
                     continue
                 results.append(RetrievedMemory(text=memories[idx].text, score=float(score)))
             return results
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - keep FAISS resilient
+            self._logger.exception("FAISS search failed: %s", exc)
             return []
 
     def _embed(self, text: str) -> list[float]:
