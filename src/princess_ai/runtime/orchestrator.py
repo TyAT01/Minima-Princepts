@@ -128,6 +128,7 @@ class RuntimeOrchestrator:
         if stream_mode or session.persona_mode == "stream":
             safety_rules.append("Stream-safe mode: avoid controversial or sensitive topics.")
             goals.append("Engage with stream chat concisely and warmly.")
+        system_notes = self._build_system_notes()
         context = self._deps.context_builder.build(
             ContextInputs(
                 persona=self._persona,
@@ -135,6 +136,7 @@ class RuntimeOrchestrator:
                 memories=[item.text for item in retrieved],
                 goals=goals,
                 safety_rules=safety_rules,
+                system_notes=system_notes,
             )
         )
         intent = self._deps.inner_thought.plan(context)
@@ -217,3 +219,22 @@ class RuntimeOrchestrator:
 
     def stop(self) -> None:
         self._running = False
+
+    def _build_system_notes(self) -> list[str]:
+        notes: list[str] = []
+        try:
+            errors = [
+                entry
+                for entry in self._deps.log_store.snapshot()
+                if entry.name == "error"
+            ]
+            if errors:
+                notes.append("Recent runtime errors:")
+                for entry in errors[-5:]:
+                    payload = entry.payload
+                    message = payload.get("message", "Unknown error")
+                    logger_name = payload.get("logger", "runtime")
+                    notes.append(f"- {logger_name}: {message}")
+        except Exception as exc:  # noqa: BLE001 - keep notes resilient
+            self._logger.exception("Failed to build system notes: %s", exc)
+        return notes

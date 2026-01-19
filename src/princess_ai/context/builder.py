@@ -27,6 +27,7 @@ class ContextInputs:
     memories: Iterable[str]
     goals: Iterable[str]
     safety_rules: Iterable[str]
+    system_notes: Iterable[str]
 
 
 class ContextBuilder:
@@ -43,6 +44,7 @@ class ContextBuilder:
             safety_block = "\n".join([inputs.persona.safety, *inputs.safety_rules])
             memory_block = "\n".join(text for text in inputs.memories if text)
             goals_block = "\n".join(goal for goal in inputs.goals if goal)
+            notes_block = "\n".join(note for note in inputs.system_notes if note)
             conversation_block = "\n".join(
                 f"{event.username}: {event.text}" for event in inputs.conversation
             )
@@ -51,6 +53,7 @@ class ContextBuilder:
                 f"{persona_block}\n"
                 f"Safety Rules:\n{safety_block}\n\n"
                 f"Memories:\n{memory_block}\n\n"
+                f"System Notes:\n{notes_block}\n\n"
                 f"Goals:\n{goals_block}\n\n"
                 f"Conversation:\n{conversation_block}\n\n"
                 f"{response_marker}"
