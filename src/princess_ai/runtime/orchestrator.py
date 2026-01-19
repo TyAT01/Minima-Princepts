@@ -35,6 +35,7 @@ class RuntimeDependencies:
     inner_thought: InnerThought
     tool_router: ToolRouter
     learning_controller: LearningController
+    use_streaming: bool = False
 
 
 class RuntimeOrchestrator:
@@ -104,7 +105,7 @@ class RuntimeOrchestrator:
                 "Princess Response:",
                 f"Tool Result:\n{tool_result}\n\nPrincess Response:",
             )
-        response = self._deps.llm.generate(context, GenerationConfig())
+        response = self._generate_response(context)
         response = self._deps.personality_layer.apply(response)
         response = self._deps.emotion_engine.express(response)
         output = self._deps.safety_filter.filter_output(
@@ -137,6 +138,15 @@ class RuntimeOrchestrator:
             self._deps.memory_store.add_memory(record)
             return f"Saved memory: {text}"
         return None
+
+    def _generate_response(self, context: str) -> str:
+        config = GenerationConfig()
+        if not self._deps.use_streaming:
+            return self._deps.llm.generate(context, config)
+        tokens = []
+        for token in self._deps.llm.stream(context, config):
+            tokens.append(token)
+        return "".join(tokens)
 
     def stop(self) -> None:
         self._running = False

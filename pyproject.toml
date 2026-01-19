@@ -4,5 +4,8 @@ version = "0.1.0"
 description = "Modular AI companion runtime scaffold."
 requires-python = ">=3.10"
 
+[project.optional-dependencies]
+api = ["fastapi>=0.110.0", "uvicorn>=0.23.0"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
