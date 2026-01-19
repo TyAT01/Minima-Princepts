@@ -12,11 +12,16 @@ from princess_ai.context.builder import ContextBuilder, ContextInputs, Persona
 from princess_ai.emotion.engine import EmotionEngine
 from princess_ai.input_adapters.base import InputAdapter
 from princess_ai.learning.controller import LearningController
+from princess_ai.logging.telemetry import InMemoryLogStore, LogEntry
 from princess_ai.llm.engine import GenerationConfig, LLMEngine
+from princess_ai.memory.policy import MemoryPolicy
 from princess_ai.memory.retrieval import MemoryRetriever
 from princess_ai.memory.state import ConversationState
-from princess_ai.memory.store import MemoryRecord, MemoryStore
+from princess_ai.memory.store import MemoryStore
 from princess_ai.personality.layer import PersonalityLayer
+from princess_ai.runtime.control import ControlHub
+from princess_ai.runtime.event_router import EventRouter
+from princess_ai.runtime.session import SessionManager
 from princess_ai.safety.filter import SafetyFilter
 from princess_ai.schemas.events import Event, OutputMessage
 from princess_ai.thought.inner import InnerThought
@@ -29,6 +34,7 @@ class RuntimeDependencies:
     llm: LLMEngine
     memory_store: MemoryStore
     memory_retriever: MemoryRetriever
+    memory_policy: MemoryPolicy
     context_builder: ContextBuilder
     safety_filter: SafetyFilter
     personality_layer: PersonalityLayer
@@ -36,6 +42,10 @@ class RuntimeDependencies:
     inner_thought: InnerThought
     tool_router: ToolRouter
     learning_controller: LearningController
+    event_router: EventRouter
+    session_manager: SessionManager
+    control_hub: ControlHub
+    log_store: InMemoryLogStore
     use_streaming: bool = False
     persona: Persona = field(default_factory=Persona)
 
@@ -66,17 +76,35 @@ class RuntimeOrchestrator:
                 self._logger.exception("Adapter polling failed: %s", exc)
                 await asyncio.sleep(0.2)
                 continue
+            manual = self._deps.control_hub.drain_manual()
+            for message in manual:
+                events.append(
+                    Event(
+                        source="manual",
+                        user_id="operator",
+                        username="operator",
+                        text=message,
+                        metadata={"priority": "high"},
+                    )
+                )
             if not events:
                 if self._should_emit_autonomous_event():
                     events = [self._build_autonomous_event()]
                 else:
                     await asyncio.sleep(0.1)
                     continue
+            events = self._deps.event_router.select(events, mode=self._deps.session_manager.snapshot().mode)
             for event in events:
                 try:
                     event.text = self._deps.safety_filter.filter_input(event.text)
                 except Exception as exc:  # noqa: BLE001 - keep runtime alive
                     self._logger.exception("Safety filter failed for input: %s", exc)
+                self._deps.session_manager.upsert_channel(
+                    f"{event.source}:{event.metadata.get('channel', event.user_id)}",
+                    event.user_id,
+                    event.text,
+                )
+                self._deps.log_store.add(LogEntry(name="input", payload={"source": event.source, "text": event.text}))
             self._conversation.add_events(events)
             self._last_activity = time.monotonic()
             try:
@@ -93,13 +121,20 @@ class RuntimeOrchestrator:
         last_event = recent_events[-1]
         memories = list(self._deps.memory_store.list_memories())
         retrieved = self._deps.memory_retriever.retrieve(last_event.text, memories)
+        session = self._deps.session_manager.snapshot()
+        stream_mode = self._deps.control_hub.snapshot().stream_mode
+        safety_rules = ["No explicit content", "Avoid ban-worthy topics"]
+        goals = ["Keep the chat engaged", "Stay in character"]
+        if stream_mode or session.persona_mode == "stream":
+            safety_rules.append("Stream-safe mode: avoid controversial or sensitive topics.")
+            goals.append("Engage with stream chat concisely and warmly.")
         context = self._deps.context_builder.build(
             ContextInputs(
                 persona=self._persona,
                 conversation=recent_events,
                 memories=[item.text for item in retrieved],
-                goals=["Keep the chat engaged", "Stay in character"],
-                safety_rules=["No explicit content", "Avoid ban-worthy topics"],
+                goals=goals,
+                safety_rules=safety_rules,
             )
         )
         intent = self._deps.inner_thought.plan(context)
@@ -110,13 +145,16 @@ class RuntimeOrchestrator:
                 self._persona.response_marker,
                 f"Tool Result:\n{tool_result}\n\n{self._persona.response_marker}",
             )
+        self._deps.log_store.add(LogEntry(name="decision", payload={"intent": intent.goal}))
         response = self._generate_response(context)
         response = self._deps.personality_layer.apply(response)
         response = self._deps.emotion_engine.express(response)
         output = self._deps.safety_filter.filter_output(
             OutputMessage(text=response, intent=intent.goal)
         )
-        print(output.text)
+        if not self._deps.session_manager.snapshot().muted:
+            print(output.text)
+        self._deps.log_store.add(LogEntry(name="output", payload={"text": output.text}))
 
     def _should_emit_autonomous_event(self) -> bool:
         return (time.monotonic() - self._last_activity) >= self._idle_interval
@@ -140,8 +178,8 @@ class RuntimeOrchestrator:
                 text = tool_call.payload.get("text", last_message).strip()
                 if not text:
                     return "No memory stored (empty message)."
-                record = MemoryRecord(text=text, importance=1.0, timestamp=time.time())
-                self._deps.memory_store.add_memory(record)
+                importance = self._deps.memory_policy.reinforce(text, 1.0)
+                self._deps.memory_policy.store_memory(text, importance)
                 return f"Saved memory: {text}"
             if tool_call.name == "get_time":
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
