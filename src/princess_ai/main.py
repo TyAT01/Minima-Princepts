@@ -42,6 +42,47 @@ from princess_ai.tools.router import ToolRouter
 from princess_ai.output.voice import VoiceOutputManager
 
 
+def _build_llm_engine(config: RuntimeConfig):
+    engine = config.engine.lower().strip()
+    if engine == "ollama":
+        return OllamaEngine(
+            OllamaConfig(base_url=config.ollama_url, model=config.ollama_model)
+        )
+    if engine in {"dummy", "heuristic"}:
+        return HeuristicEngine()
+    return LlamaCppServerEngine(
+        LlamaCppServerConfig(base_url=config.llama_cpp_url, model=config.llama_cpp_model)
+    )
+
+
+def _load_personality_profile() -> PersonalityProfile:
+    logger = logging.getLogger(__name__)
+    sheet_path = Path(__file__).parent / "aurelia_sheet.yaml"
+    loader = PersonalityLoader(sheet_path)
+    try:
+        return loader.load()
+    except Exception as exc:  # noqa: BLE001 - fallback to defaults
+        logger.exception("Failed to load personality sheet: %s", exc)
+        return PersonalityProfile(persona=Persona(), policy=PersonaPolicy())
+
+
+def _build_adapter(telemetry: TelemetryHub) -> tuple[MultiInputAdapter, list[DiscordVoiceAdapter]]:
+    voice_adapters: list[DiscordVoiceAdapter] = []
+    adapters = [
+        TextInputAdapter(),
+        DiscordVoiceAdapter(telemetry=telemetry),
+        DiscordTranscriptAdapter(),
+        TwitchChatAdapter(telemetry=telemetry),
+        TwitchLogAdapter(),
+        YouTubeChatAdapter(telemetry=telemetry),
+        YouTubeLogAdapter(),
+    ]
+    for adapter in adapters:
+        if isinstance(adapter, DiscordVoiceAdapter):
+            voice_adapters.append(adapter)
+    return MultiInputAdapter(adapters), voice_adapters
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -99,44 +140,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logging.getLogger(__name__).info("Shutting down Aurelia Vale AI.")
-
-
-def _build_llm_engine(config: RuntimeConfig):
-    engine = config.engine.lower().strip()
-    if engine == "ollama":
-        return OllamaEngine(
-            OllamaConfig(base_url=config.ollama_url, model=config.ollama_model)
-        )
-    if engine in {"dummy", "heuristic"}:
-        return HeuristicEngine()
-    return LlamaCppServerEngine(
-        LlamaCppServerConfig(base_url=config.llama_cpp_url, model=config.llama_cpp_model)
-    )
-
-
-def _load_personality_profile() -> PersonalityProfile:
-    logger = logging.getLogger(__name__)
-    sheet_path = Path(__file__).parent / "aurelia_sheet.yaml"
-    loader = PersonalityLoader(sheet_path)
-    try:
-        return loader.load()
-    except Exception as exc:  # noqa: BLE001 - fallback to defaults
-        logger.exception("Failed to load personality sheet: %s", exc)
-        return PersonalityProfile(persona=Persona(), policy=PersonaPolicy())
-
-
-def _build_adapter(telemetry: TelemetryHub) -> tuple[MultiInputAdapter, list[DiscordVoiceAdapter]]:
-    voice_adapters: list[DiscordVoiceAdapter] = []
-    adapters = [
-        TextInputAdapter(),
-        DiscordVoiceAdapter(telemetry=telemetry),
-        DiscordTranscriptAdapter(),
-        TwitchChatAdapter(telemetry=telemetry),
-        TwitchLogAdapter(),
-        YouTubeChatAdapter(telemetry=telemetry),
-        YouTubeLogAdapter(),
-    ]
-    for adapter in adapters:
-        if isinstance(adapter, DiscordVoiceAdapter):
-            voice_adapters.append(adapter)
-    return MultiInputAdapter(adapters), voice_adapters
