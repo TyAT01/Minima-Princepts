@@ -29,11 +29,16 @@ class MemoryPolicy:
             self._logger.exception("Failed to evaluate memory policy: %s", exc)
             return False
 
-    def store_memory(self, text: str, importance: float) -> None:
+    def store_memory(self, text: str, importance: float, scope: str | None = None) -> None:
         if not self.should_store(text, importance):
             return
         try:
-            record = MemoryRecord(text=text, importance=importance, timestamp=time.time())
+            record = MemoryRecord(
+                text=text,
+                importance=importance,
+                timestamp=time.time(),
+                scope=scope,
+            )
             self._store.add_memory(record)
         except Exception as exc:  # noqa: BLE001 - keep memory storage resilient
             self._logger.exception("Failed to store memory: %s", exc)

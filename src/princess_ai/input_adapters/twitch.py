@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
+from collections import deque
 from pathlib import Path
 from typing import Iterable
 
 from princess_ai.input_adapters.base import InputAdapter
+from princess_ai.runtime.telemetry import TelemetryHub
 from princess_ai.schemas.events import Event
 
 
@@ -21,6 +24,7 @@ class TwitchChatAdapter(InputAdapter):
         token: str | None = None,
         channel: str | None = None,
         username_fallback: str = "twitch_user",
+        telemetry: TelemetryHub | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
         self._username = username or os.getenv("PRINCESS_TWITCH_USERNAME", "").strip()
@@ -30,6 +34,9 @@ class TwitchChatAdapter(InputAdapter):
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()
         self._connected = False
+        self._telemetry = telemetry
+        self._recent_ids = deque(maxlen=200)
+        self._reconnects = 0
         if self._username and self._token and self._channel:
             if self._loop.is_running():
                 self._loop.create_task(self._run())
@@ -55,6 +62,15 @@ class TwitchChatAdapter(InputAdapter):
                 backoff = 1
             except Exception as exc:  # noqa: BLE001 - keep adapter resilient
                 self._logger.exception("Twitch adapter error: %s", exc)
+                self._reconnects += 1
+                if self._telemetry:
+                    self._telemetry.update_adapter(
+                        "twitch",
+                        connected=False,
+                        last_error=str(exc),
+                        reconnects=self._reconnects,
+                    )
+                    self._telemetry.update_qos(reconnect_count=self._reconnects)
                 await asyncio.sleep(min(backoff, 30))
                 backoff *= 2
 
@@ -63,9 +79,12 @@ class TwitchChatAdapter(InputAdapter):
         reader, writer = await asyncio.open_connection("irc.chat.twitch.tv", 6667)
         writer.write(f"PASS {self._token}\r\n".encode())
         writer.write(f"NICK {self._username}\r\n".encode())
+        writer.write("CAP REQ :twitch.tv/tags twitch.tv/commands\r\n".encode())
         writer.write(f"JOIN #{self._channel}\r\n".encode())
         await writer.drain()
         self._connected = True
+        if self._telemetry:
+            self._telemetry.update_adapter("twitch", connected=True)
         while True:
             line = await reader.readline()
             if not line:
@@ -78,23 +97,41 @@ class TwitchChatAdapter(InputAdapter):
             event = self._parse_irc_message(decoded)
             if event:
                 await self._queue.put(event)
+                if self._telemetry:
+                    self._telemetry.update_adapter("twitch", last_event_at=time.time())
         self._connected = False
+        if self._telemetry:
+            self._telemetry.update_adapter("twitch", connected=False, reconnects=self._reconnects)
+            self._telemetry.update_qos(reconnect_count=self._reconnects)
 
     def _parse_irc_message(self, line: str) -> Event | None:
         try:
             if "PRIVMSG" not in line:
                 return None
+            tags = {}
+            if line.startswith("@"):
+                tag_section, _, rest = line.partition(" ")
+                for tag in tag_section.lstrip("@").split(";"):
+                    if "=" in tag:
+                        key, value = tag.split("=", 1)
+                        tags[key] = value
+                line = rest
             prefix, _, content = line.partition(" PRIVMSG ")
             username = prefix.split("!", maxsplit=1)[0].lstrip(":") if prefix else self._username_fallback
             _, _, message = content.partition(" :")
             if not message.strip():
                 return None
+            message_id = tags.get("id")
+            if message_id:
+                if message_id in self._recent_ids:
+                    return None
+                self._recent_ids.append(message_id)
             return Event(
                 source="twitch",
                 user_id=username,
                 username=username,
                 text=message.strip(),
-                metadata={"channel": self._channel},
+                metadata={"channel": self._channel, "message_id": message_id},
             )
         except Exception as exc:  # noqa: BLE001 - keep parsing resilient
             self._logger.exception("Failed to parse Twitch message: %s", exc)

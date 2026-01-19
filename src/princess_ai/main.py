@@ -34,9 +34,12 @@ from princess_ai.runtime.control import ControlHub
 from princess_ai.runtime.event_router import EventRouter
 from princess_ai.runtime.orchestrator import RuntimeDependencies, RuntimeOrchestrator
 from princess_ai.runtime.session import SessionManager
+from princess_ai.runtime.telemetry import TelemetryHub
+from princess_ai.runtime.auto_tune import RuntimeAutoTuner
 from princess_ai.safety.filter import SafetyFilter
 from princess_ai.thought.inner import InnerThought
 from princess_ai.tools.router import ToolRouter
+from princess_ai.output.voice import VoiceOutputManager
 
 
 async def main() -> None:
@@ -58,7 +61,10 @@ async def main() -> None:
     session_manager = SessionManager()
     log_store = InMemoryLogStore()
     attach_error_log_handler(log_store)
-    adapter = _build_adapter()
+    telemetry = TelemetryHub()
+    adapter, voice_adapters = _build_adapter(telemetry)
+    voice_output = VoiceOutputManager(voice_adapters)
+    auto_tuner = RuntimeAutoTuner(resource_manager, session_manager, telemetry)
     deps = RuntimeDependencies(
         adapter=adapter,
         llm=llm_engine,
@@ -78,10 +84,13 @@ async def main() -> None:
         session_manager=session_manager,
         control_hub=control_hub,
         log_store=log_store,
+        telemetry=telemetry,
+        voice_output=voice_output,
         use_streaming=runtime_config.use_streaming,
         persona=personality_profile.persona,
     )
     orchestrator = RuntimeOrchestrator(deps)
+    asyncio.create_task(auto_tuner.run())
     await orchestrator.run()
 
 
@@ -116,14 +125,18 @@ def _load_personality_profile() -> PersonalityProfile:
         return PersonalityProfile(persona=Persona(), policy=PersonaPolicy())
 
 
-def _build_adapter() -> MultiInputAdapter:
+def _build_adapter(telemetry: TelemetryHub) -> tuple[MultiInputAdapter, list[DiscordVoiceAdapter]]:
+    voice_adapters: list[DiscordVoiceAdapter] = []
     adapters = [
         TextInputAdapter(),
-        DiscordVoiceAdapter(),
+        DiscordVoiceAdapter(telemetry=telemetry),
         DiscordTranscriptAdapter(),
-        TwitchChatAdapter(),
+        TwitchChatAdapter(telemetry=telemetry),
         TwitchLogAdapter(),
-        YouTubeChatAdapter(),
+        YouTubeChatAdapter(telemetry=telemetry),
         YouTubeLogAdapter(),
     ]
-    return MultiInputAdapter(adapters)
+    for adapter in adapters:
+        if isinstance(adapter, DiscordVoiceAdapter):
+            voice_adapters.append(adapter)
+    return MultiInputAdapter(adapters), voice_adapters

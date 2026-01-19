@@ -49,6 +49,7 @@ class AudioPipelineState:
     speaking: bool = False
     tts_queue: List[str] = field(default_factory=list)
     barge_in_detected: bool = False
+    last_partial: str | None = None
 
 
 class AudioPipeline:
@@ -83,7 +84,18 @@ class AudioPipeline:
                 if self._vad.is_speech(frame):
                     self._trigger_barge_in()
             self._stt.accept_audio(frame)
-            return self._stt.partials()
+            chunks = list(self._stt.partials())
+            for chunk in chunks:
+                if not chunk.text:
+                    continue
+                self._state.last_partial = chunk.text
+                if chunk.is_final:
+                    self._state.last_partial = None
+            if self._state.last_partial and self._vad.has_turn_ended():
+                final_text = self._state.last_partial
+                self._state.last_partial = None
+                chunks.append(TranscriptChunk(text=final_text, is_final=True))
+            return chunks
         except Exception as exc:  # noqa: BLE001 - keep audio pipeline resilient
             self._logger.exception("Failed to ingest audio frame: %s", exc)
             return []
@@ -103,6 +115,7 @@ class AudioPipeline:
         try:
             self._state.speaking = False
             self._state.tts_queue.clear()
+            self._state.last_partial = None
         except Exception as exc:  # noqa: BLE001 - keep audio pipeline resilient
             self._logger.exception("Failed to stop TTS: %s", exc)
 
