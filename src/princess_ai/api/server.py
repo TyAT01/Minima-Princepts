@@ -5,12 +5,20 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
+from pathlib import Path
 from typing import Iterable, List
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
-from princess_ai.logging.telemetry import InMemoryLogStore, LogEntry
+from princess_ai.logging.telemetry import (
+    InMemoryLogStore,
+    LogEntry,
+    attach_error_log_handler,
+)
 from princess_ai.memory.store import MemoryRecord, MemoryStore
+from princess_ai.runtime.presence import PresenceTracker
 from princess_ai.runtime.control import ControlHub
 from princess_ai.runtime.session import SessionManager
 
@@ -25,10 +33,30 @@ def create_app(
     logger = logging.getLogger(__name__)
     control = control_hub or ControlHub()
     logs = log_store or InMemoryLogStore()
+    attach_error_log_handler(logs)
+    presence = PresenceTracker()
+    web_root = Path(__file__).parent / "webgui"
+    if web_root.exists():
+        app.mount("/static", StaticFiles(directory=web_root), name="static")
 
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/")
+    def web_gui() -> HTMLResponse:
+        index_path = web_root / "index.html"
+        if not index_path.exists():
+            return HTMLResponse("<h1>Aurelia Web GUI not installed.</h1>", status_code=404)
+        return HTMLResponse(index_path.read_text(encoding="utf-8"))
+
+    @app.get("/styles.css")
+    def web_styles() -> FileResponse:
+        return FileResponse(web_root / "styles.css")
+
+    @app.get("/app.js")
+    def web_script() -> FileResponse:
+        return FileResponse(web_root / "app.js")
 
     @app.get("/session")
     def get_session() -> dict:
@@ -105,12 +133,72 @@ def create_app(
         control.push_manual(message)
         return {"queued": True}
 
+    @app.get("/presence")
+    def list_presence() -> dict:
+        snapshots = presence.snapshot()
+        return {
+            "channels": [
+                {
+                    "channel": item.channel,
+                    "participants": item.participants,
+                    "last_updated": item.last_updated.isoformat(),
+                }
+                for item in snapshots
+            ]
+        }
+
+    @app.post("/presence/join")
+    def join_presence(channel: str, user: str) -> dict:
+        snapshot = presence.join(channel, user)
+        logs.add(
+            LogEntry(
+                name="presence",
+                payload={"event": "join", "channel": channel, "user": user},
+            )
+        )
+        control.push_manual(f"{user} joined the {channel} channel.")
+        return {
+            "channel": snapshot.channel,
+            "participants": snapshot.participants,
+            "last_updated": snapshot.last_updated.isoformat(),
+        }
+
+    @app.post("/presence/leave")
+    def leave_presence(channel: str, user: str) -> dict:
+        snapshot = presence.leave(channel, user)
+        logs.add(
+            LogEntry(
+                name="presence",
+                payload={"event": "leave", "channel": channel, "user": user},
+            )
+        )
+        control.push_manual(f"{user} left the {channel} channel.")
+        if not snapshot.participants:
+            control.push_manual(
+                f"The {channel} channel is empty, but the creator may still be monitoring."
+            )
+        return {
+            "channel": snapshot.channel,
+            "participants": snapshot.participants,
+            "last_updated": snapshot.last_updated.isoformat(),
+        }
+
     @app.websocket("/ws/stream")
     async def websocket_stream(socket: WebSocket) -> None:
         await socket.accept()
         try:
             while True:
-                payload = {"logs": _serialize_logs(logs.snapshot())}
+                payload = {
+                    "logs": _serialize_logs(logs.snapshot()),
+                    "presence": [
+                        {
+                            "channel": item.channel,
+                            "participants": item.participants,
+                            "last_updated": item.last_updated.isoformat(),
+                        }
+                        for item in presence.snapshot()
+                    ],
+                }
                 await socket.send_json(payload)
                 await asyncio.sleep(0.5)
         except WebSocketDisconnect:

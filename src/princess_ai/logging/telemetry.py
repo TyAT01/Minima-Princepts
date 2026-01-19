@@ -63,3 +63,32 @@ class InMemoryLogStore:
 
     def snapshot(self) -> List[LogEntry]:
         return list(self._events)
+
+
+class LogStoreHandler(logging.Handler):
+    def __init__(self, log_store: InMemoryLogStore) -> None:
+        super().__init__(level=logging.ERROR)
+        self._log_store = log_store
+        self._formatter = logging.Formatter()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            if record.levelno < self.level:
+                return
+            payload = {
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+            }
+            if record.exc_info:
+                payload["exception"] = self._formatter.formatException(record.exc_info)
+            self._log_store.add(LogEntry(name="error", payload=payload))
+        except Exception:
+            return
+
+
+def attach_error_log_handler(log_store: InMemoryLogStore) -> None:
+    logger = logging.getLogger()
+    if any(isinstance(handler, LogStoreHandler) for handler in logger.handlers):
+        return
+    logger.addHandler(LogStoreHandler(log_store))

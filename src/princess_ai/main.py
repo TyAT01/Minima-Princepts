@@ -17,7 +17,7 @@ from princess_ai.input_adapters.text_adapter import TextInputAdapter
 from princess_ai.input_adapters.twitch import TwitchChatAdapter, TwitchLogAdapter
 from princess_ai.input_adapters.youtube import YouTubeChatAdapter, YouTubeLogAdapter
 from princess_ai.learning.controller import LearningController
-from princess_ai.logging.telemetry import InMemoryLogStore
+from princess_ai.logging.telemetry import InMemoryLogStore, attach_error_log_handler
 from princess_ai.llm.engine import (
     HeuristicEngine,
     LlamaCppServerConfig,
@@ -57,6 +57,7 @@ async def main() -> None:
     control_hub = ControlHub()
     session_manager = SessionManager()
     log_store = InMemoryLogStore()
+    attach_error_log_handler(log_store)
     adapter = _build_adapter()
     deps = RuntimeDependencies(
         adapter=adapter,
