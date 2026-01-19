@@ -16,12 +16,15 @@ class RetrievedMemory:
 
 class MemoryRetriever:
     def retrieve(self, query: str, memories: Iterable[MemoryRecord], limit: int = 5) -> list[RetrievedMemory]:
-        scored = []
-        query_terms = {term.lower() for term in query.split()}
-        for memory in memories:
-            memory_terms = {term.lower() for term in memory.text.split()}
-            overlap = query_terms.intersection(memory_terms)
-            score = len(overlap) + memory.importance
-            scored.append(RetrievedMemory(text=memory.text, score=score))
-        scored.sort(key=lambda item: item.score, reverse=True)
-        return scored[:limit]
+        scored: list[RetrievedMemory] = []
+        try:
+            query_terms = {term.lower() for term in query.split() if term}
+            for memory in memories:
+                memory_terms = {term.lower() for term in memory.text.split() if term}
+                overlap = query_terms.intersection(memory_terms)
+                score = len(overlap) + memory.importance
+                scored.append(RetrievedMemory(text=memory.text, score=score))
+            scored.sort(key=lambda item: item.score, reverse=True)
+            return scored[:limit]
+        except Exception:
+            return scored[:limit]

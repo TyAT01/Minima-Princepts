@@ -21,13 +21,20 @@ class TelemetryLogger:
     def __init__(self, log_path: Path) -> None:
         self._logger = logging.getLogger("princess_ai")
         self._logger.setLevel(logging.INFO)
-        self._handler = logging.FileHandler(log_path, encoding="utf-8")
-        self._logger.addHandler(self._handler)
+        try:
+            self._handler = logging.FileHandler(log_path, encoding="utf-8")
+            self._logger.addHandler(self._handler)
+        except OSError as exc:
+            self._logger.error("Failed to configure telemetry handler: %s", exc)
+            self._handler = None
 
     def log(self, event: TelemetryEvent) -> None:
-        record = {
-            "name": event.name,
-            "payload": event.payload,
-            "timestamp": event.timestamp.isoformat(),
-        }
-        self._logger.info(json.dumps(record))
+        try:
+            record = {
+                "name": event.name,
+                "payload": event.payload,
+                "timestamp": event.timestamp.isoformat(),
+            }
+            self._logger.info(json.dumps(record))
+        except Exception as exc:  # noqa: BLE001 - keep telemetry resilient
+            self._logger.error("Failed to log telemetry event: %s", exc)

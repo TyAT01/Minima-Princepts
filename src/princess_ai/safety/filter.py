@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from princess_ai.schemas.events import OutputMessage
@@ -20,6 +21,7 @@ class SafetyPolicy:
 class SafetyFilter:
     def __init__(self, policy: SafetyPolicy | None = None) -> None:
         self._policy = policy or SafetyPolicy()
+        self._logger = logging.getLogger(__name__)
 
     def filter_input(self, text: str) -> str:
         return self._rewrite(text)
@@ -32,7 +34,11 @@ class SafetyFilter:
         )
 
     def _rewrite(self, text: str) -> str:
-        for term in self._policy.blocked_terms:
-            if term.lower() in text.lower():
-                text = text.replace(term, self._policy.replacement)
-        return text
+        try:
+            for term in self._policy.blocked_terms:
+                if term.lower() in text.lower():
+                    text = text.replace(term, self._policy.replacement)
+            return text
+        except Exception as exc:  # noqa: BLE001 - keep safety filter resilient
+            self._logger.exception("Failed to rewrite safety text: %s", exc)
+            return text

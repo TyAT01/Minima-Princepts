@@ -1,4 +1,4 @@
-"""Entry point for the Princess AI runtime."""
+"""Entry point for the Aurelia Vale runtime."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from pathlib import Path
 
 from princess_ai.config import ProfileLoader
 from princess_ai.config.runtime import RuntimeConfig
-from princess_ai.context.builder import ContextBuilder
+from princess_ai.context.builder import ContextBuilder, Persona
 from princess_ai.emotion.engine import EmotionEngine
 from princess_ai.hardware.profiler import AdaptiveResourceManager, HardwareProfiler
 from princess_ai.input_adapters.text_adapter import TextInputAdapter
 from princess_ai.learning.controller import LearningController
 from princess_ai.llm.engine import (
-    DummyEngine,
+    HeuristicEngine,
     LlamaCppServerConfig,
     LlamaCppServerEngine,
     OllamaConfig,
@@ -22,7 +22,8 @@ from princess_ai.llm.engine import (
 )
 from princess_ai.memory.retrieval import MemoryRetriever
 from princess_ai.memory.store import MemoryStore
-from princess_ai.personality.layer import PersonalityLayer
+from princess_ai.personality.layer import PersonaPolicy, PersonalityLayer
+from princess_ai.personality.loader import PersonalityLoader, PersonalityProfile
 from princess_ai.runtime.orchestrator import RuntimeDependencies, RuntimeOrchestrator
 from princess_ai.safety.filter import SafetyFilter
 from princess_ai.thought.inner import InnerThought
@@ -41,6 +42,7 @@ async def main() -> None:
     active_profile = profiles.get(resource_manager.choose_profile(), profiles["default"])
     print(f"Selected profile: {active_profile.name}")
     llm_engine = _build_llm_engine(runtime_config)
+    personality_profile = _load_personality_profile()
 
     memory_store = MemoryStore(Path("memory.sqlite"))
     deps = RuntimeDependencies(
@@ -50,12 +52,15 @@ async def main() -> None:
         memory_retriever=MemoryRetriever(),
         context_builder=ContextBuilder(),
         safety_filter=SafetyFilter(),
-        personality_layer=PersonalityLayer(),
+        personality_layer=PersonalityLayer(
+            personality_profile.policy, persona_name=personality_profile.persona.name
+        ),
         emotion_engine=EmotionEngine(),
-        inner_thought=InnerThought(),
+        inner_thought=InnerThought(response_marker=personality_profile.persona.response_marker),
         tool_router=ToolRouter(),
         learning_controller=LearningController(),
         use_streaming=runtime_config.use_streaming,
+        persona=personality_profile.persona,
     )
     orchestrator = RuntimeOrchestrator(deps)
     await orchestrator.run()
@@ -65,7 +70,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logging.getLogger(__name__).info("Shutting down Princess AI.")
+        logging.getLogger(__name__).info("Shutting down Aurelia Vale AI.")
 
 
 def _build_llm_engine(config: RuntimeConfig):
@@ -74,8 +79,19 @@ def _build_llm_engine(config: RuntimeConfig):
         return OllamaEngine(
             OllamaConfig(base_url=config.ollama_url, model=config.ollama_model)
         )
-    if engine == "dummy":
-        return DummyEngine()
+    if engine in {"dummy", "heuristic"}:
+        return HeuristicEngine()
     return LlamaCppServerEngine(
         LlamaCppServerConfig(base_url=config.llama_cpp_url, model=config.llama_cpp_model)
     )
+
+
+def _load_personality_profile() -> PersonalityProfile:
+    logger = logging.getLogger(__name__)
+    sheet_path = Path(__file__).parent / "aurelia_sheet.yaml"
+    loader = PersonalityLoader(sheet_path)
+    try:
+        return loader.load()
+    except Exception as exc:  # noqa: BLE001 - fallback to defaults
+        logger.exception("Failed to load personality sheet: %s", exc)
+        return PersonalityProfile(persona=Persona(), policy=PersonaPolicy())

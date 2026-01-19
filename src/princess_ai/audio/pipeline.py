@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Iterable, List, Protocol
 
@@ -46,6 +47,7 @@ class AudioPipeline:
         self._stt = stt
         self._tts = tts
         self._state = AudioPipelineState()
+        self._logger = logging.getLogger(__name__)
 
     @property
     def state(self) -> AudioPipelineState:
@@ -53,10 +55,18 @@ class AudioPipeline:
 
     def ingest(self, frame: AudioFrame) -> Iterable[TranscriptChunk]:
         self._state.listening = True
-        self._stt.accept_audio(frame)
-        return self._stt.partials()
+        try:
+            self._stt.accept_audio(frame)
+            return self._stt.partials()
+        except Exception as exc:  # noqa: BLE001 - keep audio pipeline resilient
+            self._logger.exception("Failed to ingest audio frame: %s", exc)
+            return []
 
     def enqueue_tts(self, text: str) -> Iterable[AudioFrame]:
         self._state.speaking = True
-        self._state.tts_queue.append(text)
-        return self._tts.synthesize(text)
+        try:
+            self._state.tts_queue.append(text)
+            return self._tts.synthesize(text)
+        except Exception as exc:  # noqa: BLE001 - keep audio pipeline resilient
+            self._logger.exception("Failed to synthesize TTS audio: %s", exc)
+            return []

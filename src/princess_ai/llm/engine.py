@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import urllib.request
 from dataclasses import dataclass
 from typing import Iterable, Optional, Protocol
@@ -24,16 +25,33 @@ class LLMEngine(Protocol):
         ...
 
 
-class DummyEngine:
-    """Placeholder engine for wiring the orchestrator."""
+class LLMServiceError(RuntimeError):
+    """Raised when an LLM backend request fails."""
+
+
+class HeuristicEngine:
+    """Lightweight heuristic engine for offline fallback responses."""
 
     def generate(self, prompt: str, config: GenerationConfig) -> str:
-        return f"[princess reply] {prompt[-200:]}"
+        try:
+            last_line = self._extract_last_line(prompt)
+        except Exception:
+            last_line = ""
+        if last_line:
+            return f"I hear you. Here's what I can share: {last_line}"
+        return "I'm here and ready—what would you like to explore next?"
 
     def stream(self, prompt: str, config: GenerationConfig) -> Iterable[str]:
         reply = self.generate(prompt, config)
         for token in reply.split():
             yield token + " "
+
+    @staticmethod
+    def _extract_last_line(prompt: str) -> str:
+        lines = [line.strip() for line in prompt.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        return lines[-1]
 
 
 @dataclass(slots=True)
@@ -47,11 +65,18 @@ class LlamaCppServerEngine:
 
     def __init__(self, config: LlamaCppServerConfig) -> None:
         self._config = config
+        self._logger = logging.getLogger(__name__)
 
     def generate(self, prompt: str, config: GenerationConfig) -> str:
         payload = self._build_payload(prompt, config, stream=False)
-        response = self._post_json(f"{self._config.base_url}/v1/chat/completions", payload)
-        return response["choices"][0]["message"]["content"]
+        try:
+            response = self._post_json(
+                f"{self._config.base_url}/v1/chat/completions", payload
+            )
+            return response["choices"][0]["message"]["content"]
+        except Exception as exc:  # noqa: BLE001 - keep runtime alive
+            self._logger.exception("Llama.cpp generate failed: %s", exc)
+            raise LLMServiceError("Failed to reach llama.cpp server.") from exc
 
     def stream(self, prompt: str, config: GenerationConfig) -> Iterable[str]:
         payload = self._build_payload(prompt, config, stream=True)
@@ -60,18 +85,22 @@ class LlamaCppServerEngine:
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(request, timeout=120) as response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8").strip()
-                if not line or not line.startswith("data: "):
-                    continue
-                data = line.removeprefix("data: ").strip()
-                if data == "[DONE]":
-                    break
-                chunk = json.loads(data)
-                delta = chunk["choices"][0]["delta"].get("content")
-                if delta:
-                    yield delta
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line.removeprefix("data: ").strip()
+                    if data == "[DONE]":
+                        break
+                    chunk = json.loads(data)
+                    delta = chunk["choices"][0]["delta"].get("content")
+                    if delta:
+                        yield delta
+        except Exception as exc:  # noqa: BLE001 - keep streaming resilient
+            self._logger.exception("Llama.cpp stream failed: %s", exc)
+            yield "I'm having trouble reaching the language model right now."
 
     def _build_payload(
         self, prompt: str, config: GenerationConfig, stream: bool
@@ -113,11 +142,16 @@ class OllamaEngine:
 
     def __init__(self, config: OllamaConfig) -> None:
         self._config = config
+        self._logger = logging.getLogger(__name__)
 
     def generate(self, prompt: str, config: GenerationConfig) -> str:
         payload = self._build_payload(prompt, config, stream=False)
-        response = self._post_json(f"{self._config.base_url}/api/generate", payload)
-        return response.get("response", "")
+        try:
+            response = self._post_json(f"{self._config.base_url}/api/generate", payload)
+            return response.get("response", "")
+        except Exception as exc:  # noqa: BLE001 - keep runtime alive
+            self._logger.exception("Ollama generate failed: %s", exc)
+            raise LLMServiceError("Failed to reach Ollama server.") from exc
 
     def stream(self, prompt: str, config: GenerationConfig) -> Iterable[str]:
         payload = self._build_payload(prompt, config, stream=True)
@@ -126,17 +160,21 @@ class OllamaEngine:
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(request, timeout=120) as response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8").strip()
-                if not line:
-                    continue
-                chunk = json.loads(line)
-                token = chunk.get("response")
-                if token:
-                    yield token
-                if chunk.get("done"):
-                    break
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    token = chunk.get("response")
+                    if token:
+                        yield token
+                    if chunk.get("done"):
+                        break
+        except Exception as exc:  # noqa: BLE001 - keep streaming resilient
+            self._logger.exception("Ollama stream failed: %s", exc)
+            yield "I'm having trouble reaching the language model right now."
 
     def _build_payload(
         self, prompt: str, config: GenerationConfig, stream: bool
