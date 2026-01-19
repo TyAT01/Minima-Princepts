@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from princess_ai.thought.inner import Intent
@@ -24,6 +25,7 @@ class ToolRouter:
     )
 
     def select_tool(self, intent: Intent) -> ToolCall | None:
+        logger = logging.getLogger(__name__)
         try:
             explicit_tool = (intent.tool or "").strip().lower()
             if explicit_tool:
@@ -41,7 +43,8 @@ class ToolRouter:
                     },
                 )
             return None
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - keep tool routing resilient
+            logger.exception("Failed to select tool: %s", exc)
             return None
 
     @staticmethod

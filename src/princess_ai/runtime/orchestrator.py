@@ -86,6 +86,9 @@ class RuntimeOrchestrator:
 
     async def _respond(self) -> None:
         recent_events = self._conversation.recent()
+        if not recent_events:
+            self._logger.warning("No recent events available to respond to.")
+            return
         last_event = recent_events[-1]
         memories = list(self._deps.memory_store.list_memories())
         retrieved = self._deps.memory_retriever.retrieve(last_event.text, memories)
