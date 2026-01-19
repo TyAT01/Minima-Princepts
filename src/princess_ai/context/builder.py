@@ -17,6 +17,7 @@ class Persona:
     )
     safety: str = "Avoid unsafe or explicit content. Be friendly and respectful."
     response_marker: str = "Aurelia Response:"
+    llm_constraints: str = ""
 
 
 @dataclass(slots=True)
@@ -37,6 +38,8 @@ class ContextBuilder:
             persona_block = (
                 f"Persona: {inputs.persona.name}\n{inputs.persona.description}\n"
             )
+            if inputs.persona.llm_constraints:
+                persona_block += f"Model Constraints: {inputs.persona.llm_constraints}\n"
             safety_block = "\n".join([inputs.persona.safety, *inputs.safety_rules])
             memory_block = "\n".join(text for text in inputs.memories if text)
             goals_block = "\n".join(goal for goal in inputs.goals if goal)

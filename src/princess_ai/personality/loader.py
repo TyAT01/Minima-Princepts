@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,12 +58,14 @@ class PersonalityLoader:
         name = str(character.get("name", "Aurelia Vale")).strip() or "Aurelia Vale"
         description = self._build_description(character)
         safety = self._build_safety_line(data)
+        llm_constraints = self._build_llm_constraints(character)
         response_marker = f"{name} Response:"
         persona = Persona(
             name=name,
             description=description,
             safety=safety,
             response_marker=response_marker,
+            llm_constraints=llm_constraints,
         )
         policy = PersonaPolicy(boundaries=safety)
         return PersonalityProfile(persona=persona, policy=policy)
@@ -71,9 +74,16 @@ class PersonalityLoader:
         role = self._safe_text(character.get("role"))
         alignment = self._safe_text(character.get("alignment"))
         archetype = self._safe_text(character.get("archetype"))
+        nicknames = character.get("nicknames", []) or []
+        nickname_text = ", ".join(
+            self._safe_text(item) for item in nicknames if self._safe_text(item)
+        )
         core_identity = character.get("core_identity", {}) or {}
         motivation = self._safe_text(core_identity.get("motivation"))
         self_awareness = self._safe_text(core_identity.get("self_awareness"))
+        appearance = character.get("appearance", {}) or {}
+        distinct_traits = self._safe_text(appearance.get("distinct_traits"))
+        outfit_style = self._safe_text(appearance.get("outfit_style"))
         personality_traits = character.get("personality_traits", []) or []
         trait_lines = []
         for item in personality_traits:
@@ -85,8 +95,16 @@ class PersonalityLoader:
                 trait_lines.append(f"{trait}: {description}")
         speech_patterns = character.get("speech_patterns", {}) or {}
         speech_style = self._safe_text(speech_patterns.get("style"))
+        speech_examples = speech_patterns.get("examples", []) or []
+        example_text = "; ".join(
+            self._safe_text(example)
+            for example in speech_examples
+            if self._safe_text(example)
+        )
 
         details = []
+        if nickname_text:
+            details.append(f"Nicknames: {nickname_text}.")
         if role:
             details.append(f"Role: {role}.")
         if alignment:
@@ -97,8 +115,14 @@ class PersonalityLoader:
             details.append(f"Self-awareness: {self_awareness}")
         if motivation:
             details.append(f"Motivation: {motivation}")
+        if distinct_traits:
+            details.append(f"Distinct traits: {distinct_traits}.")
+        if outfit_style:
+            details.append(f"Style: {outfit_style}.")
         if speech_style:
             details.append(f"Speech style: {speech_style}")
+        if example_text:
+            details.append(f"Speech examples: {example_text}")
         if trait_lines:
             details.append("Personality traits: " + "; ".join(trait_lines))
 
@@ -112,6 +136,21 @@ class PersonalityLoader:
         if tag:
             return f"{base} Persona tag: {tag}."
         return base
+
+    def _build_llm_constraints(self, character: dict[str, Any]) -> str:
+        constraints = character.get("llm_logic_constraints", {}) or {}
+        if not isinstance(constraints, dict):
+            return ""
+        profile = os.getenv("PRINCESS_LLM_PROFILE", "").strip()
+        if profile and profile in constraints:
+            return self._safe_text(constraints.get(profile))
+        if "llama_3_8b" in constraints:
+            return self._safe_text(constraints.get("llama_3_8b"))
+        for value in constraints.values():
+            text = self._safe_text(value)
+            if text:
+                return text
+        return ""
 
     @staticmethod
     def _safe_text(value: Any) -> str:
