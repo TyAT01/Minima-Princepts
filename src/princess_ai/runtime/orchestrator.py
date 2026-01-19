@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from princess_ai.context.builder import ContextBuilder, ContextInputs, Persona
 from princess_ai.emotion.engine import EmotionEngine
@@ -36,13 +36,14 @@ class RuntimeDependencies:
     tool_router: ToolRouter
     learning_controller: LearningController
     use_streaming: bool = False
+    persona: Persona = field(default_factory=Persona)
 
 
 class RuntimeOrchestrator:
     def __init__(self, deps: RuntimeDependencies) -> None:
         self._deps = deps
         self._conversation = ConversationState()
-        self._persona = Persona()
+        self._persona = deps.persona
         self._running = False
         self._last_activity = time.monotonic()
         self._idle_interval = 6.0
@@ -102,8 +103,8 @@ class RuntimeOrchestrator:
         tool_result = self._execute_tool(tool_call, last_event.text) if tool_call else None
         if tool_result:
             context = context.replace(
-                "Princess Response:",
-                f"Tool Result:\n{tool_result}\n\nPrincess Response:",
+                self._persona.response_marker,
+                f"Tool Result:\n{tool_result}\n\n{self._persona.response_marker}",
             )
         response = self._generate_response(context)
         response = self._deps.personality_layer.apply(response)
@@ -130,23 +131,31 @@ class RuntimeOrchestrator:
         )
 
     def _execute_tool(self, tool_call: ToolCall, last_message: str) -> str | None:
-        if tool_call.name == "store_memory":
-            text = tool_call.payload.get("text", last_message).strip()
-            if not text:
-                return "No memory stored (empty message)."
-            record = MemoryRecord(text=text, importance=1.0, timestamp=time.time())
-            self._deps.memory_store.add_memory(record)
-            return f"Saved memory: {text}"
+        try:
+            if tool_call.name == "store_memory":
+                text = tool_call.payload.get("text", last_message).strip()
+                if not text:
+                    return "No memory stored (empty message)."
+                record = MemoryRecord(text=text, importance=1.0, timestamp=time.time())
+                self._deps.memory_store.add_memory(record)
+                return f"Saved memory: {text}"
+        except Exception as exc:  # noqa: BLE001 - keep tool execution resilient
+            self._logger.exception("Tool execution failed: %s", exc)
+            return "Tool execution failed."
         return None
 
     def _generate_response(self, context: str) -> str:
         config = GenerationConfig()
-        if not self._deps.use_streaming:
-            return self._deps.llm.generate(context, config)
-        tokens = []
-        for token in self._deps.llm.stream(context, config):
-            tokens.append(token)
-        return "".join(tokens)
+        try:
+            if not self._deps.use_streaming:
+                return self._deps.llm.generate(context, config)
+            tokens = []
+            for token in self._deps.llm.stream(context, config):
+                tokens.append(token)
+            return "".join(tokens)
+        except Exception as exc:  # noqa: BLE001 - keep runtime alive
+            self._logger.exception("LLM response generation failed: %s", exc)
+            return "I'm having trouble reaching my language model right now, but I'm still here."
 
     def stop(self) -> None:
         self._running = False

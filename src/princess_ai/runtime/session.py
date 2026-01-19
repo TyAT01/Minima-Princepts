@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict
 
@@ -17,18 +18,31 @@ class SessionState:
 class SessionManager:
     def __init__(self, initial: SessionState | None = None) -> None:
         self._state = initial or SessionState()
+        self._logger = logging.getLogger(__name__)
 
     def snapshot(self) -> SessionState:
         return self._state
 
     def set_mode(self, mode: str) -> None:
-        self._state.mode = mode
+        try:
+            self._state.mode = mode
+        except Exception as exc:  # noqa: BLE001 - keep session updates resilient
+            self._logger.exception("Failed to set mode: %s", exc)
 
     def set_module(self, name: str, enabled: bool) -> None:
-        self._state.modules_enabled[name] = enabled
+        try:
+            self._state.modules_enabled[name] = enabled
+        except Exception as exc:  # noqa: BLE001 - keep session updates resilient
+            self._logger.exception("Failed to set module: %s", exc)
 
     def set_profile(self, profile: str) -> None:
-        self._state.active_profile = profile
+        try:
+            self._state.active_profile = profile
+        except Exception as exc:  # noqa: BLE001 - keep session updates resilient
+            self._logger.exception("Failed to set profile: %s", exc)
 
     def set_engine(self, engine: str) -> None:
-        self._state.active_engine = engine
+        try:
+            self._state.active_engine = engine
+        except Exception as exc:  # noqa: BLE001 - keep session updates resilient
+            self._logger.exception("Failed to set engine: %s", exc)
