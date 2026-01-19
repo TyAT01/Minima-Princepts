@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from princess_ai.thought.inner import Intent
@@ -22,8 +23,11 @@ class ToolRouter:
         "my name is",
         "call me",
     )
+    _TIME_KEYWORDS = ("time", "date", "day")
+    _SUMMARY_KEYWORDS = ("summarize", "summary", "recap")
 
     def select_tool(self, intent: Intent) -> ToolCall | None:
+        logger = logging.getLogger(__name__)
         try:
             explicit_tool = (intent.tool or "").strip().lower()
             if explicit_tool:
@@ -40,8 +44,13 @@ class ToolRouter:
                         "intent": intent.goal,
                     },
                 )
+            if any(keyword in lowered_goal for keyword in self._TIME_KEYWORDS):
+                return ToolCall(name="get_time", payload={"intent": intent.goal})
+            if any(keyword in lowered_goal for keyword in self._SUMMARY_KEYWORDS):
+                return ToolCall(name="summarize_recent", payload={"intent": intent.goal})
             return None
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - keep tool routing resilient
+            logger.exception("Failed to select tool: %s", exc)
             return None
 
     @staticmethod

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -16,6 +17,7 @@ class RetrievedMemory:
 
 class MemoryRetriever:
     def retrieve(self, query: str, memories: Iterable[MemoryRecord], limit: int = 5) -> list[RetrievedMemory]:
+        logger = logging.getLogger(__name__)
         scored: list[RetrievedMemory] = []
         try:
             query_terms = {term.lower() for term in query.split() if term}
@@ -26,5 +28,6 @@ class MemoryRetriever:
                 scored.append(RetrievedMemory(text=memory.text, score=score))
             scored.sort(key=lambda item: item.score, reverse=True)
             return scored[:limit]
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - keep retrieval resilient
+            logger.exception("Failed to score memories: %s", exc)
             return scored[:limit]
