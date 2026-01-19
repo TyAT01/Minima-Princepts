@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -13,12 +14,12 @@ from princess_ai.learning.controller import LearningController
 from princess_ai.llm.engine import GenerationConfig, LLMEngine
 from princess_ai.memory.retrieval import MemoryRetriever
 from princess_ai.memory.state import ConversationState
-from princess_ai.memory.store import MemoryStore
+from princess_ai.memory.store import MemoryRecord, MemoryStore
 from princess_ai.personality.layer import PersonalityLayer
 from princess_ai.safety.filter import SafetyFilter
 from princess_ai.schemas.events import OutputMessage
 from princess_ai.thought.inner import InnerThought
-from princess_ai.tools.router import ToolRouter
+from princess_ai.tools.router import ToolCall, ToolRouter
 
 
 @dataclass(slots=True)
@@ -70,9 +71,13 @@ class RuntimeOrchestrator:
             )
         )
         intent = self._deps.inner_thought.plan(context)
-        tool_call = self._deps.tool_router.select_tool(intent.goal)
-        if tool_call:
-            pass
+        tool_call = self._deps.tool_router.select_tool(intent)
+        tool_result = self._execute_tool(tool_call, last_event.text) if tool_call else None
+        if tool_result:
+            context = context.replace(
+                "Princess Response:",
+                f"Tool Result:\n{tool_result}\n\nPrincess Response:",
+            )
         response = self._deps.llm.generate(context, GenerationConfig())
         response = self._deps.personality_layer.apply(response)
         response = self._deps.emotion_engine.express(response)
@@ -80,6 +85,16 @@ class RuntimeOrchestrator:
             OutputMessage(text=response, intent=intent.goal)
         )
         print(output.text)
+
+    def _execute_tool(self, tool_call: ToolCall, last_message: str) -> str | None:
+        if tool_call.name == "store_memory":
+            text = tool_call.payload.get("text", last_message).strip()
+            if not text:
+                return "No memory stored (empty message)."
+            record = MemoryRecord(text=text, importance=1.0, timestamp=time.time())
+            self._deps.memory_store.add_memory(record)
+            return f"Saved memory: {text}"
+        return None
 
     def stop(self) -> None:
         self._running = False
