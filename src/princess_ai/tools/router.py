@@ -23,6 +23,8 @@ class ToolRouter:
         "my name is",
         "call me",
     )
+    _TIME_KEYWORDS = ("time", "date", "day")
+    _SUMMARY_KEYWORDS = ("summarize", "summary", "recap")
 
     def select_tool(self, intent: Intent) -> ToolCall | None:
         logger = logging.getLogger(__name__)
@@ -42,6 +44,10 @@ class ToolRouter:
                         "intent": intent.goal,
                     },
                 )
+            if any(keyword in lowered_goal for keyword in self._TIME_KEYWORDS):
+                return ToolCall(name="get_time", payload={"intent": intent.goal})
+            if any(keyword in lowered_goal for keyword in self._SUMMARY_KEYWORDS):
+                return ToolCall(name="summarize_recent", payload={"intent": intent.goal})
             return None
         except Exception as exc:  # noqa: BLE001 - keep tool routing resilient
             logger.exception("Failed to select tool: %s", exc)

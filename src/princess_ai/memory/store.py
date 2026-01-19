@@ -40,6 +40,9 @@ class MemoryStore:
 
     def add_memory(self, record: MemoryRecord) -> None:
         try:
+            if not record.text.strip():
+                self._logger.warning("Skipping empty memory record.")
+                return
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute(
                     "INSERT INTO memories (text, importance, timestamp) VALUES (?, ?, ?)",
@@ -50,6 +53,9 @@ class MemoryStore:
 
     def list_memories(self, limit: int = 50) -> Iterable[MemoryRecord]:
         try:
+            if limit <= 0:
+                self._logger.warning("Memory list limit must be positive. Got %s.", limit)
+                return []
             with sqlite3.connect(self._db_path) as conn:
                 rows = conn.execute(
                     "SELECT text, importance, timestamp FROM memories ORDER BY timestamp DESC LIMIT ?",

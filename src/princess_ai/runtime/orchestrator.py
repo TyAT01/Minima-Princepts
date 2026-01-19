@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 
 from princess_ai.context.builder import ContextBuilder, ContextInputs, Persona
@@ -142,10 +143,26 @@ class RuntimeOrchestrator:
                 record = MemoryRecord(text=text, importance=1.0, timestamp=time.time())
                 self._deps.memory_store.add_memory(record)
                 return f"Saved memory: {text}"
+            if tool_call.name == "get_time":
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                return f"Current time: {now}"
+            if tool_call.name == "summarize_recent":
+                return self._summarize_recent()
         except Exception as exc:  # noqa: BLE001 - keep tool execution resilient
             self._logger.exception("Tool execution failed: %s", exc)
             return "Tool execution failed."
         return None
+
+    def _summarize_recent(self) -> str:
+        try:
+            events = self._conversation.recent()[-5:]
+            if not events:
+                return "No recent conversation to summarize."
+            summary_lines = [f"- {event.username}: {event.text}" for event in events]
+            return "Recent conversation summary:\n" + "\n".join(summary_lines)
+        except Exception as exc:  # noqa: BLE001 - keep summary resilient
+            self._logger.exception("Failed to summarize recent events: %s", exc)
+            return "Unable to summarize recent conversation."
 
     def _generate_response(self, context: str) -> str:
         config = GenerationConfig()

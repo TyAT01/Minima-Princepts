@@ -24,6 +24,11 @@ class InnerThought:
         except Exception as exc:  # noqa: BLE001 - keep planning resilient
             self._logger.exception("Failed to extract last message: %s", exc)
             last_message = ""
+        if not last_message:
+            return Intent(goal="respond helpfully", tone="friendly", tool=None)
+        tool = self._detect_tool(last_message)
+        if tool:
+            return Intent(goal=last_message, tone="friendly", tool=tool)
         if self._should_store_memory(last_message):
             return Intent(
                 goal=f"store memory: {last_message}", tone="friendly", tool="store_memory"
@@ -58,3 +63,11 @@ class InnerThought:
                 "call me",
             )
         )
+
+    def _detect_tool(self, message: str) -> str | None:
+        lowered = message.lower()
+        if any(keyword in lowered for keyword in ("time", "date", "day")):
+            return "get_time"
+        if any(keyword in lowered for keyword in ("summarize", "summary", "recap")):
+            return "summarize_recent"
+        return None

@@ -32,12 +32,14 @@ class ContextBuilder:
     def build(self, inputs: ContextInputs) -> str:
         logger = logging.getLogger(__name__)
         try:
+            if not inputs.conversation:
+                logger.warning("Empty conversation supplied to context builder.")
             persona_block = (
                 f"Persona: {inputs.persona.name}\n{inputs.persona.description}\n"
             )
             safety_block = "\n".join([inputs.persona.safety, *inputs.safety_rules])
-            memory_block = "\n".join(inputs.memories)
-            goals_block = "\n".join(inputs.goals)
+            memory_block = "\n".join(text for text in inputs.memories if text)
+            goals_block = "\n".join(goal for goal in inputs.goals if goal)
             conversation_block = "\n".join(
                 f"{event.username}: {event.text}" for event in inputs.conversation
             )
