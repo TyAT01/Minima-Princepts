@@ -127,3 +127,87 @@ pip install -e .[memory]
 - **Voice output**: optional TTS output routed to voice-capable adapters.
 - **Auto-tuning**: runtime profile selection based on telemetry latency.
 - **API/Web UI**: FastAPI app with WebSocket streaming and a bundled web GUI.
+
+## Voice Configuration (Optional)
+
+For a fully interactive experience, you can set up offline Speech-to-Text (STT) and Text-to-Speech (TTS) capabilities.
+
+### Part A: Set Up Vosk (Speech-to-Text)
+
+Vosk is used for offline speech recognition.
+
+**1. Install voice dependencies:**
+If you haven't already, install the `voice` optional dependencies in your activated `.venv-aurelia` environment:
+```bash
+pip install -e .[voice] sounddevice
+```
+
+**2. Download a Vosk speech model:**
+A model is required for speech recognition. For a fast initial setup, the small English model is recommended.
+
+*   **[Download from the official Vosk models page](https://alphacephei.com/vosk/models)**
+
+Create a `models` directory in your project root and unzip the model into it. Your final path should look like:
+`models/vosk-model-small-en-us-0.15/`
+
+**3. Test the model loading:**
+Create a file named `test_vosk_load.py` with the following content:
+```python
+from vosk import Model
+
+try:
+    model = Model("models/vosk-model-small-en-us-0.15")
+    print("Loaded Vosk model OK!")
+except Exception as e:
+    print(e)
+```
+Run `python test_vosk_load.py`. If it prints "Loaded... OK!", your STT setup is ready.
+
+### Part B: Set Up Piper (Text-to-Speech)
+
+Piper provides high-quality offline voices for Aurelia's responses.
+
+**1. Install Piper TTS:**
+In your activated `.venv-aurelia` environment, install the `piper-tts` package:
+```bash
+pip install piper-tts
+```
+
+**2. Choose a voice for Aurelia:**
+A voice model determines Aurelia's personality. You can listen to samples on the **[Piper voice samples page](https://rhasspy.github.io/piper-samples/)**.
+
+A recommended starting voice that fits a youthful, friendly personality is **`en_US-amy-medium`**.
+
+**3. Download the voice model files:**
+Voice models consist of a `.onnx` file and a `.onnx.json` file. Create a `voices` directory in your project root.
+
+Use the following commands to download the "Amy" voice:
+```powershell
+# Create the voices directory
+mkdir voices
+
+# Download the .onnx model file
+curl.exe -L -o voices\en_US-amy-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx?download=true"
+
+# Download the .onnx.json config file
+curl.exe -L -o voices\en_US-amy-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json?download=true"
+```
+
+**4. Test the TTS output:**
+Create a file named `test_piper_tts.py` to generate a test audio file:
+```python
+import subprocess, sys, pathlib
+
+text = "Hi. I'm Aurelia. I'm here with you."
+model = "voices/en_US-amy-medium.onnx"
+out_wav = "aurelia_test.wav"
+
+# The piper CLI is provided by the installed package
+cmd = ["piper", "--model", model, "--output_file", out_wav]
+
+p = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
+p.communicate(text)
+
+print("Wrote test audio to:", pathlib.Path(out_wav).resolve())
+```
+Run `python test_piper_tts.py` and then play the generated `aurelia_test.wav` to hear the voice. To change the voice later, simply download a different model and update the path in your configuration.
