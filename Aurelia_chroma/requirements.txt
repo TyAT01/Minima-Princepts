@@ -21,6 +21,7 @@ fastapi
 uvicorn
 jinja2
 pydantic
+PyYAML
 
 # Tiny local text LLM client (llama.cpp server)
 requests

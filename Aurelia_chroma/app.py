@@ -18,12 +18,12 @@ from llm.llama_cpp_client import LlamaCppClient
 from memory.store import MemoryStore
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("fae_chroma")
+logger = logging.getLogger("aurelia_chroma")
 
 
 def build_orchestrator() -> Orchestrator:
     memory_store = MemoryStore(Path(settings.data_dir) / "memory.json")
-    persona = Persona()
+    persona = Persona.from_yaml(settings.persona_yaml)
     llm_client = LlamaCppClient(settings.llama_cpp_url)
     return Orchestrator(persona=persona, memory_store=memory_store, llm_client=llm_client)
 
@@ -39,7 +39,9 @@ def build_chroma_voice() -> ChromaVoice:
 
 async def run_discord(orchestrator: Orchestrator, chroma_voice: ChromaVoice) -> None:
     if not (settings.discord_token and settings.discord_guild_id and settings.discord_voice_channel_id):
-        raise RuntimeError("Discord config missing. Set FAE_CHROMA_DISCORD_TOKEN/GUILD_ID/VOICE_CHANNEL_ID")
+        raise RuntimeError(
+            "Discord config missing. Set AURELIA_CHROMA_DISCORD_TOKEN/GUILD_ID/VOICE_CHANNEL_ID"
+        )
     config = DiscordVoiceConfig(
         token=settings.discord_token,
         guild_id=settings.discord_guild_id,
@@ -58,7 +60,7 @@ def run_dashboard(orchestrator: Orchestrator, host: Optional[str], port: Optiona
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Fae Chroma Companion")
+    parser = argparse.ArgumentParser(description="Aurelia Chroma Companion")
     parser.add_argument("--discord", action="store_true", help="Run Discord always-listening bot")
     parser.add_argument("--dashboard", action="store_true", help="Run lightweight desktop dashboard")
     parser.add_argument("--prompt", type=str, help="Send a single prompt and exit")
