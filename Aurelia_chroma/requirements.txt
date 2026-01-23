@@ -1,9 +1,13 @@
 # Discord always-listening voice receive
 nextcord==2.6.0
-nextcord-ext-listening==0.2.0
+nextcord-ext-listening==0.0.3
 webrtcvad==2.0.10
 
-# Chroma
+# Vector DB / Memory
+chromadb==0.5.4
+sentence-transformers==3.0.1
+
+# Voice Models
 torch
 transformers
 
@@ -21,6 +25,7 @@ fastapi
 uvicorn
 jinja2
 pydantic
+pydantic-settings
 PyYAML
 
 # Tiny local text LLM client (llama.cpp server)

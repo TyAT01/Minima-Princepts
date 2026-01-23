@@ -15,14 +15,14 @@ from core.persona import Persona
 from desktop_ui.dashboard import build_dashboard
 from discord_ui.always_listen_bot import AlwaysListenBot, DiscordVoiceConfig
 from llm.llama_cpp_client import LlamaCppClient
-from memory.store import MemoryStore
+from memory.store import ChromaMemoryStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aurelia_chroma")
 
 
 def build_orchestrator() -> Orchestrator:
-    memory_store = MemoryStore(Path(settings.data_dir) / "memory.json")
+    memory_store = ChromaMemoryStore(db_path=Path(settings.data_dir) / "chroma_db")
     persona = Persona.from_yaml(settings.persona_yaml)
     llm_client = LlamaCppClient(settings.llama_cpp_url)
     return Orchestrator(persona=persona, memory_store=memory_store, llm_client=llm_client)

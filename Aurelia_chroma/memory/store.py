@@ -1,45 +1,78 @@
 from __future__ import annotations
 
-import json
-import uuid
-from dataclasses import dataclass
+import logging
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+
+import chromadb
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
-class MemoryEntry:
+class Memory:
     id: str
     source: str
     user_text: str
-    created_at: str
+    bot_text: str
+    created_at: datetime
+    last_accessed_at: datetime
+    embedding: Optional[list[float]] = None
+
+    def to_chroma(self) -> dict[str, Any]:
+        """Return a dictionary representation for ChromaDB metadata."""
+        return {
+            "source": self.source,
+            "user_text": self.user_text,
+            "bot_text": self.bot_text,
+            "created_at": self.created_at.isoformat(),
+            "last_accessed_at": self.last_accessed_at.isoformat(),
+        }
 
 
-class MemoryStore:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        if not self._path.exists():
-            self._path.write_text("[]", encoding="utf-8")
+class ChromaMemoryStore:
+    def __init__(self, db_path: Path, collection_name: str = "aurelia_memories"):
+        self._client = chromadb.PersistentClient(path=str(db_path))
+        self._embedding_function = SentenceTransformerEmbeddingFunction()
+        self._collection = self._client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=self._embedding_function,
+        )
 
-    def store_entry(self, source: str, user_text: str) -> str:
-        entry = MemoryEntry(
-            id=str(uuid.uuid4()),
+    def store_memory(self, source: str, user_text: str, bot_text: str) -> None:
+        now = datetime.utcnow()
+        memory_id = f"{source}-{now.timestamp()}"
+        memory = Memory(
+            id=memory_id,
             source=source,
             user_text=user_text,
-            created_at=datetime.utcnow().isoformat(),
+            bot_text=bot_text,
+            created_at=now,
+            last_accessed_at=now,
         )
-        data = self._read()
-        data.append(entry.__dict__)
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        return entry.id
+        self._collection.add(
+            ids=[memory_id],
+            documents=[user_text],  # The user text is used for similarity search
+            metadatas=[memory.to_chroma()],
+        )
+        logger.info("Stored memory: %s", memory_id)
 
-    def list_entries(self) -> list[dict[str, Any]]:
-        return list(self._read())
+    def search(self, query: str, n_results: int = 5) -> list[dict[str, Any]]:
+        results = self._collection.query(
+            query_texts=[query],
+            n_results=n_results,
+        )
+        memories = []
+        if results and "metadatas" in results and results["metadatas"]:
+            for metadata in results["metadatas"][0]:
+                if metadata:
+                    memories.append(metadata)
+        return memories
 
-    def _read(self) -> list[dict[str, Any]]:
-        try:
-            return json.loads(self._path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return []
+    def list_memories(self) -> list[dict[str, Any]]:
+        """Return all memories from the collection."""
+        results = self._collection.get()
+        return results.get("metadatas", [])

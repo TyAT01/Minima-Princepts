@@ -7,9 +7,7 @@ from core.emotion import EmotionEngine
 from core.filters import ContentFilter
 from core.persona import Persona
 from llm.llama_cpp_client import LlamaCppClient
-from memory.digestor import MemoryDigestor
-from memory.llm_scorer import LlmScorer
-from memory.store import MemoryStore
+from memory.store import ChromaMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +16,13 @@ logger = logging.getLogger(__name__)
 class OrchestratorResponse:
     text: str
     emotion: str
-    memory_id: str | None = None
 
 
 class Orchestrator:
     def __init__(
         self,
         persona: Persona,
-        memory_store: MemoryStore,
+        memory_store: ChromaMemoryStore,
         llm_client: LlamaCppClient,
         filter_engine: ContentFilter | None = None,
         emotion_engine: EmotionEngine | None = None,
@@ -35,11 +32,9 @@ class Orchestrator:
         self._llm = llm_client
         self._filter = filter_engine or ContentFilter()
         self._emotion = emotion_engine or EmotionEngine()
-        self._digestor = MemoryDigestor()
-        self._scorer = LlmScorer(llm_client)
 
     @property
-    def memory_store(self) -> MemoryStore:
+    def memory_store(self) -> ChromaMemoryStore:
         return self._memory
 
     def respond(self, text: str, source: str = "local") -> OrchestratorResponse:
@@ -49,16 +44,27 @@ class Orchestrator:
             return OrchestratorResponse(text="Message blocked by safety filter.", emotion="alert")
 
         emotion_state = self._emotion.detect(text)
-        memory_id = self._memory.store_entry(source=source, user_text=text)
-        summary = self._digestor.digest(text)
-        relevance = self._scorer.score(text, summary)
+
+        # Search for relevant memories
+        relevant_memories = self._memory.search(text, n_results=3)
+        memory_str = "\n".join(
+            [f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in relevant_memories]
+        )
 
         prompt = (
-            f"Persona: {self._persona.description}\n"
+            f"{self._persona.description}\n\n"
+            "Here are some relevant memories from the past:\n"
+            f"{memory_str}\n\n"
+            "Current conversation context:\n"
             f"Emotion tone: {emotion_state.tone}\n"
-            f"Memory summary: {summary} (score {relevance:.2f})\n"
             f"User: {text}\n"
             "Assistant:"
         )
-        response = self._llm.complete(prompt)
-        return OrchestratorResponse(text=self._persona.apply(response), emotion=emotion_state.tone, memory_id=memory_id)
+
+        bot_response_text = self._llm.complete(prompt)
+        self._memory.store_memory(source=source, user_text=text, bot_text=bot_response_text)
+
+        return OrchestratorResponse(
+            text=self._persona.apply(bot_response_text),
+            emotion=emotion_state.tone,
+        )
