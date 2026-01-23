@@ -1,0 +1,26 @@
+# Discord always-listening voice receive
+nextcord==2.6.0
+nextcord-ext-listening==0.2.0
+webrtcvad==2.0.10
+
+# Chroma
+torch
+transformers
+
+# Audio utils
+numpy
+scipy
+soundfile
+
+# Offline STT
+faster-whisper==1.0.3
+ctranslate2>=4.4.0
+
+# Desktop dashboard
+fastapi
+uvicorn
+jinja2
+pydantic
+
+# Tiny local text LLM client (llama.cpp server)
+requests
