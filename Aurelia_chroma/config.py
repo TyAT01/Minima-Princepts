@@ -7,9 +7,10 @@ from pydantic import BaseSettings, Field
 
 
 class Settings(BaseSettings):
-    app_name: str = "Fae Chroma Companion"
+    app_name: str = "Aurelia Chroma Companion"
     data_dir: Path = Field(default=Path("data"))
     tmp_dir: Path = Field(default=Path("tmp"))
+    persona_yaml: Path = Field(default=Path(__file__).resolve().parent / "aurelia_sheet.yaml")
 
     # LLM + Chroma configs
     chroma_model_name: str = Field(default="gpt2")
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     dashboard_port: int = 8000
 
     class Config:
-        env_prefix = "FAE_CHROMA_"
+        env_prefix = "AURELIA_CHROMA_"
         case_sensitive = False
 
 
