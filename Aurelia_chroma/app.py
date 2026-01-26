@@ -56,24 +56,31 @@ async def run_discord(chroma_client: ChromaClient, memory_store: ChromaMemorySto
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Aurelia Chroma Companion")
-    parser.add_argument("--discord", action="store_true", help="Run Discord always-listening bot")
+    parser.add_argument("--discord", action="store_true", default=True, help="Run Discord always-listening bot (default: True)")
     args = parser.parse_args()
 
+    logger.info("Starting Aurelia Chroma...")
+
     # Load persona and initialize clients
-    persona_prompt = load_persona_prompt()
+    try:
+        persona_prompt = load_persona_prompt()
 
-    chroma_client = ChromaClient(persona_prompt=persona_prompt, max_new_tokens=settings.max_new_tokens)
-    chroma_client.load()
+        chroma_client = ChromaClient(persona_prompt=persona_prompt, max_new_tokens=settings.max_new_tokens)
+        chroma_client.load()
 
-    whisper_client = WhisperClient()
-    whisper_client.load()
+        whisper_client = WhisperClient()
+        whisper_client.load()
 
-    memory_store = ChromaMemoryStore(db_path=settings.data_dir / "chroma_db")
+        memory_store = ChromaMemoryStore(db_path=settings.data_dir / "chroma_db")
 
-    if args.discord:
-        await run_discord(chroma_client, memory_store, whisper_client)
-    else:
-        parser.print_help()
+        if args.discord:
+            await run_discord(chroma_client, memory_store, whisper_client)
+        else:
+            logger.info("No UI selected. Exiting.")
+    except Exception as e:
+        logger.critical(f"Critical failure during startup: {e}")
+        # In a real scenario, we might want to try to notify someone,
+        # but here we just log and exit.
 
 if __name__ == "__main__":
     asyncio.run(main())

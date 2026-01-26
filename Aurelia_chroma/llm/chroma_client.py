@@ -3,6 +3,7 @@ import logging
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 import numpy as np
+from llm.filters import ContentFilter
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class ChromaClient:
         self._model = None
         self._processor = None
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._filter = ContentFilter()
 
     def load(self):
         """Loads the model and processor."""
@@ -35,24 +37,36 @@ class ChromaClient:
         if not self._model or not self._processor:
             raise RuntimeError("Model is not loaded. Call .load() first.")
 
-        system_prompt = f"{self._persona_prompt}\n\nHere are some relevant memories from the past:\n{context}"
+        system_prompt = (
+            f"{self._persona_prompt}\n\n"
+            "CURRENT AWARENESS AND MEMORIES:\n"
+            f"{context}\n\n"
+            "You are currently in a live voice interaction. Respond naturally and stay in character."
+        )
         conversation = [[
             {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
             {"role": "user", "content": [{"type": "audio", "audio": audio_path}]}
         ]]
-        return self._generate_response(conversation)
+        audio, text = self._generate_response(conversation)
+        return audio, self._filter.filter_text(text) if text else text
 
     def respond_to_text(self, text: str, context: str = "") -> tuple[np.ndarray | None, str | None]:
         """Gets a voice and text response from text input and context."""
         if not self._model or not self._processor:
             raise RuntimeError("Model is not loaded. Call .load() first.")
 
-        system_prompt = f"{self._persona_prompt}\n\nHere are some relevant memories from the past:\n{context}"
+        system_prompt = (
+            f"{self._persona_prompt}\n\n"
+            "CURRENT AWARENESS AND MEMORIES:\n"
+            f"{context}\n\n"
+            "Respond to the following input while staying in character."
+        )
         conversation = [[
             {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
             {"role": "user", "content": [{"type": "text", "text": text}]}
         ]]
-        return self._generate_response(conversation)
+        audio, text = self._generate_response(conversation)
+        return audio, self._filter.filter_text(text) if text else text
 
     def _generate_response(self, conversation: list, do_sample: bool = True) -> tuple[np.ndarray | None, str | None]:
         inputs = self._processor(conversation, add_generation_prompt=True, tokenize=False)
