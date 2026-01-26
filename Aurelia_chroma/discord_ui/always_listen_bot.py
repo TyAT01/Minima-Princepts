@@ -130,9 +130,9 @@ class AlwaysListenBot:
             memories = self._memory_store.search(user_text)
             context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
 
-            # Generate response
+            # Generate response using direct audio input for better multimodal understanding
             response_audio, response_text = await loop.run_in_executor(
-                None, self._chroma_client.respond_to_text, user_text, context
+                None, self._chroma_client.respond_to_audio, fp.name, context
             )
 
             if not response_text:

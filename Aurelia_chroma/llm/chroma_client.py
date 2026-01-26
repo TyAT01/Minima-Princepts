@@ -31,12 +31,13 @@ class ChromaClient:
 
     def respond_to_audio(self, audio_path: str, context: str = "") -> tuple[np.ndarray | None, str | None]:
         """Gets a voice and text response from audio input and text context."""
+        logger.info("Generating response from audio input.")
         if not self._model or not self._processor:
             raise RuntimeError("Model is not loaded. Call .load() first.")
 
-        full_prompt = f"{self._persona_prompt}\n\nHere are some relevant memories from the past:\n{context}"
+        system_prompt = f"{self._persona_prompt}\n\nHere are some relevant memories from the past:\n{context}"
         conversation = [[
-            {"role": "system", "content": [{"type": "text", "text": full_prompt}]},
+            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
             {"role": "user", "content": [{"type": "audio", "audio": audio_path}]}
         ]]
         return self._generate_response(conversation)
