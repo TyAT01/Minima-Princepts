@@ -8,6 +8,7 @@ from pydantic import Field
 class Settings(BaseSettings):
     app_name: str = "Aurelia Chroma Companion"
     persona_yaml: Path = Field(default=Path(__file__).resolve().parent / "aurelia_sheet.yaml")
+    data_dir: Path = Field(default=Path(__file__).resolve().parent / "data")
 
     # Chroma 1.0 config
     chroma_model_id: str = Field(default="FlashLabs/Chroma-4B")

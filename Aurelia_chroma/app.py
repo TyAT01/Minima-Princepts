@@ -68,7 +68,7 @@ async def main() -> None:
     whisper_client = WhisperClient()
     whisper_client.load()
 
-    memory_store = ChromaMemoryStore(db_path=Path("data/chroma_db"))
+    memory_store = ChromaMemoryStore(db_path=settings.data_dir / "chroma_db")
 
     if args.discord:
         await run_discord(chroma_client, memory_store, whisper_client)
