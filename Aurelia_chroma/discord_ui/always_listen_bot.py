@@ -1,19 +1,75 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os
 import tempfile
 from dataclasses import dataclass
 import soundfile as sf
 import nextcord
-from nextcord.ext import commands, listening
+from nextcord.ext import commands
+from nextcord.ext.listening import AudioSink, ListenVoiceClient
 import numpy as np
 import librosa
 
 from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
+from discord_ui.vad_segmenter import VADSegmenter, VADConfig
 
 logger = logging.getLogger(__name__)
+
+class AureliaAudioSink(AudioSink):
+    def __init__(self, bot: "AlwaysListenBot", vad_config: VADConfig):
+        super().__init__()
+        self.bot = bot
+        self.vad = VADSegmenter(vad_config)
+        self.buffers = {}
+        self.silence_count = {}
+        self.speaking = {}
+
+    def write(self, user, data):
+        # nextcord-ext-listening might pass a VoiceData object or raw bytes
+        raw_data = data.data if hasattr(data, "data") else data
+
+        if user not in self.buffers:
+            self.buffers[user] = bytearray()
+            self.silence_count[user] = 0
+            self.speaking[user] = False
+
+        # Convert to mono for VAD check
+        pcm_data = np.frombuffer(raw_data, dtype=np.int16)
+        # Discord data is stereo interleaved: [L, R, L, R, ...]
+        # Reshape to (N, 2) and mean over axis 1 to get mono
+        if pcm_data.size % 2 == 0:
+            mono_frame = pcm_data.reshape(-1, 2).mean(axis=1).astype(np.int16).tobytes()
+        else:
+            mono_frame = data # Fallback
+
+        is_speech = self.vad.is_speech(mono_frame)
+
+        if is_speech:
+            if not self.speaking[user]:
+                logger.info(f"User {user} started speaking.")
+            self.speaking[user] = True
+            self.silence_count[user] = 0
+            self.buffers[user].extend(raw_data)
+        elif self.speaking[user]:
+            self.silence_count[user] += 1
+            self.buffers[user].extend(raw_data)
+
+            if self.silence_count[user] > 50: # ~1 second of silence at 20ms frames
+                logger.info(f"User {user} finished speaking. Processing segment...")
+                audio_data = bytes(self.buffers[user])
+                self.buffers[user].clear()
+                self.speaking[user] = False
+                self.silence_count[user] = 0
+
+                # Trigger bot processing in the main event loop
+                loop = self.bot.bot.loop
+                asyncio.run_coroutine_threadsafe(self.bot.process_audio_data(user, audio_data), loop)
+
+    def cleanup(self):
+        self.buffers.clear()
 
 @dataclass
 class DiscordVoiceConfig:
@@ -31,13 +87,14 @@ class AlwaysListenBot:
         self._whisper_client = whisper_client
         self._voice_client = None
         self._is_listening = False
-        self._user_audio_data = {}
+        self.bot = None
 
     async def run(self) -> None:
         intents = nextcord.Intents.default()
         intents.message_content = True
         intents.voice_states = True
-        bot = commands.Bot(command_prefix="!", intents=intents)
+        self.bot = commands.Bot(command_prefix="!", intents=intents)
+        bot = self.bot
 
         @bot.event
         async def on_ready():
@@ -62,9 +119,16 @@ class AlwaysListenBot:
 
             await thinking_message.edit(content=response_text)
 
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as fp:
-                sf.write(fp.name, response_audio, self._config.sample_rate)
-                self._voice_client.play(nextcord.FFmpegPCMAudio(fp.name), after=lambda e: logger.info("Finished playing audio."))
+            fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            sf.write(fp.name, response_audio, self._config.sample_rate)
+            fp.close()
+
+            def cleanup(error):
+                if error:
+                    logger.error(f"Error during playback: {error}")
+                self._safe_delete(fp.name)
+
+            self._voice_client.play(nextcord.FFmpegPCMAudio(fp.name), after=cleanup)
 
             self._memory_store.store_memory(message.content, response_text)
 
@@ -80,68 +144,82 @@ class AlwaysListenBot:
             logger.error(f"Channel {self._config.voice_channel_id} not found.")
             return
 
-        self._voice_client = await channel.connect(cls=listening.ListenVoiceClient)
+        self._voice_client = await channel.connect(cls=ListenVoiceClient)
         asyncio.create_task(self.start_listening())
 
     async def start_listening(self):
         if self._voice_client and not self._is_listening:
             self._is_listening = True
-            self._voice_client.listen(self.process_user_audio, after=self.after_listening)
-
-    def process_user_audio(self, user, data):
-        if user not in self._user_audio_data:
-            self._user_audio_data[user] = bytearray()
-        self._user_audio_data[user].extend(data)
-
-    def after_listening(self, error):
-        self._is_listening = False
-        if error:
-            logger.error(f"Error in listening: {error}")
-            return
-
-        loop = asyncio.get_event_loop()
-        for user, data in self._user_audio_data.items():
-            if len(data) > 0:
-                asyncio.run_coroutine_threadsafe(self.process_audio_data(user, data), loop)
-        self._user_audio_data.clear()
-
-        asyncio.run_coroutine_threadsafe(self.start_listening(), loop)
+            # VAD config for Discord's 48kHz audio
+            vad_config = VADConfig(aggressiveness=3, sample_rate=self._config.discord_sample_rate)
+            sink = AureliaAudioSink(self, vad_config)
+            self._voice_client.listen(sink)
+            logger.info("Started listening in voice channel.")
 
     async def process_audio_data(self, user, data):
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as fp:
-            audio_data = np.frombuffer(data, dtype=np.int16)
-            resampled_audio = librosa.resample(audio_data.astype(np.float32), orig_sr=self._config.discord_sample_rate, target_sr=self._config.sample_rate)
-            sf.write(fp.name, resampled_audio, self._config.sample_rate)
+        fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        fp.close() # Close so other processes can read it
 
-            loop = asyncio.get_event_loop()
+        # Convert raw bytes to numpy array
+        audio_np = np.frombuffer(data, dtype=np.int16)
 
-            # Transcribe audio to text
-            user_text = await loop.run_in_executor(
-                None, self._whisper_client.transcribe, fp.name
-            )
+        # Handle stereo interleaved (L, R, L, R...) to mono
+        if audio_np.size % 2 == 0:
+            audio_mono = audio_np.reshape(-1, 2).mean(axis=1).astype(np.float32) / 32768.0
+        else:
+            audio_mono = audio_np.astype(np.float32) / 32768.0
 
-            if not user_text or not user_text.strip():
-                logger.info("Whisper transcribed empty text.")
-                return
+        # Resample to the model's required sample rate (e.g. 24kHz)
+        resampled_audio = librosa.resample(audio_mono, orig_sr=self._config.discord_sample_rate, target_sr=self._config.sample_rate)
+        sf.write(fp.name, resampled_audio, self._config.sample_rate)
 
-            logger.info(f"Transcribed text from {user}: {user_text}")
+        loop = asyncio.get_event_loop()
 
-            # Search memory for relevant context
-            memories = self._memory_store.search(user_text)
-            context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
+        # Transcribe audio to text
+        user_text = await loop.run_in_executor(
+            None, self._whisper_client.transcribe, fp.name
+        )
 
-            # Generate response using direct audio input for better multimodal understanding
-            response_audio, response_text = await loop.run_in_executor(
-                None, self._chroma_client.respond_to_audio, fp.name, context
-            )
+        if not user_text or not user_text.strip():
+            logger.info("Whisper transcribed empty text.")
+            self._safe_delete(fp.name) # Cleanup even if empty
+            return
 
-            if not response_text:
-                logger.warning("Chroma client returned empty text response.")
-                return
+        logger.info(f"Transcribed text from {user}: {user_text}")
 
-            # Play response and store memory
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as response_fp:
-                sf.write(response_fp.name, response_audio, self._config.sample_rate)
-                self._voice_client.play(nextcord.FFmpegPCMAudio(response_fp.name), after=lambda e: logger.info("Finished playing audio."))
+        # Search memory for relevant context
+        memories = self._memory_store.search(user_text)
+        context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
 
-            self._memory_store.store_memory(user_text, response_text)
+        # Generate response using direct audio input for better multimodal understanding
+        response_audio, response_text = await loop.run_in_executor(
+            None, self._chroma_client.respond_to_audio, fp.name, context
+        )
+
+        if not response_text:
+            logger.warning("Chroma client returned empty text response.")
+            self._safe_delete(fp.name) # Cleanup
+            return
+
+        # Play response and store memory
+        response_fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        sf.write(response_fp.name, response_audio, self._config.sample_rate)
+        response_fp.close()
+
+        def cleanup_response(error):
+            if error:
+                logger.error(f"Error during playback: {error}")
+            self._safe_delete(response_fp.name)
+            self._safe_delete(fp.name) # Also delete input file after response
+
+        self._voice_client.play(nextcord.FFmpegPCMAudio(response_fp.name), after=cleanup_response)
+
+        self._memory_store.store_memory(user_text, response_text)
+
+    def _safe_delete(self, filepath: str):
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logger.info(f"Deleted temporary file: {filepath}")
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary file {filepath}: {e}")
