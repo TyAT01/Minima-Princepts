@@ -1,37 +1,22 @@
 from __future__ import annotations
-
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class Memory:
     id: str
-    source: str
     user_text: str
     bot_text: str
     created_at: datetime
     last_accessed_at: datetime
-    embedding: Optional[list[float]] = None
-
-    def to_chroma(self) -> dict[str, Any]:
-        """Return a dictionary representation for ChromaDB metadata."""
-        return {
-            "source": self.source,
-            "user_text": self.user_text,
-            "bot_text": self.bot_text,
-            "created_at": self.created_at.isoformat(),
-            "last_accessed_at": self.last_accessed_at.isoformat(),
-        }
-
 
 class ChromaMemoryStore:
     def __init__(self, db_path: Path, collection_name: str = "aurelia_memories"):
@@ -42,21 +27,18 @@ class ChromaMemoryStore:
             embedding_function=self._embedding_function,
         )
 
-    def store_memory(self, source: str, user_text: str, bot_text: str) -> None:
+    def store_memory(self, user_text: str, bot_text: str) -> None:
         now = datetime.utcnow()
-        memory_id = f"{source}-{now.timestamp()}"
-        memory = Memory(
-            id=memory_id,
-            source=source,
-            user_text=user_text,
-            bot_text=bot_text,
-            created_at=now,
-            last_accessed_at=now,
-        )
+        memory_id = f"memory-{now.timestamp()}"
         self._collection.add(
             ids=[memory_id],
-            documents=[user_text],  # The user text is used for similarity search
-            metadatas=[memory.to_chroma()],
+            documents=[user_text],
+            metadatas=[{
+                "user_text": user_text,
+                "bot_text": bot_text,
+                "created_at": now.isoformat(),
+                "last_accessed_at": now.isoformat(),
+            }],
         )
         logger.info("Stored memory: %s", memory_id)
 
@@ -71,8 +53,3 @@ class ChromaMemoryStore:
                 if metadata:
                     memories.append(metadata)
         return memories
-
-    def list_memories(self) -> list[dict[str, Any]]:
-        """Return all memories from the collection."""
-        results = self._collection.get()
-        return results.get("metadatas", [])

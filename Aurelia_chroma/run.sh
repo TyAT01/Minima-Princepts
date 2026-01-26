@@ -1,14 +1,18 @@
 #!/bin/bash
 # This script starts the Aurelia Chroma Companion.
-# It assumes you have already started your LLM server (e.g., llama.cpp or Ollama).
+# It will first install the required dependencies,
+# and then it will run the Discord bot.
 #
-# Example for llama.cpp:
-# llama-server --model /path/to/your/model.gguf --port 8080
-#
-# Once the LLM server is running, you can run this script.
+# Make sure to set the following environment variables:
+# - DISCORD_BOT_TOKEN
+# - AURELIA_CHROMA_DISCORD_GUILD_ID
+# - AURELIA_CHROMA_DISCORD_VOICE_CHANNEL_ID
 
 # Change to the script's directory
 cd "$(dirname "$0")"
 
-echo "Starting Aurelia Chroma Companion with Discord and Dashboard..."
-python app.py --discord --dashboard
+echo "Installing dependencies..."
+pip install -r requirements.txt
+
+echo "Starting Aurelia Chroma Companion..."
+python app.py --discord

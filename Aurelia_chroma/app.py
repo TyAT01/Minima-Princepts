@@ -1,43 +1,40 @@
 from __future__ import annotations
-
 import argparse
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
+import yaml
 
-import uvicorn
-
-from chroma.chroma_voice import ChromaVoice, ChromaVoiceConfig
 from config import settings
-from core.orchestrator import Orchestrator
-from core.persona import Persona
-from desktop_ui.dashboard import build_dashboard
 from discord_ui.always_listen_bot import AlwaysListenBot, DiscordVoiceConfig
-from llm.llama_cpp_client import LlamaCppClient
+from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
+from stt.whisper_client import WhisperClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aurelia_chroma")
 
+def load_persona_prompt() -> str:
+    """Loads the persona from the yaml file and constructs the system prompt."""
+    with open(settings.persona_yaml, "r", encoding="utf-8") as f:
+        persona_data = yaml.safe_load(f)
 
-def build_orchestrator() -> Orchestrator:
-    memory_store = ChromaMemoryStore(db_path=Path(settings.data_dir) / "chroma_db")
-    persona = Persona.from_yaml(settings.persona_yaml)
-    llm_client = LlamaCppClient(settings.llama_cpp_url)
-    return Orchestrator(persona=persona, memory_store=memory_store, llm_client=llm_client)
+    character = persona_data.get("character", {})
+    name = character.get("name", "Aurelia")
+    role = character.get("role", "AI Companion")
+    goals = ", ".join(character.get("goals", []))
+    core_identity = character.get("core_identity", {}).get("self_awareness", "I am an AI.")
+    speech_style = character.get("speech_patterns", {}).get("style", "friendly and helpful.")
 
-
-def build_chroma_voice() -> ChromaVoice:
-    config = ChromaVoiceConfig(
-        model_name=settings.chroma_voice_model,
-        tts_model=settings.chroma_tts_model,
-        sample_rate=settings.sample_rate,
+    system_prompt = (
+        f"You are {name}, an advanced virtual human. Your role is '{role}'. "
+        f"Your core identity is: '{core_identity}'. Your goal is to '{goals}'. "
+        f"You speak in a style that is '{speech_style}'. "
+        "You possess the ability to understand auditory inputs and generate both text and speech."
     )
-    return ChromaVoice(config)
+    return system_prompt
 
-
-async def run_discord(orchestrator: Orchestrator, chroma_voice: ChromaVoice) -> None:
+async def run_discord(chroma_client: ChromaClient, memory_store: ChromaMemoryStore, whisper_client: WhisperClient) -> None:
     if not (settings.discord_token and settings.discord_guild_id and settings.discord_voice_channel_id):
         raise RuntimeError(
             "Discord config missing. Set AURELIA_CHROMA_DISCORD_TOKEN/GUILD_ID/VOICE_CHANNEL_ID"
@@ -47,48 +44,36 @@ async def run_discord(orchestrator: Orchestrator, chroma_voice: ChromaVoice) -> 
         guild_id=settings.discord_guild_id,
         voice_channel_id=settings.discord_voice_channel_id,
         sample_rate=settings.sample_rate,
-        vad_aggressiveness=settings.vad_aggressiveness,
+        discord_sample_rate=settings.discord_sample_rate,
     )
-    bot = AlwaysListenBot(config=config, orchestrator=orchestrator, chroma_voice=chroma_voice)
+    bot = AlwaysListenBot(
+        config=config,
+        chroma_client=chroma_client,
+        memory_store=memory_store,
+        whisper_client=whisper_client
+    )
     await bot.run()
-
-
-def run_dashboard(orchestrator: Orchestrator, host: Optional[str], port: Optional[int]) -> None:
-    memory_store = orchestrator.memory_store
-    app = build_dashboard(memory_store, Path(__file__).parent / "desktop_ui" / "templates")
-    uvicorn.run(app, host=host or settings.dashboard_host, port=port or settings.dashboard_port)
-
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Aurelia Chroma Companion")
     parser.add_argument("--discord", action="store_true", help="Run Discord always-listening bot")
-    parser.add_argument("--dashboard", action="store_true", help="Run lightweight desktop dashboard")
-    parser.add_argument("--prompt", type=str, help="Send a single prompt and exit")
-    parser.add_argument("--dashboard-host", type=str)
-    parser.add_argument("--dashboard-port", type=int)
     args = parser.parse_args()
 
-    orchestrator = build_orchestrator()
-    chroma_voice = build_chroma_voice()
+    # Load persona and initialize clients
+    persona_prompt = load_persona_prompt()
 
-    if args.prompt:
-        response = orchestrator.respond(args.prompt, source="cli")
-        print(response.text)
-        return
+    chroma_client = ChromaClient(persona_prompt=persona_prompt, max_new_tokens=settings.max_new_tokens)
+    chroma_client.load()
 
-    tasks = []
+    whisper_client = WhisperClient()
+    whisper_client.load()
+
+    memory_store = ChromaMemoryStore(db_path=Path("data/chroma_db"))
+
     if args.discord:
-        tasks.append(run_discord(orchestrator, chroma_voice))
-    if args.dashboard:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, run_dashboard, orchestrator, args.dashboard_host, args.dashboard_port)
-        return
-
-    if tasks:
-        await asyncio.gather(*tasks)
+        await run_discord(chroma_client, memory_store, whisper_client)
     else:
         parser.print_help()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
