@@ -10,6 +10,7 @@ from discord_ui.always_listen_bot import AlwaysListenBot, DiscordVoiceConfig
 from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
+from web_dashboard import run_dashboard
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aurelia_chroma")
@@ -57,6 +58,7 @@ async def run_discord(chroma_client: ChromaClient, memory_store: ChromaMemorySto
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Aurelia Chroma Companion")
     parser.add_argument("--discord", action="store_true", default=True, help="Run Discord always-listening bot (default: True)")
+    parser.add_argument("--web", action="store_true", default=False, help="Run web dashboard (default: False)")
     args = parser.parse_args()
 
     logger.info("Starting Aurelia Chroma...")
@@ -65,7 +67,11 @@ async def main() -> None:
     try:
         persona_prompt = load_persona_prompt()
 
-        chroma_client = ChromaClient(persona_prompt=persona_prompt, max_new_tokens=settings.max_new_tokens)
+        chroma_client = ChromaClient(
+            model_id=settings.chroma_model_id,
+            persona_prompt=persona_prompt,
+            max_new_tokens=settings.max_new_tokens
+        )
         chroma_client.load()
 
         whisper_client = WhisperClient()
@@ -73,8 +79,17 @@ async def main() -> None:
 
         memory_store = ChromaMemoryStore(db_path=settings.data_dir / "chroma_db")
 
+        tasks = []
         if args.discord:
-            await run_discord(chroma_client, memory_store, whisper_client)
+            tasks.append(run_discord(chroma_client, memory_store, whisper_client))
+
+        if args.web:
+            # Run dashboard in a separate thread/process as it's blocking
+            loop = asyncio.get_event_loop()
+            tasks.append(loop.run_in_executor(None, run_dashboard))
+
+        if tasks:
+            await asyncio.gather(*tasks)
         else:
             logger.info("No UI selected. Exiting.")
     except Exception as e:
