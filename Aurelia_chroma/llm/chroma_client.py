@@ -22,14 +22,22 @@ class ChromaClient:
     def load(self):
         """Loads the model and processor."""
         logger.info("Loading Chroma 1.0 model: %s", self._model_id)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self._model_id,
-            trust_remote_code=True,
-            device_map="auto",
-            torch_dtype=torch.bfloat16
-        )
-        self._processor = AutoProcessor.from_pretrained(self._model_id, trust_remote_code=True)
-        logger.info("Chroma 1.0 model loaded successfully.")
+
+        # Use bfloat16 if CUDA is available, otherwise float32
+        dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+
+        try:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self._model_id,
+                trust_remote_code=True,
+                device_map="auto",
+                torch_dtype=dtype
+            )
+            self._processor = AutoProcessor.from_pretrained(self._model_id, trust_remote_code=True)
+            logger.info("Chroma 1.0 model loaded successfully.")
+        except Exception as e:
+            logger.error(f"Failed to load Chroma model: {e}")
+            raise
 
     def respond_to_audio(self, audio_path: str, context: str = "") -> tuple[np.ndarray | None, str | None]:
         """Gets a voice and text response from audio input and text context."""
@@ -69,23 +77,49 @@ class ChromaClient:
         return audio, self._filter.filter_text(text) if text else text
 
     def _generate_response(self, conversation: list, do_sample: bool = True) -> tuple[np.ndarray | None, str | None]:
-        inputs = self._processor(conversation, add_generation_prompt=True, tokenize=False)
-        inputs = {k: v.to(self._device) for k, v in inputs.items()}
+        try:
+            # return_tensors="pt" is usually required for the model
+            inputs = self._processor(conversation, add_generation_prompt=True, return_tensors="pt")
+            inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
-        output = self._model.generate(
-            **inputs,
-            max_new_tokens=self._max_new_tokens,
-            do_sample=do_sample,
-            temperature=0.7,
-            top_p=0.9,
-            use_cache=True,
-            output_text=True
-        )
+            output = self._model.generate(
+                **inputs,
+                max_new_tokens=self._max_new_tokens,
+                do_sample=do_sample,
+                temperature=0.7,
+                top_p=0.9,
+                use_cache=True,
+                output_text=True
+            )
 
-        audio_values = self._model.codec_model.decode(output.permute(0, 2, 1)).audio_values
-        text_response = self._processor.decode(output[0], skip_special_tokens=True)
+            # Robust extraction of audio and text
+            audio_np = None
+            text_response = None
 
-        return audio_values[0].cpu().detach().numpy(), text_response
+            if hasattr(self._model, "codec_model") and output.ndim == 3:
+                # Expected shape for multimodal output (batch, seq, codebooks)
+                audio_values = self._model.codec_model.decode(output.permute(0, 2, 1)).audio_values
+                audio_np = audio_values[0].cpu().detach().numpy()
+            elif output.ndim == 2:
+                # Standard 2D output (batch, seq)
+                logger.debug("Output is 2D, attempting to decode as text only.")
+
+            # Text decoding - handle both prompt+output and interleaved formats
+            # Usually we want only the newly generated tokens
+            input_len = inputs.get("input_ids", torch.tensor([])).shape[-1]
+
+            if output.ndim == 3:
+                # If 3D, take the first codebook (usually contains text tokens if interleaved)
+                generated_tokens = output[0, input_len:, 0]
+            else:
+                generated_tokens = output[0, input_len:]
+
+            text_response = self._processor.decode(generated_tokens, skip_special_tokens=True)
+
+            return audio_np, text_response
+        except Exception as e:
+            logger.error(f"Error during generation: {e}")
+            return None, "I encountered a cognitive glitch while trying to respond."
 
     def set_persona_prompt(self, prompt: str):
         self._persona_prompt = prompt

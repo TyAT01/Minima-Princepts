@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import soundfile as sf
 import nextcord
 from nextcord.ext import commands
-from nextcord.ext.listening import AudioSink, ListenVoiceClient
+from nextcord.ext.listening import AudioSink, VoiceClient as ListenVoiceClient
 import numpy as np
 import librosa
 
@@ -23,53 +23,83 @@ class AureliaAudioSink(AudioSink):
         super().__init__()
         self.bot = bot
         self.vad = VADSegmenter(vad_config)
-        self.buffers = {}
+        self.buffers = {} # Accumulates raw stereo audio for processing
+        self.vad_buffers = {} # Accumulates mono audio for VAD check
         self.silence_count = {}
         self.speaking = {}
+        # VAD expects 10, 20, or 30ms. At 48kHz, 20ms is 960 samples.
+        self.vad_frame_samples = int(vad_config.sample_rate * 0.02) # 20ms
+        self.vad_frame_bytes = self.vad_frame_samples * 2
 
     def write(self, user, data):
-        # nextcord-ext-listening might pass a VoiceData object or raw bytes
-        raw_data = data.data if hasattr(data, "data") else data
+        # nextcord-ext-listening: data might be VoiceData or raw bytes
+        if hasattr(data, "pcm"):
+            raw_data = data.pcm
+        elif hasattr(data, "data"):
+            raw_data = data.data
+        else:
+            raw_data = data
 
         if user not in self.buffers:
             self.buffers[user] = bytearray()
+            self.vad_buffers[user] = bytearray()
             self.silence_count[user] = 0
             self.speaking[user] = False
 
         # Convert to mono for VAD check
         pcm_data = np.frombuffer(raw_data, dtype=np.int16)
-        # Discord data is stereo interleaved: [L, R, L, R, ...]
-        # Reshape to (N, 2) and mean over axis 1 to get mono
         if pcm_data.size % 2 == 0:
-            mono_frame = pcm_data.reshape(-1, 2).mean(axis=1).astype(np.int16).tobytes()
+            # Stereo to Mono: average L and R
+            mono_data = pcm_data.reshape(-1, 2).mean(axis=1).astype(np.int16)
+            self.vad_buffers[user].extend(mono_data.tobytes())
         else:
-            mono_frame = data # Fallback
+            # Fallback if already mono or corrupted
+            self.vad_buffers[user].extend(raw_data)
 
-        is_speech = self.vad.is_speech(mono_frame)
+        # Process VAD in fixed chunks
+        while len(self.vad_buffers[user]) >= self.vad_frame_bytes:
+            frame = bytes(self.vad_buffers[user][:self.vad_frame_bytes])
+            del self.vad_buffers[user][:self.vad_frame_bytes]
 
-        if is_speech:
-            if not self.speaking[user]:
-                logger.info(f"User {user} started speaking.")
-            self.speaking[user] = True
-            self.silence_count[user] = 0
+            is_speech = self.vad.is_speech(frame)
+
+            if is_speech:
+                if not self.speaking[user]:
+                    logger.info(f"User {user} started speaking.")
+                    self.speaking[user] = True
+                self.silence_count[user] = 0
+            elif self.speaking[user]:
+                self.silence_count[user] += 1
+
+            # Accumulate raw data if we are in a speaking state
+            if self.speaking[user]:
+                # Note: This is a bit simplified; ideally we'd map VAD frames back to raw packets
+                # But since we extension raw_data every write, it's roughly aligned.
+                # Actually, the original logic extended in write, let's keep it similar but better.
+                pass
+
+        # Always extend full buffer if speaking
+        if self.speaking[user]:
             self.buffers[user].extend(raw_data)
-        elif self.speaking[user]:
-            self.silence_count[user] += 1
-            self.buffers[user].extend(raw_data)
 
-            if self.silence_count[user] > 50: # ~1 second of silence at 20ms frames
+            # 50 frames of 20ms = 1 second of silence
+            if self.silence_count[user] > 50:
                 logger.info(f"User {user} finished speaking. Processing segment...")
                 audio_data = bytes(self.buffers[user])
                 self.buffers[user].clear()
+                self.vad_buffers[user].clear()
                 self.speaking[user] = False
                 self.silence_count[user] = 0
 
-                # Trigger bot processing in the main event loop
-                loop = self.bot.bot.loop
-                asyncio.run_coroutine_threadsafe(self.bot.process_audio_data(user, audio_data), loop)
+                # Trigger bot processing
+                if self.bot.bot and self.bot.bot.loop:
+                    self.bot.bot.loop.call_soon_threadsafe(
+                        lambda: asyncio.create_task(self.bot.process_audio_data(user, audio_data))
+                    )
 
     def cleanup(self):
         self.buffers.clear()
+        self.vad_buffers.clear()
 
 @dataclass
 class DiscordVoiceConfig:
@@ -101,6 +131,17 @@ class AlwaysListenBot:
         intents.voice_states = True
         self.bot = commands.Bot(command_prefix="!", intents=intents)
         bot = self.bot
+
+        @bot.command(name="stop")
+        async def stop(ctx):
+            """Stops the bot and disconnects from voice."""
+            if self._voice_client:
+                await self._voice_client.disconnect()
+                self._voice_client = None
+                self._is_listening = False
+                await ctx.send("Disconnected from voice. Farewell!")
+            else:
+                await ctx.send("I'm not in a voice channel.")
 
         @bot.event
         async def on_ready():
@@ -187,6 +228,10 @@ class AlwaysListenBot:
         if not self._voice_client or not self._voice_client.is_connected():
             return
 
+        # Don't act if already speaking or someone else is speaking
+        if self._voice_client.is_playing():
+            return
+
         logger.info("Aurelia is thinking autonomously...")
 
         is_alone = len(self._current_members) == 0
@@ -215,6 +260,10 @@ class AlwaysListenBot:
 
     async def _play_response(self, audio_data, text_response, source_label):
         """Helper to play audio response."""
+        if audio_data is None:
+            logger.warning(f"No audio data to play for {source_label}")
+            return
+
         response_fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         sf.write(response_fp.name, audio_data, self._config.sample_rate)
         response_fp.close()
@@ -225,7 +274,15 @@ class AlwaysListenBot:
             self._safe_delete(response_fp.name)
 
         if self._voice_client and self._voice_client.is_connected():
-             self._voice_client.play(nextcord.FFmpegPCMAudio(response_fp.name), after=cleanup_response)
+            # Wait if already playing (simple queueing could be better, but for now we just wait)
+            while self._voice_client.is_playing():
+                await asyncio.sleep(0.1)
+
+            try:
+                self._voice_client.play(nextcord.FFmpegPCMAudio(response_fp.name), after=cleanup_response)
+            except Exception as e:
+                logger.error(f"Failed to play audio: {e}")
+                self._safe_delete(response_fp.name)
         else:
              self._safe_delete(response_fp.name)
 
