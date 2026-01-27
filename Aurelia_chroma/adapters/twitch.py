@@ -25,9 +25,9 @@ class TwitchChatAdapter(InputAdapter):
         username_fallback: str = "twitch_user",
     ) -> None:
         self._logger = logging.getLogger(__name__)
-        self._username = username or os.getenv("AURELIA_TWITCH_USERNAME", "").strip()
-        self._token = token or os.getenv("AURELIA_TWITCH_TOKEN", "").strip()
-        self._channel = (channel or os.getenv("AURELIA_TWITCH_CHANNEL", "").strip()).lstrip("#")
+        self._username = username or os.getenv("AURELIA_CHROMA_TWITCH_USERNAME", "").strip()
+        self._token = token or os.getenv("AURELIA_CHROMA_TWITCH_TOKEN", "").strip()
+        self._channel = (channel or os.getenv("AURELIA_CHROMA_TWITCH_CHANNEL", "").strip()).lstrip("#")
         self._username_fallback = username_fallback
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()

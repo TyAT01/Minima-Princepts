@@ -76,8 +76,13 @@ class YouTubeChatAdapter(InputAdapter):
         if self._next_page_token:
             query["pageToken"] = self._next_page_token
         url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?{urlencode(query)}"
-        with urlopen(url, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+
+        def fetch_messages():
+            with urlopen(url, timeout=10) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        loop = asyncio.get_event_loop()
+        payload = await loop.run_in_executor(None, fetch_messages)
         self._next_page_token = payload.get("nextPageToken")
         polling_ms = payload.get("pollingIntervalMillis", 2000)
         for item in payload.get("items", []):

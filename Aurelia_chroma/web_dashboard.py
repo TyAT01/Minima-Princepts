@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import asyncio
+import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pathlib import Path
@@ -57,7 +58,8 @@ templates_html = """
         </div>
         <div class="persona">
             <h3>Persona</h3>
-            <p>Aurelia Vale - The Hedge-Knight Squire</p>
+            <p>{{ persona_name }} - {{ persona_role }}</p>
+            <p><i>{{ persona_archetype }}</i></p>
         </div>
         <h3>System Logs</h3>
         <div class="logs" id="logs">
@@ -87,8 +89,28 @@ templates_html = """
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     from jinja2 import Template
+
+    # Load persona info
+    try:
+        with open(settings.persona_yaml, "r", encoding="utf-8") as f:
+            persona_data = yaml.safe_load(f)
+        char = persona_data.get("character", {})
+        persona_name = char.get("name", "Aurelia")
+        persona_role = char.get("role", "AI Companion")
+        persona_archetype = char.get("archetype", "")
+    except Exception:
+        persona_name = "Aurelia"
+        persona_role = "AI Companion"
+        persona_archetype = ""
+
     template = Template(templates_html)
-    return template.render(model_id=settings.chroma_model_id, data_dir=str(settings.data_dir))
+    return template.render(
+        model_id=settings.chroma_model_id,
+        data_dir=str(settings.data_dir),
+        persona_name=persona_name,
+        persona_role=persona_role,
+        persona_archetype=persona_archetype
+    )
 
 @app.get("/logs-stream")
 async def logs_stream(request: Request):
