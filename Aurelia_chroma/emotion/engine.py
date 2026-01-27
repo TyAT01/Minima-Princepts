@@ -23,7 +23,7 @@ class EmotionEngine:
             self._state.valence = max(
                 0.0, min(1.0, self._state.valence + sentiment_delta)
             )
-        except Exception as exc:  # noqa: BLE001 - keep emotion updates safe
+        except Exception as exc:
             self._logger.exception("Failed to update emotion state: %s", exc)
 
     def express(self, text: str) -> str:
@@ -33,7 +33,7 @@ class EmotionEngine:
             if self._state.valence < 0.3:
                 return f"{text}..."
             return text
-        except Exception as exc:  # noqa: BLE001 - keep expression safe
+        except Exception as exc:
             self._logger.exception("Failed to express emotion: %s", exc)
             return text
 

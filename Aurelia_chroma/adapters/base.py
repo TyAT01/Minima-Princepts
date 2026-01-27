@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterable
 
-from princess_ai.schemas.events import Event
+from adapters.schemas import Event
 
 
 class InputAdapter(ABC):

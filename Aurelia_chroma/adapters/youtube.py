@@ -13,9 +13,8 @@ from typing import Iterable
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-from princess_ai.input_adapters.base import InputAdapter
-from princess_ai.runtime.telemetry import TelemetryHub
-from princess_ai.schemas.events import Event
+from adapters.base import InputAdapter
+from adapters.schemas import Event
 
 
 class YouTubeChatAdapter(InputAdapter):
@@ -26,16 +25,14 @@ class YouTubeChatAdapter(InputAdapter):
         api_key: str | None = None,
         live_chat_id: str | None = None,
         username_fallback: str = "youtube_user",
-        telemetry: TelemetryHub | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
-        self._api_key = api_key or os.getenv("PRINCESS_YOUTUBE_API_KEY", "").strip()
-        self._live_chat_id = live_chat_id or os.getenv("PRINCESS_YOUTUBE_LIVE_CHAT_ID", "").strip()
+        self._api_key = api_key or os.getenv("AURELIA_YOUTUBE_API_KEY", "").strip()
+        self._live_chat_id = live_chat_id or os.getenv("AURELIA_YOUTUBE_LIVE_CHAT_ID", "").strip()
         self._username_fallback = username_fallback
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()
         self._next_page_token: str | None = None
-        self._telemetry = telemetry
         self._recent_ids = deque(maxlen=300)
         self._reconnects = 0
         if self._api_key and self._live_chat_id:
@@ -61,17 +58,9 @@ class YouTubeChatAdapter(InputAdapter):
             try:
                 await self._poll()
                 backoff = 1
-            except Exception as exc:  # noqa: BLE001 - keep adapter resilient
+            except Exception as exc:
                 self._logger.exception("YouTube adapter error: %s", exc)
                 self._reconnects += 1
-                if self._telemetry:
-                    self._telemetry.update_adapter(
-                        "youtube",
-                        connected=False,
-                        last_error=str(exc),
-                        reconnects=self._reconnects,
-                    )
-                    self._telemetry.update_qos(reconnect_count=self._reconnects)
                 await asyncio.sleep(min(backoff, 30))
                 backoff *= 2
 
@@ -87,9 +76,6 @@ class YouTubeChatAdapter(InputAdapter):
         url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?{urlencode(query)}"
         with urlopen(url, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        if self._telemetry:
-            self._telemetry.update_adapter("youtube", connected=True, reconnects=self._reconnects)
-            self._telemetry.update_qos(reconnect_count=self._reconnects)
         self._next_page_token = payload.get("nextPageToken")
         polling_ms = payload.get("pollingIntervalMillis", 2000)
         for item in payload.get("items", []):
@@ -115,8 +101,6 @@ class YouTubeChatAdapter(InputAdapter):
                 },
             )
             await self._queue.put(event)
-            if self._telemetry:
-                self._telemetry.update_adapter("youtube", last_event_at=time.time())
         await asyncio.sleep(polling_ms / 1000)
 
 
@@ -130,7 +114,7 @@ class YouTubeLogAdapter(InputAdapter):
         self._offset = 0
         if not self._log_path:
             self._logger.warning(
-                "YouTubeLogAdapter disabled; set PRINCESS_YOUTUBE_CHAT_LOG to enable file input."
+                "YouTubeLogAdapter disabled; set AURELIA_YOUTUBE_CHAT_LOG to enable file input."
             )
         else:
             self._logger.info("YouTubeLogAdapter watching %s", self._log_path)
@@ -174,5 +158,5 @@ class YouTubeLogAdapter(InputAdapter):
 
     @staticmethod
     def _resolve_log_path() -> Path | None:
-        value = os.getenv("PRINCESS_YOUTUBE_CHAT_LOG", "").strip()
+        value = os.getenv("AURELIA_YOUTUBE_CHAT_LOG", "").strip()
         return Path(value) if value else None

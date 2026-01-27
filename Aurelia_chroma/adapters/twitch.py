@@ -10,9 +10,8 @@ from collections import deque
 from pathlib import Path
 from typing import Iterable
 
-from princess_ai.input_adapters.base import InputAdapter
-from princess_ai.runtime.telemetry import TelemetryHub
-from princess_ai.schemas.events import Event
+from adapters.base import InputAdapter
+from adapters.schemas import Event
 
 
 class TwitchChatAdapter(InputAdapter):
@@ -24,17 +23,15 @@ class TwitchChatAdapter(InputAdapter):
         token: str | None = None,
         channel: str | None = None,
         username_fallback: str = "twitch_user",
-        telemetry: TelemetryHub | None = None,
     ) -> None:
         self._logger = logging.getLogger(__name__)
-        self._username = username or os.getenv("PRINCESS_TWITCH_USERNAME", "").strip()
-        self._token = token or os.getenv("PRINCESS_TWITCH_TOKEN", "").strip()
-        self._channel = (channel or os.getenv("PRINCESS_TWITCH_CHANNEL", "").strip()).lstrip("#")
+        self._username = username or os.getenv("AURELIA_TWITCH_USERNAME", "").strip()
+        self._token = token or os.getenv("AURELIA_TWITCH_TOKEN", "").strip()
+        self._channel = (channel or os.getenv("AURELIA_TWITCH_CHANNEL", "").strip()).lstrip("#")
         self._username_fallback = username_fallback
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()
         self._connected = False
-        self._telemetry = telemetry
         self._recent_ids = deque(maxlen=200)
         self._reconnects = 0
         if self._username and self._token and self._channel:
@@ -60,17 +57,9 @@ class TwitchChatAdapter(InputAdapter):
             try:
                 await self._connect()
                 backoff = 1
-            except Exception as exc:  # noqa: BLE001 - keep adapter resilient
+            except Exception as exc:
                 self._logger.exception("Twitch adapter error: %s", exc)
                 self._reconnects += 1
-                if self._telemetry:
-                    self._telemetry.update_adapter(
-                        "twitch",
-                        connected=False,
-                        last_error=str(exc),
-                        reconnects=self._reconnects,
-                    )
-                    self._telemetry.update_qos(reconnect_count=self._reconnects)
                 await asyncio.sleep(min(backoff, 30))
                 backoff *= 2
 
@@ -83,8 +72,6 @@ class TwitchChatAdapter(InputAdapter):
         writer.write(f"JOIN #{self._channel}\r\n".encode())
         await writer.drain()
         self._connected = True
-        if self._telemetry:
-            self._telemetry.update_adapter("twitch", connected=True)
         while True:
             line = await reader.readline()
             if not line:
@@ -97,12 +84,7 @@ class TwitchChatAdapter(InputAdapter):
             event = self._parse_irc_message(decoded)
             if event:
                 await self._queue.put(event)
-                if self._telemetry:
-                    self._telemetry.update_adapter("twitch", last_event_at=time.time())
         self._connected = False
-        if self._telemetry:
-            self._telemetry.update_adapter("twitch", connected=False, reconnects=self._reconnects)
-            self._telemetry.update_qos(reconnect_count=self._reconnects)
 
     def _parse_irc_message(self, line: str) -> Event | None:
         try:
@@ -133,7 +115,7 @@ class TwitchChatAdapter(InputAdapter):
                 text=message.strip(),
                 metadata={"channel": self._channel, "message_id": message_id},
             )
-        except Exception as exc:  # noqa: BLE001 - keep parsing resilient
+        except Exception as exc:
             self._logger.exception("Failed to parse Twitch message: %s", exc)
             return None
 
@@ -148,7 +130,7 @@ class TwitchLogAdapter(InputAdapter):
         self._offset = 0
         if not self._log_path:
             self._logger.warning(
-                "TwitchLogAdapter disabled; set PRINCESS_TWITCH_CHAT_LOG to enable file input."
+                "TwitchLogAdapter disabled; set AURELIA_TWITCH_CHAT_LOG to enable file input."
             )
         else:
             self._logger.info("TwitchLogAdapter watching %s", self._log_path)
@@ -192,5 +174,5 @@ class TwitchLogAdapter(InputAdapter):
 
     @staticmethod
     def _resolve_log_path() -> Path | None:
-        value = os.getenv("PRINCESS_TWITCH_CHAT_LOG", "").strip()
+        value = os.getenv("AURELIA_TWITCH_CHAT_LOG", "").strip()
         return Path(value) if value else None

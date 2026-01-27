@@ -1,18 +1,50 @@
 #!/bin/bash
-# This script starts the Aurelia Chroma Companion.
-# It will first install the required dependencies,
-# and then it will run the Discord bot.
-#
-# Make sure to set the following environment variables:
-# - AURELIA_CHROMA_DISCORD_TOKEN
-# - AURELIA_CHROMA_DISCORD_GUILD_ID
-# - AURELIA_CHROMA_DISCORD_VOICE_CHANNEL_ID
+
+# --- Aurelia Chroma Launcher (Linux/macOS) ---
+# Optimized for high-spec hardware
+# Supports running from external drives
 
 # Change to the script's directory
 cd "$(dirname "$0")"
 
-echo "Installing dependencies..."
-pip install -r requirements.txt
+echo ""
+echo " 🌸 Starting Aurelia Chroma Setup... 🌸"
+echo ""
 
+# --- Virtual Environment Setup ---
+if [ -d ".venv" ]; then
+    echo "[INFO] Existing virtual environment found."
+else
+    echo "[INFO] Creating new virtual environment in .venv folder..."
+    python3 -m venv .venv
+    if [ $? -ne 0 ]; then
+        echo "[ERROR] Failed to create virtual environment."
+        exit 1
+    fi
+fi
+
+echo "[INFO] Activating virtual environment..."
+source .venv/bin/activate
+if [ $? -ne 0 ]; then
+    echo "[ERROR] Failed to activate virtual environment."
+    exit 1
+fi
+
+echo "[INFO] Ensuring pip is up to date..."
+pip install --upgrade pip > /dev/null 2>&1
+
+echo "[INFO] Installing/Updating dependencies..."
+pip install -r requirements.txt
+if [ $? -ne 0 ]; then
+    echo "[ERROR] Dependency installation failed."
+    exit 1
+fi
+
+echo ""
+echo "[SUCCESS] Environment is ready!"
+echo ""
 echo "Starting Aurelia Chroma Companion..."
+echo ""
+
+# Run the application
 python app.py --discord --web

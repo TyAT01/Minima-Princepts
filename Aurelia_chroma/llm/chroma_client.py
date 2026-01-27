@@ -27,11 +27,15 @@ class ChromaClient:
         dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
         try:
+            # Optimization: Load in 4-bit if CUDA is available to save VRAM on RTX 3070
+            load_in_4bit = torch.cuda.is_available()
+
             self._model = AutoModelForCausalLM.from_pretrained(
                 self._model_id,
                 trust_remote_code=True,
                 device_map="auto",
-                torch_dtype=dtype
+                torch_dtype=dtype,
+                load_in_4bit=load_in_4bit
             )
             self._processor = AutoProcessor.from_pretrained(self._model_id, trust_remote_code=True)
             logger.info("Chroma 1.0 model loaded successfully.")
