@@ -17,6 +17,11 @@ faster-whisper
 chromadb
 sentence-transformers
 
+# Web Dashboard
+fastapi
+uvicorn
+jinja2
+
 # Other
 webrtcvad
 pydantic
