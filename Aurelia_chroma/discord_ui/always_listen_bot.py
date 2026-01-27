@@ -14,6 +14,7 @@ import librosa
 from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
+from orchestrator import AureliaOrchestrator
 from discord_ui.vad_segmenter import VADSegmenter, VADConfig
 
 logger = logging.getLogger(__name__)
@@ -129,17 +130,13 @@ import time
 import random
 
 class AlwaysListenBot:
-    def __init__(self, config: DiscordVoiceConfig, chroma_client: ChromaClient, memory_store: ChromaMemoryStore, whisper_client: WhisperClient):
+    def __init__(self, config: DiscordVoiceConfig, orchestrator: AureliaOrchestrator):
         self._config = config
-        self._chroma_client = chroma_client
-        self._memory_store = memory_store
-        self._whisper_client = whisper_client
+        self._orchestrator = orchestrator
+        self._orchestrator.discord_play_callback = self._play_response
         self._voice_client = None
         self._is_listening = False
         self.bot = None
-        self._current_members = []
-        self._last_interaction_time = time.time()
-        self._autonomous_task = None
         self._response_queue = asyncio.Queue()
         self._worker_task = None
 
@@ -179,40 +176,22 @@ class AlwaysListenBot:
             if message.author == bot.user or not self._voice_client:
                 return
 
-            self._last_interaction_time = time.time()
             thinking_message = await message.channel.send("Thinking...")
-
-            # Search memory for relevant context
-            memories = self._memory_store.search(message.content)
-            long_term_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
-            short_term_context = self._memory_store.get_short_term_context()
-
-            is_alone = len(self._current_members) == 0
-            room_context = f"Room members: {', '.join(self._current_members) if not is_alone else 'None (Aurelia is alone)'}."
-
-            full_context = f"{room_context}\n\n[Short-term Memory]\n{short_term_context}\n\n[Long-term Memory]\n{long_term_context}"
-
-            loop = asyncio.get_event_loop()
-            response_audio, response_text = await loop.run_in_executor(
-                None, self._chroma_client.respond_to_text, message.content, full_context
-            )
-
+            response_text = await self._orchestrator.process_text_input(message.content, message.author.display_name, "discord")
             await thinking_message.edit(content=response_text)
-            await self._play_response(response_audio, response_text, "Text Message")
-
-            self._memory_store.store_memory(message.content, response_text)
           except Exception as e:
             logger.exception("Error in on_message")
-            await self._report_error(str(e))
+            await self._orchestrator.report_error(str(e))
 
         await bot.start(self._config.token)
 
     def _update_members(self):
         if self._voice_client and self._voice_client.channel:
-            self._current_members = [
+            members = [
                 m.display_name for m in self._voice_client.channel.members if not m.bot
             ]
-            logger.info(f"Current members in voice: {self._current_members}")
+            self._orchestrator.current_members = members
+            logger.info(f"Current members in voice: {members}")
 
     async def _connect_to_voice(self, bot):
         guild = bot.get_guild(self._config.guild_id)
@@ -226,56 +205,6 @@ class AlwaysListenBot:
 
         self._voice_client = await channel.connect(cls=ListenVoiceClient)
         asyncio.create_task(self.start_listening())
-        self._autonomous_task = asyncio.create_task(self.autonomous_loop())
-
-    async def autonomous_loop(self):
-        """A background loop that makes Aurelia proactive."""
-        logger.info("Autonomous loop started.")
-        while True:
-            await asyncio.sleep(60) # Check every minute
-
-            now = time.time()
-            idle_time = now - self._last_interaction_time
-
-            # If idle for more than 5 minutes, or if alone and feels like doing something
-            if idle_time > 300:
-                await self._think_and_act()
-
-    async def _think_and_act(self):
-      try:
-        """Aurelia decides what to do when idle."""
-        if not self._voice_client or not self._voice_client.is_connected():
-            return
-
-        # Don't act if already speaking or someone else is speaking
-        if self._voice_client.is_playing():
-            return
-
-        logger.info("Aurelia is thinking autonomously...")
-
-        is_alone = len(self._current_members) == 0
-        state_context = f"Status: {'Alone' if is_alone else 'Idle'}. Members present: {', '.join(self._current_members) if not is_alone else 'None'}."
-
-        # We use respond_to_text with a special prompt for autonomous thought
-        prompt = "You've been quiet for a while. What are you thinking or doing right now? If alone, maybe you are running simulations or talking to yourself. If people are there but quiet, maybe you are bored or want to start a conversation."
-
-        # Get memory context
-        memories = self._memory_store.search("current state")
-        memory_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
-        full_context = f"{state_context}\n\n{memory_context}"
-
-        loop = asyncio.get_event_loop()
-        response_audio, response_text = await loop.run_in_executor(
-            None, self._chroma_client.respond_to_text, prompt, full_context
-        )
-
-        if response_text:
-            logger.info(f"Autonomous action: {response_text}")
-            await self._play_response(response_audio, response_text, "Autonomous Thought")
-            self._last_interaction_time = time.time()
-      except Exception as e:
-        logger.exception("Error in _think_and_act")
-        await self._report_error(str(e))
 
     async def _response_worker(self):
         """Processes the response queue and plays audio sequentially."""
@@ -336,93 +265,25 @@ class AlwaysListenBot:
             self._voice_client.listen(sink)
             logger.info("Started listening in voice channel.")
 
-    async def _report_error(self, error_context: str):
-        """Reports an error in natural language via voice."""
-        logger.error(f"Reporting error: {error_context}")
-
-        # A set of natural language error messages that don't reveal code.
-        error_messages = [
-            "I'm feeling a bit of a glitch in my system... Can someone check my logs?",
-            "My apologies, but I've encountered an internal disturbance. I might need a moment to recalibrate.",
-            "Something isn't quite right in my cognitive processors. I should mention this to my creator.",
-            "Hark! A technical gremlin has invaded my squire gear! I am struggling to process."
-        ]
-        text_response = random.choice(error_messages)
-
-        # We try to generate an audio response for the error message.
-        # If the LLM is down, we might need a fallback, but for now we use the LLM if possible.
-        try:
-            loop = asyncio.get_event_loop()
-            response_audio, _ = await loop.run_in_executor(
-                None, self._chroma_client.respond_to_text, f"Internal Error: {error_context}. Please say: {text_response}", ""
-            )
-            if response_audio is not None:
-                await self._play_response(response_audio, text_response, "Error Report")
-            else:
-                 logger.error("No audio generated for error report.")
-        except Exception as e:
-            logger.critical(f"Failed to even report error via voice: {e}")
-
     async def process_audio_data(self, user, data):
       try:
-        self._last_interaction_time = time.time()
         fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        fp.close() # Close so other processes can read it
+        fp.close()
 
-        # Convert raw bytes to numpy array
         audio_np = np.frombuffer(data, dtype=np.int16)
-
-        # Handle stereo interleaved (L, R, L, R...) to mono
         if audio_np.size % 2 == 0:
             audio_mono = audio_np.reshape(-1, 2).mean(axis=1).astype(np.float32) / 32768.0
         else:
             audio_mono = audio_np.astype(np.float32) / 32768.0
 
-        # Resample to the model's required sample rate (e.g. 24kHz)
         resampled_audio = librosa.resample(audio_mono, orig_sr=self._config.discord_sample_rate, target_sr=self._config.sample_rate)
         sf.write(fp.name, resampled_audio, self._config.sample_rate)
 
-        loop = asyncio.get_event_loop()
-
-        # Transcribe audio to text
-        user_text = await loop.run_in_executor(
-            None, self._whisper_client.transcribe, fp.name
-        )
-
-        if not user_text or not user_text.strip():
-            logger.info("Whisper transcribed empty text.")
-            self._safe_delete(fp.name) # Cleanup even if empty
-            return
-
-        logger.info(f"Transcribed text from {user}: {user_text}")
-
-        # Search memory for relevant context
-        memories = self._memory_store.search(user_text)
-        long_term_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
-        short_term_context = self._memory_store.get_short_term_context()
-
-        is_alone = len(self._current_members) == 0
-        room_context = f"Room members: {', '.join(self._current_members) if not is_alone else 'None (Aurelia is alone)'}."
-
-        full_context = f"{room_context}\n\n[Short-term Memory]\n{short_term_context}\n\n[Long-term Memory]\n{long_term_context}"
-
-        # Generate response using direct audio input for better multimodal understanding
-        response_audio, response_text = await loop.run_in_executor(
-            None, self._chroma_client.respond_to_audio, fp.name, full_context
-        )
-
-        if not response_text:
-            logger.warning("Chroma client returned empty text response.")
-            self._safe_delete(fp.name) # Cleanup
-            return
-
-        await self._play_response(response_audio, response_text, "Voice Interaction")
+        await self._orchestrator.process_audio_input(fp.name, str(user), "discord")
         self._safe_delete(fp.name)
-
-        self._memory_store.store_memory(user_text, response_text)
       except Exception as e:
         logger.exception("Error in process_audio_data")
-        await self._report_error(str(e))
+        await self._orchestrator.report_error(str(e))
 
     def _safe_delete(self, filepath: str):
         try:

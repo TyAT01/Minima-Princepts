@@ -10,6 +10,7 @@ torch>=2.1.0
 transformers>=4.38.0
 accelerate
 soundfile
+sounddevice
 librosa
 faster-whisper
 bitsandbytes

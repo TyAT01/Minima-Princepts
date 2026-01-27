@@ -11,8 +11,11 @@ from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
 from hardware.profiler import HardwareProfiler
+from hardware.audio_player import LocalAudioPlayer
+from orchestrator import AureliaOrchestrator
+from adapters.twitch import TwitchChatAdapter
+from adapters.youtube import YouTubeChatAdapter
 import web_dashboard
-from web_dashboard import run_dashboard
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aurelia_chroma")
@@ -37,11 +40,11 @@ def load_persona_prompt() -> str:
     )
     return system_prompt
 
-async def run_discord(chroma_client: ChromaClient, memory_store: ChromaMemoryStore, whisper_client: WhisperClient) -> None:
+async def run_discord(orchestrator: AureliaOrchestrator) -> None:
     if not (settings.discord_token and settings.discord_guild_id and settings.discord_voice_channel_id):
-        raise RuntimeError(
-            "Discord config missing. Set AURELIA_CHROMA_DISCORD_TOKEN/GUILD_ID/VOICE_CHANNEL_ID"
-        )
+        logger.warning("Discord config missing. Skipping Discord bot.")
+        return
+
     config = DiscordVoiceConfig(
         token=settings.discord_token,
         guild_id=settings.discord_guild_id,
@@ -49,12 +52,7 @@ async def run_discord(chroma_client: ChromaClient, memory_store: ChromaMemorySto
         sample_rate=settings.sample_rate,
         discord_sample_rate=settings.discord_sample_rate,
     )
-    bot = AlwaysListenBot(
-        config=config,
-        chroma_client=chroma_client,
-        memory_store=memory_store,
-        whisper_client=whisper_client
-    )
+    bot = AlwaysListenBot(config=config, orchestrator=orchestrator)
     await bot.run()
 
 async def main() -> None:
@@ -63,6 +61,8 @@ async def main() -> None:
     parser.add_argument("--discord", action="store_true", dest="discord", help="Run Discord always-listening bot")
     parser.add_argument("--no-discord", action="store_false", dest="discord", help="Do not run Discord always-listening bot")
     parser.set_defaults(discord=True)
+    parser.add_argument("--twitch", action="store_true", default=False, help="Run Twitch chat interaction")
+    parser.add_argument("--youtube", action="store_true", default=False, help="Run YouTube chat interaction")
     parser.add_argument("--web", action="store_true", default=False, help="Run web dashboard (default: False)")
     args = parser.parse_args()
 
@@ -92,12 +92,44 @@ async def main() -> None:
 
         memory_store = ChromaMemoryStore(db_path=settings.data_dir / "chroma_db")
 
+        # Initialize streamers if requested
+        twitch_adapter = None
+        if args.twitch:
+            twitch_adapter = TwitchChatAdapter(
+                username=settings.twitch_username,
+                token=settings.twitch_token,
+                channel=settings.twitch_channel
+            )
+
+        youtube_adapter = None
+        if args.youtube:
+            youtube_adapter = YouTubeChatAdapter(
+                api_key=settings.youtube_api_key,
+                token=settings.youtube_token,
+                live_chat_id=settings.youtube_live_chat_id
+            )
+
+        local_audio_player = None
+        if settings.enable_local_audio:
+            local_audio_player = LocalAudioPlayer(sample_rate=settings.sample_rate)
+
+        # Initialize Orchestrator
+        orchestrator = AureliaOrchestrator(
+            chroma_client=chroma_client,
+            memory_store=memory_store,
+            whisper_client=whisper_client,
+            twitch_adapter=twitch_adapter,
+            youtube_adapter=youtube_adapter,
+            local_audio_player=local_audio_player
+        )
+        await orchestrator.start()
+
         tasks = []
         if args.discord:
-            tasks.append(run_discord(chroma_client, memory_store, whisper_client))
+            tasks.append(run_discord(orchestrator))
 
         if args.web:
-            tasks.append(run_dashboard())
+            tasks.append(web_dashboard.run_dashboard())
 
         if tasks:
             await asyncio.gather(*tasks)

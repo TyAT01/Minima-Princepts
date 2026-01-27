@@ -32,6 +32,7 @@ class TwitchChatAdapter(InputAdapter):
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()
         self._connected = False
+        self._writer: asyncio.StreamWriter | None = None
         self._recent_ids = deque(maxlen=200)
         self._reconnects = 0
         if self._username and self._token and self._channel:
@@ -66,25 +67,38 @@ class TwitchChatAdapter(InputAdapter):
     async def _connect(self) -> None:
         self._logger.info("Connecting to Twitch IRC channel #%s", self._channel)
         reader, writer = await asyncio.open_connection("irc.chat.twitch.tv", 6667)
+        self._writer = writer
         writer.write(f"PASS {self._token}\r\n".encode())
         writer.write(f"NICK {self._username}\r\n".encode())
         writer.write("CAP REQ :twitch.tv/tags twitch.tv/commands\r\n".encode())
         writer.write(f"JOIN #{self._channel}\r\n".encode())
         await writer.drain()
         self._connected = True
-        while True:
-            line = await reader.readline()
-            if not line:
-                break
-            decoded = line.decode(errors="ignore").strip()
-            if decoded.startswith("PING"):
-                writer.write("PONG :tmi.twitch.tv\r\n".encode())
-                await writer.drain()
-                continue
-            event = self._parse_irc_message(decoded)
-            if event:
-                await self._queue.put(event)
-        self._connected = False
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                decoded = line.decode(errors="ignore").strip()
+                if decoded.startswith("PING"):
+                    writer.write("PONG :tmi.twitch.tv\r\n".encode())
+                    await writer.drain()
+                    continue
+                event = self._parse_irc_message(decoded)
+                if event:
+                    await self._queue.put(event)
+        finally:
+            self._connected = False
+            self._writer = None
+
+    async def send_message(self, text: str) -> None:
+        """Sends a message to the Twitch channel."""
+        if self._connected and self._writer:
+            self._logger.info(f"Sending message to Twitch: {text}")
+            self._writer.write(f"PRIVMSG #{self._channel} :{text}\r\n".encode())
+            await self._writer.drain()
+        else:
+            self._logger.warning("Twitch adapter not connected; cannot send message.")
 
     def _parse_irc_message(self, line: str) -> Event | None:
         try:
