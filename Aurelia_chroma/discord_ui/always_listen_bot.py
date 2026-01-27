@@ -31,6 +31,12 @@ class AureliaAudioSink(AudioSink):
         self.vad_frame_samples = int(vad_config.sample_rate * 0.02) # 20ms
         self.vad_frame_bytes = self.vad_frame_samples * 2
 
+        # Pre-roll to avoid clipping start of speech
+        self.pre_roll_buffers = {}
+        self.pre_roll_ms = 500
+        self.bytes_per_ms = (vad_config.sample_rate * 2 * 2) // 1000
+        self.pre_roll_max_bytes = self.pre_roll_ms * self.bytes_per_ms
+
     def write(self, user, data):
         # nextcord-ext-listening: data might be VoiceData or raw bytes
         if hasattr(data, "pcm"):
@@ -43,6 +49,7 @@ class AureliaAudioSink(AudioSink):
         if user not in self.buffers:
             self.buffers[user] = bytearray()
             self.vad_buffers[user] = bytearray()
+            self.pre_roll_buffers[user] = bytearray()
             self.silence_count[user] = 0
             self.speaking[user] = False
 
@@ -67,6 +74,8 @@ class AureliaAudioSink(AudioSink):
                 if not self.speaking[user]:
                     logger.info(f"User {user} started speaking.")
                     self.speaking[user] = True
+                    # Prepend pre-roll to main buffer
+                    self.buffers[user].extend(self.pre_roll_buffers[user])
                 self.silence_count[user] = 0
             elif self.speaking[user]:
                 self.silence_count[user] += 1
@@ -82,12 +91,19 @@ class AureliaAudioSink(AudioSink):
         if self.speaking[user]:
             self.buffers[user].extend(raw_data)
 
+        # Always update pre-roll buffer
+        self.pre_roll_buffers[user].extend(raw_data)
+        if len(self.pre_roll_buffers[user]) > self.pre_roll_max_bytes:
+            del self.pre_roll_buffers[user][:-self.pre_roll_max_bytes]
+
+        if self.speaking[user]:
             # 50 frames of 20ms = 1 second of silence
             if self.silence_count[user] > 50:
                 logger.info(f"User {user} finished speaking. Processing segment...")
                 audio_data = bytes(self.buffers[user])
                 self.buffers[user].clear()
                 self.vad_buffers[user].clear()
+                self.pre_roll_buffers[user].clear()
                 self.speaking[user] = False
                 self.silence_count[user] = 0
 
@@ -124,8 +140,11 @@ class AlwaysListenBot:
         self._current_members = []
         self._last_interaction_time = time.time()
         self._autonomous_task = None
+        self._response_queue = asyncio.Queue()
+        self._worker_task = None
 
     async def run(self) -> None:
+        self._worker_task = asyncio.create_task(self._response_worker())
         intents = nextcord.Intents.default()
         intents.message_content = True
         intents.voice_states = True
@@ -258,7 +277,23 @@ class AlwaysListenBot:
         logger.exception("Error in _think_and_act")
         await self._report_error(str(e))
 
+    async def _response_worker(self):
+        """Processes the response queue and plays audio sequentially."""
+        logger.info("Response worker started.")
+        while True:
+            audio_data, text_response, source_label = await self._response_queue.get()
+            try:
+                await self._actually_play_response(audio_data, text_response, source_label)
+            except Exception as e:
+                logger.exception(f"Error in response worker during {source_label}: {e}")
+            finally:
+                self._response_queue.task_done()
+
     async def _play_response(self, audio_data, text_response, source_label):
+        """Puts a response into the queue."""
+        await self._response_queue.put((audio_data, text_response, source_label))
+
+    async def _actually_play_response(self, audio_data, text_response, source_label):
         """Helper to play audio response."""
         if audio_data is None:
             logger.warning(f"No audio data to play for {source_label}")
@@ -268,21 +303,27 @@ class AlwaysListenBot:
         sf.write(response_fp.name, audio_data, self._config.sample_rate)
         response_fp.close()
 
+        play_done = asyncio.Event()
+
         def cleanup_response(error):
             if error:
                 logger.error(f"Error during playback ({source_label}): {error}")
             self._safe_delete(response_fp.name)
+            play_done.set()
 
         if self._voice_client and self._voice_client.is_connected():
-            # Wait if already playing (simple queueing could be better, but for now we just wait)
+            # Ensure we don't start playing while something else is playing
+            # (though the queue should handle this, autonomous actions or errors might skip the queue)
             while self._voice_client.is_playing():
                 await asyncio.sleep(0.1)
 
             try:
                 self._voice_client.play(nextcord.FFmpegPCMAudio(response_fp.name), after=cleanup_response)
+                await play_done.wait()
             except Exception as e:
                 logger.error(f"Failed to play audio: {e}")
                 self._safe_delete(response_fp.name)
+                play_done.set()
         else:
              self._safe_delete(response_fp.name)
 
