@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Aurelia Chroma Dashboard")
 
-log_queue = asyncio.Queue()
+subscribers: set[asyncio.Queue] = set()
 main_loop: asyncio.AbstractEventLoop | None = None
 
 class QueueHandler(logging.Handler):
@@ -18,9 +18,13 @@ class QueueHandler(logging.Handler):
         try:
             if main_loop and main_loop.is_running():
                 msg = self.format(record)
-                main_loop.call_soon_threadsafe(log_queue.put_nowait, msg)
+                main_loop.call_soon_threadsafe(self.broadcast, msg)
         except Exception:
             self.handleError(record)
+
+    def broadcast(self, msg: str):
+        for q in subscribers:
+            q.put_nowait(msg)
 
 # Configure logging to use our QueueHandler
 queue_handler = QueueHandler()
@@ -40,7 +44,7 @@ templates_html = """
         .status { padding: 10px; border-radius: 4px; background: #333; margin-bottom: 20px; }
         .logs { background: #000; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; font-size: 0.9em; line-height: 1.4; }
         .persona { border-left: 4px solid #bb86fc; padding-left: 10px; margin-top: 20px; }
-        .log-entry { margin-bottom: 2px; border-bottom: 1px solid #222; }
+        .log-entry { margin-bottom: 2px; border-bottom: 1px solid #222; white-space: pre-wrap; }
     </style>
 </head>
 <body>
@@ -88,16 +92,26 @@ async def index(request: Request):
 
 @app.get("/logs-stream")
 async def logs_stream(request: Request):
+    q = asyncio.Queue()
+    subscribers.add(q)
+
     async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                break
-            try:
-                # Use wait_for to periodically check for disconnection even if no logs
-                log_msg = await asyncio.wait_for(log_queue.get(), timeout=1.0)
-                yield f"data: {log_msg}\n\n"
-            except asyncio.TimeoutError:
-                continue
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    # Use wait_for to periodically check for disconnection even if no logs
+                    log_msg = await asyncio.wait_for(q.get(), timeout=1.0)
+                    # Handle multi-line logs for SSE
+                    lines = log_msg.splitlines()
+                    sse_msg = "".join([f"data: {line}\n" for line in lines])
+                    yield f"{sse_msg}\n"
+                except asyncio.TimeoutError:
+                    continue
+        finally:
+            subscribers.remove(q)
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 async def run_dashboard(host: str = "0.0.0.0", port: int = 8000):
