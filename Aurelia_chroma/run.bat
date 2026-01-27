@@ -15,4 +15,4 @@ echo "Installing dependencies..."
 pip install -r requirements.txt
 
 echo "Starting Aurelia Chroma Companion..."
-python app.py --discord
+python app.py --discord --web
