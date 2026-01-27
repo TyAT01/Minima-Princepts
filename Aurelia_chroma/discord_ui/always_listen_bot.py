@@ -81,14 +81,11 @@ class AureliaAudioSink(AudioSink):
             elif self.speaking[user]:
                 self.silence_count[user] += 1
 
-            # Accumulate raw data if we are in a speaking state
-            if self.speaking[user]:
-                # Note: This is a bit simplified; ideally we'd map VAD frames back to raw packets
-                # But since we extension raw_data every write, it's roughly aligned.
-                # Actually, the original logic extended in write, let's keep it similar but better.
-                pass
+            # If speech is detected, reset silence counter.
+            # If transitioning from silence to speech, pre-roll is already handled.
+            pass
 
-        # Always extend full buffer if speaking
+        # Always extend full buffer if speaking to ensure we capture the audio for processing.
         if self.speaking[user]:
             self.buffers[user].extend(raw_data)
 
