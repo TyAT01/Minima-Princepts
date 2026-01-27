@@ -10,6 +10,7 @@ from discord_ui.always_listen_bot import AlwaysListenBot, DiscordVoiceConfig
 from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
+from hardware.profiler import HardwareProfiler
 import web_dashboard
 from web_dashboard import run_dashboard
 
@@ -66,6 +67,14 @@ async def main() -> None:
     args = parser.parse_args()
 
     logger.info("Starting Aurelia Chroma...")
+
+    # Log hardware info
+    try:
+        profiler = HardwareProfiler()
+        hw = profiler.detect()
+        logger.info(f"Hardware Detected: CPU Cores: {hw.cpu_count}, RAM: {hw.total_ram_gb}GB, GPU: {hw.gpu_name} ({hw.vram_gb}GB VRAM)")
+    except Exception as e:
+        logger.warning(f"Could not detect hardware: {e}")
 
     # Load persona and initialize clients
     try:

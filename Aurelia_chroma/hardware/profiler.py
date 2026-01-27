@@ -38,7 +38,7 @@ class HardwareProfiler:
                 gpu_name=gpu_name,
                 vram_gb=vram_gb,
             )
-        except Exception as exc:  # noqa: BLE001 - keep runtime resilient
+        except Exception as exc:
             self._logger.exception("Failed to detect hardware profile: %s", exc)
             return HardwareProfile(cpu_count=1, total_ram_gb=0.0, gpu_name=None, vram_gb=None)
 
@@ -47,16 +47,24 @@ class HardwareProfiler:
             if self._psutil:
                 return round(self._psutil.virtual_memory().total / 1024**3, 2)
             return 0.0
-        except Exception as exc:  # noqa: BLE001 - keep runtime resilient
+        except Exception as exc:
             self._logger.exception("Failed to read total RAM: %s", exc)
             return 0.0
 
     def _get_gpu_info(self) -> tuple[Optional[str], Optional[float]]:
         try:
+            # Basic detection for NVIDIA on Windows
             if platform.system().lower() == "windows":
-                return None, None
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        name = torch.cuda.get_device_name(0)
+                        vram = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                        return name, round(vram, 2)
+                except ImportError:
+                    pass
             return None, None
-        except Exception as exc:  # noqa: BLE001 - keep runtime resilient
+        except Exception as exc:
             self._logger.exception("Failed to detect GPU info: %s", exc)
             return None, None
 
@@ -73,7 +81,7 @@ class AdaptiveResourceManager:
             if profile.total_ram_gb and profile.total_ram_gb < 8:
                 return "low_spec"
             return "default"
-        except Exception as exc:  # noqa: BLE001 - keep runtime resilient
+        except Exception as exc:
             self._logger.exception("Failed to choose profile: %s", exc)
             return "default"
 
@@ -86,7 +94,7 @@ class AdaptiveResourceManager:
                 else:
                     self._active_profile = "default"
             return self._active_profile
-        except Exception as exc:  # noqa: BLE001 - keep auto tuning resilient
+        except Exception as exc:
             self._logger.exception("Failed to auto-tune profile: %s", exc)
             return self._active_profile
 
@@ -99,6 +107,6 @@ class AdaptiveResourceManager:
             elif latency_ms < 2000:
                 self._active_profile = "default"
             return self._active_profile
-        except Exception as exc:  # noqa: BLE001 - keep tuning resilient
+        except Exception as exc:
             self._logger.exception("Failed to tune for latency: %s", exc)
             return self._active_profile

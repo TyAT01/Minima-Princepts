@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class WhisperClient:
     """A client for the faster-whisper speech-to-text model."""
 
-    def __init__(self, model_size: str = "base"):
+    def __init__(self, model_size: str = "small"):
         self._model_size = model_size
         self._model = None
 
