@@ -10,6 +10,7 @@ from discord_ui.always_listen_bot import AlwaysListenBot, DiscordVoiceConfig
 from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
+import web_dashboard
 from web_dashboard import run_dashboard
 
 logging.basicConfig(level=logging.INFO)
@@ -56,8 +57,11 @@ async def run_discord(chroma_client: ChromaClient, memory_store: ChromaMemorySto
     await bot.run()
 
 async def main() -> None:
+    web_dashboard.main_loop = asyncio.get_running_loop()
     parser = argparse.ArgumentParser(description="Aurelia Chroma Companion")
-    parser.add_argument("--discord", action="store_true", default=True, help="Run Discord always-listening bot (default: True)")
+    parser.add_argument("--discord", action="store_true", dest="discord", help="Run Discord always-listening bot")
+    parser.add_argument("--no-discord", action="store_false", dest="discord", help="Do not run Discord always-listening bot")
+    parser.set_defaults(discord=True)
     parser.add_argument("--web", action="store_true", default=False, help="Run web dashboard (default: False)")
     args = parser.parse_args()
 
@@ -84,9 +88,7 @@ async def main() -> None:
             tasks.append(run_discord(chroma_client, memory_store, whisper_client))
 
         if args.web:
-            # Run dashboard in a separate thread/process as it's blocking
-            loop = asyncio.get_event_loop()
-            tasks.append(loop.run_in_executor(None, run_dashboard))
+            tasks.append(run_dashboard())
 
         if tasks:
             await asyncio.gather(*tasks)
