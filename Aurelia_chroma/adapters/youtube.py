@@ -28,9 +28,9 @@ class YouTubeChatAdapter(InputAdapter):
         username_fallback: str = "youtube_user",
     ) -> None:
         self._logger = logging.getLogger(__name__)
-        self._api_key = api_key or os.getenv("AURELIA_CHROMA_YOUTUBE_API_KEY", "").strip()
-        self._token = token or os.getenv("AURELIA_CHROMA_YOUTUBE_TOKEN", "").strip()
-        self._live_chat_id = live_chat_id or os.getenv("AURELIA_CHROMA_YOUTUBE_LIVE_CHAT_ID", "").strip()
+        self._api_key = api_key or os.getenv("AURELIA_VALE_YOUTUBE_API_KEY", "").strip()
+        self._token = token or os.getenv("AURELIA_VALE_YOUTUBE_TOKEN", "").strip()
+        self._live_chat_id = live_chat_id or os.getenv("AURELIA_VALE_YOUTUBE_LIVE_CHAT_ID", "").strip()
         self._username_fallback = username_fallback
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()

@@ -1,4 +1,4 @@
-# 🌸 Aurelia Chroma Setup Guide (For Dummies) 🌸
+# 🌸 Aurelia Vale Setup Guide (For Dummies) 🌸
 
 Welcome! This guide will help you get your very own **Aurelia AI** up and running. No master's degree in computer science required!
 
@@ -56,9 +56,9 @@ Now we need to tell Aurelia which server and channel to join.
 Inside the `Aurelia_chroma` folder, create a new file named `.env` and paste this into it, replacing the values with your own:
 
 ```env
-AURELIA_CHROMA_DISCORD_TOKEN=your_token_here
-AURELIA_CHROMA_DISCORD_GUILD_ID=your_server_id_here
-AURELIA_CHROMA_DISCORD_VOICE_CHANNEL_ID=your_channel_id_here
+AURELIA_VALE_DISCORD_TOKEN=your_token_here
+AURELIA_VALE_DISCORD_GUILD_ID=your_server_id_here
+AURELIA_VALE_DISCORD_VOICE_CHANNEL_ID=your_channel_id_here
 ```
 
 ---

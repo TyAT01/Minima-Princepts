@@ -18,7 +18,7 @@ from adapters.youtube import YouTubeChatAdapter
 import web_dashboard
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("aurelia_chroma")
+logger = logging.getLogger("aurelia_vale")
 
 def load_persona_prompt() -> str:
     """Loads the persona from the yaml file and constructs the system prompt."""
@@ -57,7 +57,7 @@ async def run_discord(orchestrator: AureliaOrchestrator) -> None:
 
 async def main() -> None:
     web_dashboard.main_loop = asyncio.get_running_loop()
-    parser = argparse.ArgumentParser(description="Aurelia Chroma Companion")
+    parser = argparse.ArgumentParser(description="Aurelia Vale Companion")
     parser.add_argument("--discord", action="store_true", dest="discord", help="Run Discord always-listening bot")
     parser.add_argument("--no-discord", action="store_false", dest="discord", help="Do not run Discord always-listening bot")
     parser.set_defaults(discord=True)
@@ -66,7 +66,7 @@ async def main() -> None:
     parser.add_argument("--web", action="store_true", default=False, help="Run web dashboard (default: False)")
     args = parser.parse_args()
 
-    logger.info("Starting Aurelia Chroma...")
+    logger.info("Starting Aurelia Vale...")
 
     # Log hardware info
     try:

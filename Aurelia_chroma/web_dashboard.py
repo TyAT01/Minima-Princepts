@@ -9,7 +9,7 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Aurelia Chroma Dashboard")
+app = FastAPI(title="Aurelia Vale Dashboard")
 
 subscribers: set[asyncio.Queue] = set()
 main_loop: asyncio.AbstractEventLoop | None = None
@@ -37,7 +37,7 @@ templates_html = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Aurelia Chroma Dashboard</title>
+    <title>Aurelia Vale Dashboard</title>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: #e0e0e0; margin: 20px; }
         .container { max-width: 800px; margin: auto; background: #2a2a2a; padding: 20px; border-radius: 8px; }
@@ -50,7 +50,7 @@ templates_html = """
 </head>
 <body>
     <div class="container">
-        <h1>Aurelia Chroma Companion</h1>
+        <h1>Aurelia Vale Companion</h1>
         <div class="status">
             <strong>Status:</strong> Online<br>
             <strong>Model:</strong> {{ model_id }}<br>

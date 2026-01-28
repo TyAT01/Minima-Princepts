@@ -1,14 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
 
-rem --- Aurelia Chroma Launcher ---
+rem --- Aurelia Vale Launcher ---
 rem Optimized for RTX 3070, i9 9900k, 64GB RAM
 rem Supports running from external drives (e.g. F:)
 
 cd /d "%~dp0"
 
 echo.
-echo  🌸 Starting Aurelia Chroma Setup... 🌸
+echo  🌸 Starting Aurelia Vale Setup... 🌸
 echo.
 
 rem Check for administrative privileges
@@ -64,7 +64,7 @@ if %errorLevel% neq 0 (
 echo.
 echo [SUCCESS] Environment is ready!
 echo.
-echo Starting Aurelia Chroma Companion...
+echo Starting Aurelia Vale Companion...
 echo.
 
 rem Run the application with Discord and Web Dashboard enabled by default

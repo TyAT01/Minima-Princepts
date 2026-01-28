@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# --- Aurelia Chroma Launcher (Linux/macOS) ---
+# --- Aurelia Vale Launcher (Linux/macOS) ---
 # Optimized for high-spec hardware
 # Supports running from external drives
 
@@ -8,7 +8,7 @@
 cd "$(dirname "$0")"
 
 echo ""
-echo " 🌸 Starting Aurelia Chroma Setup... 🌸"
+echo " 🌸 Starting Aurelia Vale Setup... 🌸"
 echo ""
 
 # --- Virtual Environment Setup ---
@@ -43,7 +43,7 @@ fi
 echo ""
 echo "[SUCCESS] Environment is ready!"
 echo ""
-echo "Starting Aurelia Chroma Companion..."
+echo "Starting Aurelia Vale Companion..."
 echo ""
 
 # Run the application
