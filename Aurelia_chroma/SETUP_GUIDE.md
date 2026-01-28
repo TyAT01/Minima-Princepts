@@ -85,6 +85,29 @@ Once Aurelia is running, you can see what she's thinking in real-time!
 
 ---
 
+## 🧠 Evolution & Learning
+
+Aurelia is designed to learn and evolve from her interactions.
+
+### Autonomous Learning
+While running, Aurelia periodically:
+- **Reflects** on recent conversations to extract "Lessons Learned".
+- Runs **Mental Simulations** when idle to improve her responses in various scenarios (handling irate viewers, lore deep-dives, etc.).
+
+These insights are stored in her long-term memory and will influence her future behavior and responses.
+
+### Standalone Simulations
+You can run simulations to help Aurelia learn even when the main bot is not active. This is useful for "training" her on specific scenarios.
+
+To run the standalone simulation script:
+```bash
+# From the Aurelia_chroma directory
+python run_sim.py
+```
+This will run a series of scenarios, allowing Aurelia to reflect and update her memory store.
+
+---
+
 ## ❓ Troubleshooting
 
 - **"Command not found: python"**: Make sure Python is installed and you checked "Add to PATH".
