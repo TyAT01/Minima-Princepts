@@ -191,23 +191,31 @@ class AureliaOrchestrator:
         """Background loop for proactive behavior and learning."""
         logger.info("Autonomous loop started.")
         while self.is_running:
-            await asyncio.sleep(30) # Check every 30 seconds
+            await asyncio.sleep(20) # Check more frequently for better responsiveness
             self.cycle_count += 1
 
             now = time.time()
             idle_time = now - self.last_interaction_time
 
-            # 1. Periodic Reflection (every 20 cycles ~ 10 mins)
-            if self.cycle_count % 20 == 0:
+            # 1. Periodic Reflection (every 30 cycles ~ 10 mins at 20s intervals)
+            if self.cycle_count % 30 == 0:
                 await self.reflector.reflect_on_recent_interactions()
 
-            # 2. Idle behaviors
-            if idle_time > 300: # 5 minutes idle
-                # 30% chance to run a mental simulation instead of just speaking
+            # 2. Tiered Idle behaviors (Aurelia hates dead air!)
+            if 60 <= idle_time < 120:
+                # 15% chance for light filler every 20s
+                if random.random() < 0.15:
+                    await self.think_and_act(style="filler")
+            elif 120 <= idle_time < 300:
+                # 25% chance to drive conversation every 20s
+                if random.random() < 0.25:
+                    await self.think_and_act(style="conversation_driver")
+            elif idle_time >= 300:
+                # Original deep idle logic
                 if random.random() < 0.3:
                     await self.run_autonomous_simulation()
                 else:
-                    await self.think_and_act()
+                    await self.think_and_act(style="deep_thought")
 
     async def run_autonomous_simulation(self):
         """Runs a simulation during idle time to improve skills."""
@@ -215,13 +223,34 @@ class AureliaOrchestrator:
         await self.simulation_manager.run_simulation(self.chroma_client, self.memory_store)
         self.last_interaction_time = time.time() # Reset idle timer after 'thinking'
 
-    async def think_and_act(self):
+    async def think_and_act(self, style: str = "default"):
         """Aurelia decides to speak or act on her own."""
-        logger.info("Aurelia is thinking autonomously...")
+        logger.info(f"Aurelia is thinking autonomously (style: {style})...")
 
         is_alone = len(self.current_members) == 0
-        state_context = f"Status: {'Alone' if is_alone else 'Idle'}. Members present: {', '.join(self.current_members) if not is_alone else 'None'}."
-        prompt = "You've been quiet. What's on your mind? Share a thought with your friends or chat."
+
+        # Determine silence type context
+        if is_alone:
+            silence_context = "You are currently alone in the room/stream. It's very quiet."
+        else:
+            silence_context = f"There are people present ({', '.join(self.current_members)}), but they are being quiet."
+
+        has_chat = self.twitch_adapter is not None or self.youtube_adapter is not None
+        if has_chat:
+            silence_context += " The stream chat is also silent."
+
+        state_context = f"Status: {'Alone' if is_alone else 'Idle'}. {silence_context}"
+
+        if style == "filler":
+            prompt = "It's a bit quiet. Share a brief inner monologue or a small 'filler' comment about what you're doing or thinking. Keep it short and natural."
+        elif style == "conversation_driver":
+            prompt = "The silence is starting to bother you. As a streamer who hates dead air, try to start a conversation. Ask a question to those present or share an interesting thought to get people talking."
+        elif style == "deep_thought":
+            prompt = "You've been quiet for a while. Share a deeper existential thought or reflect on your journey to become human. Don't let the dead air win."
+        else:
+            prompt = "You've been quiet. What's on your mind? Share a thought with your friends or chat."
+
+        prompt += " Remember: You hate dead air, but don't be annoying."
 
         memories = self.memory_store.search("current state")
         memory_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
@@ -233,7 +262,7 @@ class AureliaOrchestrator:
         )
 
         if response_text:
-            logger.info(f"Autonomous action: {response_text}")
+            logger.info(f"Autonomous action ({style}): {response_text}")
             # Broadcast autonomous actions to all platforms
             await self.dispatch_response(response_text, audio_data, "autonomous", broadcast=True)
             self.last_interaction_time = time.time()
