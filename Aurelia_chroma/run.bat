@@ -67,8 +67,8 @@ echo.
 echo Starting Aurelia Vale Companion...
 echo.
 
-rem Run the application with Discord and Web Dashboard enabled by default
-python app.py --discord --web
+rem Run the application
+python app.py %*
 
 if %errorLevel% neq 0 (
     echo.

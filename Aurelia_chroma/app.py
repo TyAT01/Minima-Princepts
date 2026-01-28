@@ -63,7 +63,8 @@ async def main() -> None:
     parser.set_defaults(discord=True)
     parser.add_argument("--twitch", action="store_true", default=False, help="Run Twitch chat interaction")
     parser.add_argument("--youtube", action="store_true", default=False, help="Run YouTube chat interaction")
-    parser.add_argument("--web", action="store_true", default=False, help="Run web dashboard (default: False)")
+    parser.add_argument("--web", action="store_true", default=True, help="Run web dashboard (default: True)")
+    parser.add_argument("--no-web", action="store_false", dest="web", help="Do not run web dashboard")
     args = parser.parse_args()
 
     logger.info("Starting Aurelia Vale...")

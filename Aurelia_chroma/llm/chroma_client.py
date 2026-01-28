@@ -28,14 +28,22 @@ class ChromaClient:
 
         try:
             # Optimization: Load in 4-bit if CUDA is available to save VRAM on RTX 3070
-            load_in_4bit = torch.cuda.is_available()
+            quant_config = None
+            if torch.cuda.is_available():
+                from transformers import BitsAndBytesConfig
+                quant_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True
+                )
 
             self._model = AutoModelForCausalLM.from_pretrained(
                 self._model_id,
                 trust_remote_code=True,
                 device_map="auto",
                 torch_dtype=dtype,
-                load_in_4bit=load_in_4bit
+                quantization_config=quant_config
             )
             self._processor = AutoProcessor.from_pretrained(self._model_id, trust_remote_code=True)
             logger.info("Chroma 1.0 model loaded successfully.")
@@ -100,25 +108,33 @@ class ChromaClient:
             audio_np = None
             text_response = None
 
-            if hasattr(self._model, "codec_model") and output.ndim == 3:
-                # Expected shape for multimodal output (batch, seq, codebooks)
-                audio_values = self._model.codec_model.decode(output.permute(0, 2, 1)).audio_values
-                audio_np = audio_values[0].cpu().detach().numpy()
-            elif output.ndim == 2:
-                # Standard 2D output (batch, seq)
-                logger.debug("Output is 2D, attempting to decode as text only.")
+            # Handle multimodal output
+            try:
+                if hasattr(self._model, "codec_model") and output.ndim == 3:
+                    # Expected shape for multimodal output (batch, seq, codebooks)
+                    audio_values = self._model.codec_model.decode(output.permute(0, 2, 1)).audio_values
+                    audio_np = audio_values[0].cpu().detach().numpy()
+                elif output.ndim == 2:
+                    # Standard 2D output (batch, seq)
+                    logger.debug("Output is 2D, attempting to decode as text only.")
+            except Exception as audio_err:
+                logger.error(f"Failed to extract audio from output: {audio_err}")
 
             # Text decoding - handle both prompt+output and interleaved formats
             # Usually we want only the newly generated tokens
-            input_len = inputs.get("input_ids", torch.tensor([])).shape[-1]
+            try:
+                input_len = inputs.get("input_ids", torch.tensor([])).shape[-1]
 
-            if output.ndim == 3:
-                # If 3D, take the first codebook (usually contains text tokens if interleaved)
-                generated_tokens = output[0, input_len:, 0]
-            else:
-                generated_tokens = output[0, input_len:]
+                if output.ndim == 3:
+                    # If 3D, take the first codebook (usually contains text tokens if interleaved)
+                    generated_tokens = output[0, input_len:, 0]
+                else:
+                    generated_tokens = output[0, input_len:]
 
-            text_response = self._processor.decode(generated_tokens, skip_special_tokens=True)
+                text_response = self._processor.decode(generated_tokens, skip_special_tokens=True)
+            except Exception as text_err:
+                logger.error(f"Failed to decode text from output: {text_err}")
+                text_response = "I have the words, but they are tangled in my circuits."
 
             return audio_np, text_response
         except Exception as e:

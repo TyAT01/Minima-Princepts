@@ -164,8 +164,19 @@ class AlwaysListenBot:
 
         @bot.event
         async def on_voice_state_update(member, before, after):
-            if self._voice_client and (before.channel == self._voice_client.channel or after.channel == self._voice_client.channel):
-                self._update_members()
+            if member == bot.user:
+                return
+
+            if self._voice_client:
+                # Member joined our channel
+                if after.channel == self._voice_client.channel and before.channel != self._voice_client.channel:
+                    self._update_members()
+                    await self._orchestrator.handle_event("member_join", {"user": member.display_name, "source": "discord"})
+
+                # Member left our channel
+                elif before.channel == self._voice_client.channel and after.channel != self._voice_client.channel:
+                    self._update_members()
+                    await self._orchestrator.handle_event("member_leave", {"user": member.display_name, "source": "discord"})
 
         @bot.event
         async def on_message(message: nextcord.Message):

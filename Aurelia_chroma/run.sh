@@ -47,4 +47,4 @@ echo "Starting Aurelia Vale Companion..."
 echo ""
 
 # Run the application
-python app.py --discord --web
+python app.py "$@"
