@@ -149,6 +149,9 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Detect and apply autonomous cadence adjustments, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
+
             self.memory_store.store_memory(user_text, response_text)
             await self.dispatch_response(response_text, audio_data, source)
             self.cadence_controller.last_spoke_ts = time.time()
@@ -414,6 +417,9 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Detect and apply autonomous cadence adjustments, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
+
             await self.dispatch_response(response_text, audio_data, source, broadcast=(source != "discord"))
             self.last_interaction_time = time.time()
             self.cadence_controller.last_spoke_ts = time.time()

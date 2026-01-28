@@ -48,6 +48,8 @@ def load_persona_prompt() -> str:
         f"You possess the ability to understand auditory inputs and generate both text and speech.\n\n"
         f"AUTONOMOUS CADENCE CONTROL:\n"
         f"You can adjust your own speech timing parameters by including a tag in your thoughts or responses. "
+        f"IMPORTANT: These tags are SILENT internal commands and will be automatically stripped from your response before being shown to the audience. "
+        f"Place them at the very end of your response text. "
         f"Use the format [CADENCE: min_gap_s=X, soft_gap_s=Y, max_silence_s=Z, burst_max_items=N].\n"
         f"- min_gap_s: Minimum seconds between responses (1.0 - 5.0).\n"
         f"- soft_gap_s: Typical gap when chat is active (2.0 - 10.0).\n"
