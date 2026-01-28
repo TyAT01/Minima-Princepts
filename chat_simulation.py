@@ -64,7 +64,7 @@ async def run_simulation():
 
     # 5. Simulate Chat
     print("\n" + "="*40)
-    print("🌸 AURELIA CHROMA CHAT SIMULATION 🌸")
+    print("🌸 AURELIA VALE CHAT SIMULATION 🌸")
     print("="*40 + "\n")
 
     user_inputs = [

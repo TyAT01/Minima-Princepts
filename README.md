@@ -1,6 +1,6 @@
-# 🌸 Aurelia Chroma 🌸
+# 🌸 Aurelia Vale 🌸
 
-Aurelia Chroma is an advanced, multimodal AI companion designed for streamers and virtual interaction. She is powered by the **Chroma-4B** model, which enables her to understand audio directly and respond with both text and voice.
+Aurelia Vale is an advanced, multimodal AI companion designed for streamers and virtual interaction. She is powered by the **Chroma-4B** model, which enables her to understand audio directly and respond with both text and voice.
 
 ## 🚀 Key Features
 - **Multimodal Understanding**: Processes raw audio input for better emotional and contextual awareness.
@@ -27,9 +27,9 @@ Aurelia Chroma is an advanced, multimodal AI companion designed for streamers an
 ### 3. Configuration
 Copy `Aurelia_chroma/.env.example` to `Aurelia_chroma/.env` and fill in your API tokens and channel IDs:
 ```env
-AURELIA_CHROMA_DISCORD_TOKEN=your_discord_token
-AURELIA_CHROMA_DISCORD_GUILD_ID=your_guild_id
-AURELIA_CHROMA_DISCORD_VOICE_CHANNEL_ID=your_voice_channel_id
+AURELIA_VALE_DISCORD_TOKEN=your_discord_token
+AURELIA_VALE_DISCORD_GUILD_ID=your_guild_id
+AURELIA_VALE_DISCORD_VOICE_CHANNEL_ID=your_voice_channel_id
 ```
 
 ## 🖥️ Web Dashboard

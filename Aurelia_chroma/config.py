@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 
 class Settings(BaseSettings):
-    app_name: str = "Aurelia Chroma Companion"
+    app_name: str = "Aurelia Vale Companion"
     persona_yaml: Path = Field(default=Path(__file__).resolve().parent / "aurelia_sheet.yaml")
     data_dir: Path = Field(default=Path(__file__).resolve().parent / "data")
 
@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     discord_sample_rate: int = 48000
 
     class Config:
-        env_prefix = "AURELIA_CHROMA_"
+        env_prefix = "AURELIA_VALE_"
         case_sensitive = False
         env_file = ".env"
         env_file_encoding = "utf-8"
