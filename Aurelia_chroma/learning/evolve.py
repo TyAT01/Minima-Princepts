@@ -20,10 +20,10 @@ class Reflector:
             return None
 
         prompt = (
-            "Review your recent interactions below and summarize what you've learned "
-            "about the people you've talked to, your own reactions, or how you can be a better companion.\n\n"
+            "Review your recent REAL-WORLD interactions below. These are actual conversations with people in your community.\n"
+            "Summarize what you've learned about the people you've talked to, your own reactions, or how you can be a better companion to them.\n\n"
             f"{short_term_context}\n\n"
-            "Provide a concise 'Insight' that will be stored in your long-term memory."
+            "Provide a concise 'Insight' that will be stored in your long-term memory. Emphasize what you've learned from these real human experiences."
         )
 
         loop = asyncio.get_event_loop()

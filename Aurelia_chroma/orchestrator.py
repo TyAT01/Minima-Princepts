@@ -59,31 +59,49 @@ class AureliaOrchestrator:
             self.autonomous_task.cancel()
         logger.info("Aurelia Orchestrator stopped.")
 
-    async def process_text_input(self, text: str, user: str, source: str) -> str:
-        """Processes text input from any source and generates a response."""
-        self.last_interaction_time = time.time()
-        logger.info(f"Processing input from {user} ({source}): {text}")
-
-        # Search memory for relevant context
-        memories = self.memory_store.search(text, filter_type="interaction")
-        long_term_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
-        short_term_context = self.memory_store.get_short_term_context()
-
-        # Fetch relevant insights/lessons
-        insights = self.memory_store.search(text, filter_type="insight", n_results=3)
-        insights_context = "\n".join([f"- {ins['insight']}" for ins in insights]) if insights else "No specific lessons learned yet."
-
+    def _build_full_context(self, user: str, source: str, query_text: str) -> str:
+        """Centralized method to build the prompt context with categorized insights."""
+        # 1. Platform & User Context
         room_context = f"Platform: {source}. User: {user}."
         if source == "discord":
             is_alone = len(self.current_members) == 0
             room_context += f" Members in voice: {', '.join(self.current_members) if not is_alone else 'None'}."
 
+        # 2. Memory Retrieval
+        memories = self.memory_store.search(query_text, filter_type="interaction")
+        long_term_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
+        short_term_context = self.memory_store.get_short_term_context()
+
+        # 3. Categorized Insights
+        # We increase n_results to 5 to get a better spread of both types
+        insights = self.memory_store.search(query_text, filter_type="insight", n_results=5)
+
+        real_insights = [i['insight'] for i in insights if i.get("source") == "periodic_reflection"]
+        sim_insights = [i['insight'] for i in insights if i.get("source", "").startswith("sim_")]
+
+        insights_sections = []
+        if real_insights:
+            insights_sections.append("### [REAL-WORLD EXPERIENCE & LESSONS]\n" + "\n".join([f"- {ins}" for ins in real_insights]))
+        if sim_insights:
+            insights_sections.append("### [SIMULATED TRAINING & GROWTH DATA]\n" + "\n".join([f"- {ins}" for ins in sim_insights]))
+
+        insights_context = "\n\n".join(insights_sections) if insights_sections else "No specific lessons learned yet."
+
+        # 4. Final Context Assembly
         full_context = (
             f"{room_context}\n\n"
-            f"[Lessons Learned & Evolution]\n{insights_context}\n\n"
+            f"{insights_context}\n\n"
             f"[Short-term Memory]\n{short_term_context}\n\n"
             f"[Long-term Memory]\n{long_term_context}"
         )
+        return full_context
+
+    async def process_text_input(self, text: str, user: str, source: str) -> str:
+        """Processes text input from any source and generates a response."""
+        self.last_interaction_time = time.time()
+        logger.info(f"Processing input from {user} ({source}): {text}")
+
+        full_context = self._build_full_context(user, source, text)
 
         loop = asyncio.get_event_loop()
         audio_data, response_text = await loop.run_in_executor(
@@ -114,23 +132,7 @@ class AureliaOrchestrator:
 
         logger.info(f"Transcribed audio from {user} ({source}): {user_text}")
 
-        # Search memory for relevant context
-        memories = self.memory_store.search(user_text, filter_type="interaction")
-        long_term_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
-        short_term_context = self.memory_store.get_short_term_context()
-
-        # Fetch relevant insights/lessons
-        insights = self.memory_store.search(user_text, filter_type="insight", n_results=3)
-        insights_context = "\n".join([f"- {ins['insight']}" for ins in insights]) if insights else "No specific lessons learned yet."
-
-        is_alone = len(self.current_members) == 0
-        room_context = f"Platform: {source}. User: {user}. Members in voice: {', '.join(self.current_members) if not is_alone else 'None'}."
-        full_context = (
-            f"{room_context}\n\n"
-            f"[Lessons Learned & Evolution]\n{insights_context}\n\n"
-            f"[Short-term Memory]\n{short_term_context}\n\n"
-            f"[Long-term Memory]\n{long_term_context}"
-        )
+        full_context = self._build_full_context(user, source, user_text)
 
         # Generate response using direct audio input
         audio_data, response_text = await loop.run_in_executor(
@@ -174,10 +176,10 @@ class AureliaOrchestrator:
         while self.is_running:
             events = []
             if self.twitch_adapter:
-                events.extend(list(self.twitch_adapter.poll()))
+                events.extend(self.twitch_adapter.poll())
 
             if self.youtube_adapter:
-                events.extend(list(self.youtube_adapter.poll()))
+                events.extend(self.youtube_adapter.poll())
 
             # Process all gathered events sequentially to maintain conversation context
             for event in events:

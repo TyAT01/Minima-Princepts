@@ -87,8 +87,9 @@ class SimulationManager:
         # 2. Self-Evaluation / Reflection
         eval_prompt = (
             f"You just completed a simulation: {scenario.title}.\n"
+            "This was a synthetic training scenario (a simulation) to help you evolve, not a real interaction with humans.\n"
             f"Your response was: '{response_text}'\n\n"
-            "Now, reflect on your performance. Did you meet the goal? "
+            "Now, reflect on your performance. How did this simulation help you grow or learn a lesson? "
             "Rate your performance on a scale of 1 to 10. "
             "Provide your response in the format: 'Score: [N/10]. Insight: [Your lesson learned]'"
         )
