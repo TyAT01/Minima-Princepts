@@ -8,6 +8,8 @@ from typing import Optional, List, Dict, Any
 from llm.chroma_client import ChromaClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
+from learning.simulation import SimulationManager
+from learning.evolve import Reflector
 from adapters.twitch import TwitchChatAdapter
 from adapters.youtube import YouTubeChatAdapter
 from adapters.schemas import Event
@@ -39,6 +41,11 @@ class AureliaOrchestrator:
         # Callback for playing audio via Discord (set by AlwaysListenBot)
         self.discord_play_callback = None
 
+        # Learning components
+        self.simulation_manager = SimulationManager()
+        self.reflector = Reflector(chroma_client, memory_store)
+        self.cycle_count = 0
+
     async def start(self):
         self.is_running = True
         self.autonomous_task = asyncio.create_task(self.autonomous_loop())
@@ -58,16 +65,25 @@ class AureliaOrchestrator:
         logger.info(f"Processing input from {user} ({source}): {text}")
 
         # Search memory for relevant context
-        memories = self.memory_store.search(text)
+        memories = self.memory_store.search(text, filter_type="interaction")
         long_term_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
         short_term_context = self.memory_store.get_short_term_context()
+
+        # Fetch relevant insights/lessons
+        insights = self.memory_store.search(text, filter_type="insight", n_results=3)
+        insights_context = "\n".join([f"- {ins['insight']}" for ins in insights]) if insights else "No specific lessons learned yet."
 
         room_context = f"Platform: {source}. User: {user}."
         if source == "discord":
             is_alone = len(self.current_members) == 0
             room_context += f" Members in voice: {', '.join(self.current_members) if not is_alone else 'None'}."
 
-        full_context = f"{room_context}\n\n[Short-term Memory]\n{short_term_context}\n\n[Long-term Memory]\n{long_term_context}"
+        full_context = (
+            f"{room_context}\n\n"
+            f"[Lessons Learned & Evolution]\n{insights_context}\n\n"
+            f"[Short-term Memory]\n{short_term_context}\n\n"
+            f"[Long-term Memory]\n{long_term_context}"
+        )
 
         loop = asyncio.get_event_loop()
         audio_data, response_text = await loop.run_in_executor(
@@ -98,13 +114,23 @@ class AureliaOrchestrator:
 
         logger.info(f"Transcribed audio from {user} ({source}): {user_text}")
 
-        memories = self.memory_store.search(user_text)
+        # Search memory for relevant context
+        memories = self.memory_store.search(user_text, filter_type="interaction")
         long_term_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
         short_term_context = self.memory_store.get_short_term_context()
 
+        # Fetch relevant insights/lessons
+        insights = self.memory_store.search(user_text, filter_type="insight", n_results=3)
+        insights_context = "\n".join([f"- {ins['insight']}" for ins in insights]) if insights else "No specific lessons learned yet."
+
         is_alone = len(self.current_members) == 0
         room_context = f"Platform: {source}. User: {user}. Members in voice: {', '.join(self.current_members) if not is_alone else 'None'}."
-        full_context = f"{room_context}\n\n[Short-term Memory]\n{short_term_context}\n\n[Long-term Memory]\n{long_term_context}"
+        full_context = (
+            f"{room_context}\n\n"
+            f"[Lessons Learned & Evolution]\n{insights_context}\n\n"
+            f"[Short-term Memory]\n{short_term_context}\n\n"
+            f"[Long-term Memory]\n{long_term_context}"
+        )
 
         # Generate response using direct audio input
         audio_data, response_text = await loop.run_in_executor(
@@ -160,16 +186,32 @@ class AureliaOrchestrator:
             await asyncio.sleep(1)
 
     async def autonomous_loop(self):
-        """Background loop for proactive behavior."""
+        """Background loop for proactive behavior and learning."""
         logger.info("Autonomous loop started.")
         while self.is_running:
             await asyncio.sleep(30) # Check every 30 seconds
+            self.cycle_count += 1
 
             now = time.time()
             idle_time = now - self.last_interaction_time
 
+            # 1. Periodic Reflection (every 20 cycles ~ 10 mins)
+            if self.cycle_count % 20 == 0:
+                await self.reflector.reflect_on_recent_interactions()
+
+            # 2. Idle behaviors
             if idle_time > 300: # 5 minutes idle
-                await self.think_and_act()
+                # 30% chance to run a mental simulation instead of just speaking
+                if random.random() < 0.3:
+                    await self.run_autonomous_simulation()
+                else:
+                    await self.think_and_act()
+
+    async def run_autonomous_simulation(self):
+        """Runs a simulation during idle time to improve skills."""
+        logger.info("Aurelia is running an autonomous mental simulation...")
+        await self.simulation_manager.run_simulation(self.chroma_client, self.memory_store)
+        self.last_interaction_time = time.time() # Reset idle timer after 'thinking'
 
     async def think_and_act(self):
         """Aurelia decides to speak or act on her own."""

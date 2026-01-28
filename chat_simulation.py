@@ -45,7 +45,12 @@ async def run_simulation():
 
     # 3. Mock MemoryStore
     mock_memory = MagicMock()
-    mock_memory.search.return_value = [{"user_text": "previous hello", "bot_text": "previous hi"}]
+    def mock_search(query, n_results=5, filter_type=None):
+        if filter_type == "insight":
+            return [{"insight": "Always be polite to travelers.", "type": "insight"}]
+        return [{"user_text": "previous hello", "bot_text": "previous hi", "type": "interaction"}]
+
+    mock_memory.search.side_effect = mock_search
     mock_memory.get_short_term_context.return_value = "User: hi, Aurelia: hello"
 
     # 4. Initialize Orchestrator
