@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import random
+import re
 from typing import Optional, List, Dict, Any
 
 from llm.chroma_client import ChromaClient
@@ -113,6 +114,9 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Detect and apply autonomous cadence adjustments
+            self._extract_and_apply_cadence_commands(response_text)
+
             # Store in memory
             self.memory_store.store_memory(text, response_text)
 
@@ -271,6 +275,25 @@ class AureliaOrchestrator:
         await self.simulation_manager.run_simulation(self.chroma_client, self.memory_store)
         self.last_interaction_time = time.time() # Reset idle timer after 'thinking'
 
+    def _extract_and_apply_cadence_commands(self, text: str):
+        """Scans for [CADENCE: key=value] tags and updates the controller."""
+        pattern = r"\[CADENCE:\s*(.*?)\]"
+        matches = re.findall(pattern, text, re.IGNORECASE)
+
+        for match in matches:
+            # match is like "min_gap_s=2.5, max_silence_s=30"
+            parts = [p.strip() for p in match.split(",")]
+            updates = {}
+            for p in parts:
+                if "=" in p:
+                    k, v = p.split("=", 1)
+                    try:
+                        updates[k.strip()] = float(v.strip())
+                    except ValueError:
+                        continue
+            if updates:
+                self.cadence_controller.update_config(**updates)
+
     async def think_and_act(self, style: str = "default", intent: Optional[Any] = None):
         """Aurelia decides to speak or act on her own, optionally guided by an intent."""
         logger.info(f"Aurelia is thinking (style: {style})...")
@@ -327,6 +350,9 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Apply cadence commands even from autonomous thoughts
+            self._extract_and_apply_cadence_commands(response_text)
+
             logger.info(f"Autonomous action ({style}): {response_text}")
             # Broadcast autonomous actions to all platforms
             await self.dispatch_response(response_text, audio_data, "autonomous", broadcast=True)

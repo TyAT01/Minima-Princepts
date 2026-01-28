@@ -226,6 +226,26 @@ class AureliaCadenceController:
 
         return speech_intent
 
+    def update_config(self, **kwargs) -> Dict[str, Any]:
+        """Dynamically update cadence parameters with clamping."""
+        updates = {}
+        if "min_gap_s" in kwargs:
+            self.min_gap_s = clamp(float(kwargs["min_gap_s"]), 1.0, 5.0)
+            updates["min_gap_s"] = self.min_gap_s
+        if "soft_gap_s" in kwargs:
+            self.soft_gap_s = clamp(float(kwargs["soft_gap_s"]), 2.0, 10.0)
+            updates["soft_gap_s"] = self.soft_gap_s
+        if "max_silence_s" in kwargs:
+            self.max_silence_s = clamp(float(kwargs["max_silence_s"]), 5.0, 60.0)
+            updates["max_silence_s"] = self.max_silence_s
+        if "burst_max_items" in kwargs:
+            self.burst_max_items = int(clamp(float(kwargs["burst_max_items"]), 1, 8))
+            updates["burst_max_items"] = self.burst_max_items
+
+        if updates:
+            print(f"Cadence Controller Config Updated: {updates}")
+        return updates
+
     def pop_consumed_message(self, msg: ChatMessage) -> None:
         if msg is None: return
         try:
