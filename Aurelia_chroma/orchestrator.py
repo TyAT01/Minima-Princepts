@@ -14,7 +14,7 @@ from learning.evolve import Reflector
 from adapters.twitch import TwitchChatAdapter
 from adapters.youtube import YouTubeChatAdapter
 from adapters.schemas import Event
-from cadence_controller import AureliaCadenceController, StreamSignals, ChatMessage
+from cadence_controller import AureliaCadenceController, StreamSignals, ChatMessage, clamp
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +114,8 @@ class AureliaOrchestrator:
         )
 
         if response_text:
-            # Detect and apply autonomous cadence adjustments
-            self._extract_and_apply_cadence_commands(response_text)
+            # Detect and apply autonomous cadence adjustments, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
 
             # Store in memory
             self.memory_store.store_memory(text, response_text)
@@ -181,21 +181,50 @@ class AureliaOrchestrator:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     def _detect_hype(self, events: List[Event]) -> float:
-        """Calculates current hype based on message volume and keywords."""
+        """Calculates current hype based on message volume, keywords, and intensity markers."""
         if not events:
-            return max(0.0, self.current_hype - 0.05) # decay
+            return clamp(self.current_hype - 0.05) # decay
 
-        hype_keywords = {"lfg", "pog", "hype", "omg", "wow", "love", "cracked", "legendary", "gg"}
+        hype_keywords = {
+            "lfg", "pog", "hype", "omg", "wow", "love", "cracked", "legendary", "gg",
+            "fire", "lit", "huge", "goat", "clutch", "poggers", "pogchamp", "ez"
+        }
+
         count = len(events)
-        keyword_hits = 0
-        for e in events:
-            text_lower = e.text.lower()
-            if any(k in text_lower for k in hype_keywords):
-                keyword_hits += 1
+        intensity_sum = 0.0
 
-        # score: volume + keywords
-        score = (count / 5.0) * 0.4 + (keyword_hits / max(1, count)) * 0.6
-        return min(1.0, score)
+        for e in events:
+            msg_intensity = 0.0
+            text = e.text
+            text_lower = text.lower()
+
+            # 1. Keywords
+            if any(k in text_lower for k in hype_keywords):
+                msg_intensity += 0.4
+
+            # 2. Capitalization (Caps lock hype)
+            if len(text) > 3 and text.isupper():
+                msg_intensity += 0.3
+
+            # 3. Repeated punctuation (!!!, ???)
+            if "!!" in text or "??" in text:
+                msg_intensity += 0.2
+
+            # 4. Elongated words (e.g. POGGGGG, NOOOOO)
+            if re.search(r"(.)\1{2,}", text): # Changed to 2+ repeats (3 total chars)
+                msg_intensity += 0.2
+
+            intensity_sum += clamp(msg_intensity)
+
+        # Average intensity per message
+        avg_msg_intensity = intensity_sum / count
+
+        # Density score (volume)
+        density = clamp(count / 5.0)
+
+        # Combined score: 40% density, 60% intensity
+        score = (density * 0.4) + (avg_msg_intensity * 0.6)
+        return clamp(score)
 
     async def chat_polling_loop(self):
         """Polls Twitch and YouTube for new messages and handles cadence."""
@@ -275,8 +304,8 @@ class AureliaOrchestrator:
         await self.simulation_manager.run_simulation(self.chroma_client, self.memory_store)
         self.last_interaction_time = time.time() # Reset idle timer after 'thinking'
 
-    def _extract_and_apply_cadence_commands(self, text: str):
-        """Scans for [CADENCE: key=value] tags and updates the controller."""
+    def _extract_and_apply_cadence_commands(self, text: str) -> str:
+        """Scans for [CADENCE: key=value] tags, updates the controller, and returns cleaned text."""
         pattern = r"\[CADENCE:\s*(.*?)\]"
         matches = re.findall(pattern, text, re.IGNORECASE)
 
@@ -293,6 +322,11 @@ class AureliaOrchestrator:
                         continue
             if updates:
                 self.cadence_controller.update_config(**updates)
+
+        # Strip tags from output and normalize spaces
+        cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
 
     async def think_and_act(self, style: str = "default", intent: Optional[Any] = None):
         """Aurelia decides to speak or act on her own, optionally guided by an intent."""
@@ -350,8 +384,8 @@ class AureliaOrchestrator:
         )
 
         if response_text:
-            # Apply cadence commands even from autonomous thoughts
-            self._extract_and_apply_cadence_commands(response_text)
+            # Apply cadence commands even from autonomous thoughts, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
 
             logger.info(f"Autonomous action ({style}): {response_text}")
             # Broadcast autonomous actions to all platforms
