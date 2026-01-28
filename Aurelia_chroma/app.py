@@ -32,10 +32,19 @@ def load_persona_prompt() -> str:
     core_identity = character.get("core_identity", {}).get("self_awareness", "I am an AI.")
     speech_style = character.get("speech_patterns", {}).get("style", "friendly and helpful.")
 
+    # Extract personality traits to enrich the system prompt
+    traits = character.get("personality_traits", {})
+    traits_list = []
+    for trait_name, trait_data in traits.items():
+        desc = trait_data.get("description", "")
+        traits_list.append(f"- {trait_name.replace('_', ' ').title()}: {desc}")
+    traits_str = "\n".join(traits_list)
+
     system_prompt = (
         f"You are {name}, an advanced virtual human. Your role is '{role}'. "
         f"Your core identity is: '{core_identity}'. Your goal is to '{goals}'. "
-        f"You speak in a style that is '{speech_style}'. "
+        f"You speak in a style that is '{speech_style}'.\n\n"
+        f"PERSONALITY TRAITS:\n{traits_str}\n\n"
         "You possess the ability to understand auditory inputs and generate both text and speech."
     )
     return system_prompt
