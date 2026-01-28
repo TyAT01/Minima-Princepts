@@ -43,10 +43,16 @@ except ImportError as e:
     # but we check if the local modules are found.
     if "No module named" in str(e):
         module_name = str(e).split("'")[-2]
-        if module_name in ["nextcord", "transformers", "torch", "faster_whisper", "bitsandbytes", "psutil"]:
+        external_deps = [
+            "nextcord", "transformers", "torch", "faster_whisper", "bitsandbytes",
+            "psutil", "pydantic_settings", "pydantic", "yaml", "numpy", "soundfile",
+            "librosa", "webrtcvad", "chromadb", "sentence_transformers", "fastapi",
+            "uvicorn", "jinja2", "sounddevice"
+        ]
+        if module_name in external_deps:
             print(f"   (Note: {module_name} is an external dependency and might not be installed in the sandbox, which is expected.)")
-            # Continue checking other local imports if possible? No, ImportError stops execution.
         else:
+            print(f"   (Potential local module missing or misnamed: {module_name})")
             sys.exit(1)
     else:
         sys.exit(1)

@@ -100,15 +100,14 @@ class ChromaClient:
                 do_sample=do_sample,
                 temperature=0.7,
                 top_p=0.9,
-                use_cache=True,
-                output_text=True
+                use_cache=True
             )
 
             # Robust extraction of audio and text
             audio_np = None
             text_response = None
 
-            # Handle multimodal output
+            # Handle multimodal output extraction with extra safety
             try:
                 if hasattr(self._model, "codec_model") and output.ndim == 3:
                     # Expected shape for multimodal output (batch, seq, codebooks)
@@ -117,8 +116,10 @@ class ChromaClient:
                 elif output.ndim == 2:
                     # Standard 2D output (batch, seq)
                     logger.debug("Output is 2D, attempting to decode as text only.")
-            except Exception as audio_err:
+            except (KeyError, ValueError, AttributeError, RuntimeError) as audio_err:
                 logger.error(f"Failed to extract audio from output: {audio_err}")
+            except Exception as e:
+                logger.error(f"Unexpected error during audio extraction: {e}")
 
             # Text decoding - handle both prompt+output and interleaved formats
             # Usually we want only the newly generated tokens
@@ -132,9 +133,12 @@ class ChromaClient:
                     generated_tokens = output[0, input_len:]
 
                 text_response = self._processor.decode(generated_tokens, skip_special_tokens=True)
-            except Exception as text_err:
+            except (KeyError, ValueError, AttributeError, RuntimeError) as text_err:
                 logger.error(f"Failed to decode text from output: {text_err}")
                 text_response = "I have the words, but they are tangled in my circuits."
+            except Exception as e:
+                logger.error(f"Unexpected error during text decoding: {e}")
+                text_response = "I encountered a linguistic anomaly."
 
             return audio_np, text_response
         except Exception as e:

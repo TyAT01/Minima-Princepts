@@ -274,8 +274,10 @@ class AlwaysListenBot:
             logger.info("Started listening in voice channel.")
 
     async def process_audio_data(self, user, data):
+      fp_name = None
       try:
         fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        fp_name = fp.name
         fp.close()
 
         audio_np = np.frombuffer(data, dtype=np.int16)
@@ -285,13 +287,15 @@ class AlwaysListenBot:
             audio_mono = audio_np.astype(np.float32) / 32768.0
 
         resampled_audio = librosa.resample(audio_mono, orig_sr=self._config.discord_sample_rate, target_sr=self._config.sample_rate)
-        sf.write(fp.name, resampled_audio, self._config.sample_rate)
+        sf.write(fp_name, resampled_audio, self._config.sample_rate)
 
-        await self._orchestrator.process_audio_input(fp.name, str(user), "discord")
-        self._safe_delete(fp.name)
+        await self._orchestrator.process_audio_input(fp_name, str(user), "discord")
       except Exception as e:
         logger.exception("Error in process_audio_data")
         await self._orchestrator.report_error(str(e))
+      finally:
+        if fp_name:
+          self._safe_delete(fp_name)
 
     def _safe_delete(self, filepath: str):
         try:
