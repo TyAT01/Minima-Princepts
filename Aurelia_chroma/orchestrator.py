@@ -117,14 +117,15 @@ class AureliaOrchestrator:
 
         return response_text
 
-    async def dispatch_response(self, text: str, audio_data: Optional[bytes], source: str):
+    async def dispatch_response(self, text: str, audio_data: Optional[bytes], source: str, broadcast: bool = False):
         """Dispatches the response to appropriate platforms."""
         tasks = []
 
-        # 1. Always output text to the source if it's chat-based
-        if source == "twitch" and self.twitch_adapter:
+        # 1. Output text to chat-based platforms
+        if self.twitch_adapter and (broadcast or source == "twitch"):
             tasks.append(self.twitch_adapter.send_message(text))
-        elif source == "youtube" and self.youtube_adapter:
+
+        if self.youtube_adapter and (broadcast or source == "youtube"):
             tasks.append(self.youtube_adapter.send_message(text))
 
         # 2. Handle Audio output
@@ -133,9 +134,10 @@ class AureliaOrchestrator:
             if self.local_audio_player:
                 tasks.append(self.local_audio_player.play(audio_data))
 
-            # Play in Discord if that's the source or if requested
-            if source == "discord" and self.discord_play_callback:
-                tasks.append(self.discord_play_callback(audio_data, text, "Voice Interaction"))
+            # Play in Discord
+            if self.discord_play_callback:
+                if broadcast or source == "discord":
+                    tasks.append(self.discord_play_callback(audio_data, text, "Interaction"))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -144,13 +146,16 @@ class AureliaOrchestrator:
         """Polls Twitch and YouTube for new messages."""
         logger.info("Chat polling loop started.")
         while self.is_running:
+            events = []
             if self.twitch_adapter:
-                for event in self.twitch_adapter.poll():
-                    await self.process_text_input(event.text, event.username, "twitch")
+                events.extend(list(self.twitch_adapter.poll()))
 
             if self.youtube_adapter:
-                for event in self.youtube_adapter.poll():
-                    await self.process_text_input(event.text, event.username, "youtube")
+                events.extend(list(self.youtube_adapter.poll()))
+
+            # Process all gathered events sequentially to maintain conversation context
+            for event in events:
+                await self.process_text_input(event.text, event.username, event.source)
 
             await asyncio.sleep(1)
 
@@ -185,15 +190,32 @@ class AureliaOrchestrator:
 
         if response_text:
             logger.info(f"Autonomous action: {response_text}")
-            # Dispatch to all active platforms
-            sources = ["discord"] if self.discord_play_callback else []
-            if self.twitch_adapter: sources.append("twitch")
-            if self.youtube_adapter: sources.append("youtube")
-
-            # For autonomy, we pick a primary source or just broadcast
-            primary_source = "twitch" if self.twitch_adapter else ("discord" if self.discord_play_callback else "local")
-            await self.dispatch_response(response_text, audio_data, primary_source)
+            # Broadcast autonomous actions to all platforms
+            await self.dispatch_response(response_text, audio_data, "autonomous", broadcast=True)
             self.last_interaction_time = time.time()
+
+    async def handle_event(self, event_type: str, data: Dict[str, Any]):
+        """Handles platform-specific events (e.g. member joined)."""
+        logger.info(f"Handling event: {event_type} - {data}")
+
+        user = data.get("user", "Someone")
+        source = data.get("source", "unknown")
+
+        if event_type == "member_join":
+            prompt = f"{user} has joined the voice channel. Greet them warmly and in character."
+        elif event_type == "member_leave":
+            prompt = f"{user} has left the voice channel. Say a brief goodbye if appropriate, or just note it."
+        else:
+            return
+
+        # Simple event-driven response
+        loop = asyncio.get_event_loop()
+        audio_data, response_text = await loop.run_in_executor(
+            None, self.chroma_client.respond_to_text, prompt, f"Event: {event_type}. User: {user}."
+        )
+
+        if response_text:
+            await self.dispatch_response(response_text, audio_data, source, broadcast=(source != "discord"))
 
     async def report_error(self, error_message: str):
         """Reports an error in natural language."""
