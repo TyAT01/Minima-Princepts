@@ -1,120 +1,83 @@
-# 🌸 Aurelia Vale Setup Guide (For Dummies) 🌸
+# 🌸 Aurelia Vale - PersonaPlex Edition Setup Guide 🌸
 
-Welcome! This guide will help you get your very own **Aurelia AI** up and running. No master's degree in computer science required!
+Welcome! This guide is for the **PersonaPlex Edition** of Aurelia. This version uses the **NVIDIA PersonaPlex** architecture for full-duplex, natural speech interactions and features a dynamic persona module system.
+
+---
+
+## 🚀 Key Differences (PersonaPlex Edition)
+
+- **NVIDIA PersonaPlex Integration:** Uses the Moshi-based full-duplex speech-to-speech model.
+- **Dynamic Persona Modules:** Aurelia can autonomously create and modify her own personality traits and voice settings.
+- **Hybrid Prompting:** Supports both Text Role Prompts and Voice Audio Prompts (NATF0, NATM1, etc.).
 
 ---
 
 ## 🛠 Prerequisites
 
-Before we start, you need two main things installed on your computer:
+Before we start, you need the standard requirements plus some specific ones for the NVIDIA architecture:
 
-1.  **Python (3.9 or newer):** The "brain" that runs the code.
-2.  **FFmpeg:** A tool that helps Aurelia handle audio (listening and speaking).
-
-### 1. Install Python
-- Go to [python.org](https://www.python.org/downloads/) and download the latest version for Windows or Mac.
-- **IMPORTANT:** When installing, make sure to check the box that says **"Add Python to PATH"**.
-
-### 2. Install FFmpeg
-- **Windows:**
-    1. Download the build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/).
-    2. Extract it to a folder (like `C:\ffmpeg`).
-    3. Add the `bin` folder to your System PATH.
-- **Mac:** Open Terminal and type `brew install ffmpeg` (requires Homebrew).
-- **Linux:** Type `sudo apt install ffmpeg`.
+1.  **Python (3.9 or newer)**
+2.  **FFmpeg** (For audio handling)
+3.  **Libopus-dev:** Required for Moshi audio processing.
+    - **Ubuntu/Debian:** `sudo apt install libopus-dev`
+    - **Mac:** `brew install opus`
+4.  **Hugging Face Account:** You must accept the NVIDIA PersonaPlex model license on Hugging Face to download the weights.
 
 ---
 
-## 🤖 Step 1: Get your Discord Bot Token
+## 🤖 Step 1: Configuration
 
-Aurelia lives in Discord! You need to "invite" her.
-
-1.  Go to the [Discord Developer Portal](https://discord.com/developers/applications).
-2.  Click **"New Application"** and name it "Aurelia".
-3.  Go to the **"Bot"** tab on the left.
-4.  Click **"Reset Token"** (or "Copy Token") to get your **Bot Token**. Save this!
-5.  Scroll down to **"Privileged Gateway Intents"** and turn on:
-    - Presence Intent
-    - Server Members Intent
-    - Message Content Intent
-6.  Go to the **"OAuth2"** -> **"URL Generator"** tab:
-    - Select `bot` and `applications.commands`.
-    - Select permissions: `Administrator` (easiest for setup).
-    - Copy the URL and paste it into your browser to invite Aurelia to your server.
-
----
-
-## ⚙️ Step 2: Configuration
-
-Now we need to tell Aurelia which server and channel to join.
-
-1.  In your Discord settings, go to **Advanced** and turn on **Developer Mode**.
-2.  Right-click your Server Name and click **"Copy Server ID"** (Guild ID).
-3.  Right-click the Voice Channel you want Aurelia to join and click **"Copy Channel ID"**.
+Follow the standard bot setup (get Discord Token, Guild ID, etc.) as described in the base guide.
 
 ### Create your .env file
-Inside the `Aurelia_chroma` folder, create a new file named `.env` and paste this into it, replacing the values with your own:
+Inside the `aurelia_chroma_PP` folder, create a new file named `.env`:
 
 ```env
 AURELIA_VALE_DISCORD_TOKEN=your_token_here
 AURELIA_VALE_DISCORD_GUILD_ID=your_server_id_here
 AURELIA_VALE_DISCORD_VOICE_CHANNEL_ID=your_channel_id_here
+HF_TOKEN=your_huggingface_token_here
 ```
 
 ---
 
-## 🚀 Step 3: Starting Aurelia
+## ⚙️ Step 2: Running PersonaPlex
 
-### Windows
-1.  Open the `Aurelia_chroma` folder.
-2.  Double-click `run.bat`.
-    - It will automatically install everything needed and start the AI!
+### First Time Setup
+The PersonaPlex version requires the `moshi` package. You can install it from the submodule (if available) or via pip:
+```bash
+pip install -r requirements.txt
+```
 
-### Mac / Linux
-1.  Open your Terminal.
-2.  Navigate to the folder: `cd Aurelia_chroma`
-3.  Make the script runnable: `chmod +x run.sh`
-4.  Run it: `./run.sh`
+### Starting Aurelia
+Use the included launch scripts:
+- **Windows:** `run.bat`
+- **Linux/Mac:** `./run.sh`
+
+These scripts are updated to work within the `aurelia_chroma_PP` environment.
+
+---
+
+## 🧠 Using the PersonaPlex System
+
+Aurelia can now manage her own "Persona Modules". You can also manually trigger module changes in chat (or she will do it herself).
+
+### Commands/Tags
+Aurelia uses the following internal tags to manage her modules:
+- `[PERSONAPLEX: action=create, name=bard, voice=NATF2, data={...}]` - Creates a new module with a specific voice.
+- `[PERSONAPLEX: action=activate, name=bard]` - Switches to an existing module.
+
+### Available NVIDIA Voices
+- **Natural Female:** NATF0, NATF1, NATF2, NATF3
+- **Natural Male:** NATM0, NATM1, NATM2, NATM3
+- **Variety:** VARF0-4, VARM0-4
 
 ---
 
 ## 🖥️ Web Dashboard
-Once Aurelia is running, you can see what she's thinking in real-time!
-- Open your web browser and go to: `http://localhost:8000`
-- The `run` scripts are already configured to start the web dashboard for you.
+View Aurelia's logs and current active PersonaPlex modules at:
+`http://localhost:8000`
 
 ---
 
-## 🧠 Evolution & Learning
-
-Aurelia is designed to learn and evolve from her interactions.
-
-### Autonomous Learning
-While running, Aurelia periodically:
-- **Reflects** on recent conversations to extract "Lessons Learned".
-- Runs **Mental Simulations** when idle to improve her responses in various scenarios (handling irate viewers, lore deep-dives, etc.).
-
-These insights are stored in her long-term memory and will influence her future behavior and responses.
-
-### Standalone Simulations
-You can run simulations to help Aurelia learn even when the main bot is not active. This is useful for "training" her on specific scenarios.
-
-To run the standalone simulation script:
-```bash
-# From the Aurelia_chroma directory
-python run_sim.py
-```
-This will run a series of scenarios, allowing Aurelia to reflect and update her memory store.
-
----
-
-## ❓ Troubleshooting
-
-- **"Command not found: python"**: Make sure Python is installed and you checked "Add to PATH".
-- **"FFmpeg not found"**: Ensure FFmpeg is installed and added to your system's PATH.
-- **Audio is choppy**: Aurelia requires a decent computer to run the "Chroma-4B" model. If it's too slow, she might lag.
-- **She won't join the channel**: Double-check your Channel ID and make sure the bot has permission to join and speak.
-
----
-
-**Enjoy your time with Aurelia!** 🌸
+**Treat her with kindness as she evolves!** 🌸

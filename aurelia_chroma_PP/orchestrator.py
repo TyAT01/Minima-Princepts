@@ -6,7 +6,7 @@ import random
 import re
 from typing import Optional, List, Dict, Any
 
-from llm.chroma_client import ChromaClient
+from llm.nvidia_personaplex_client import NVIDIAPersonaPlexClient as PersonaPlexClient
 from llm.personaplex import PersonaPlex
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class AureliaOrchestrator:
     def __init__(
         self,
-        chroma_client: ChromaClient,
+        chroma_client: PersonaPlexClient,
         memory_store: ChromaMemoryStore,
         whisper_client: WhisperClient,
         twitch_adapter: Optional[TwitchChatAdapter] = None,
@@ -336,7 +336,8 @@ class AureliaOrchestrator:
                 logger.info("Persona changed via command. Regenerating system prompt.")
                 from llm.persona import load_persona_prompt
                 new_prompt = load_persona_prompt(self.personaplex)
-                self.chroma_client.set_persona_prompt(new_prompt)
+                voice_prompt = self.personaplex.get_active_voice_prompt()
+                self.chroma_client.set_persona(text_prompt=new_prompt, voice_prompt=voice_prompt)
 
         # 3. Clean all tags
         cleaned = re.sub(cadence_pattern, "", text, flags=re.IGNORECASE)

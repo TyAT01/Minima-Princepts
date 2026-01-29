@@ -9,7 +9,7 @@ import yaml
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
-from llm.chroma_client import ChromaClient
+from llm.nvidia_personaplex_client import NVIDIAPersonaPlexClient as PersonaPlexClient
 from memory.store import ChromaMemoryStore
 from learning.simulation import SimulationManager
 
@@ -32,10 +32,10 @@ async def main():
 
     # Initialize components
     # NOTE: We use a high max_new_tokens for simulations to allow deep reflection
-    chroma_client = ChromaClient(
-        model_id=settings.chroma_model_id,
-        persona_prompt=persona_prompt,
-        max_new_tokens=200
+    chroma_client = PersonaPlexClient(
+        model_id="nvidia/personaplex-7b-v1",
+        text_prompt=persona_prompt,
+        voice_prompt="NATF0"
     )
 
     try:

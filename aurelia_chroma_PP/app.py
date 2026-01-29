@@ -7,7 +7,7 @@ import yaml
 
 from config import settings
 from discord_ui.always_listen_bot import AlwaysListenBot, DiscordVoiceConfig
-from llm.chroma_client import ChromaClient
+from llm.nvidia_personaplex_client import NVIDIAPersonaPlexClient
 from memory.store import ChromaMemoryStore
 from stt.whisper_client import WhisperClient
 from hardware.profiler import HardwareProfiler
@@ -63,11 +63,12 @@ async def main() -> None:
         from llm.personaplex import PersonaPlex
         personaplex = PersonaPlex()
         persona_prompt = load_persona_prompt(personaplex)
+        voice_prompt = personaplex.get_active_voice_prompt()
 
-        chroma_client = ChromaClient(
-            model_id=settings.chroma_model_id,
-            persona_prompt=persona_prompt,
-            max_new_tokens=settings.max_new_tokens
+        chroma_client = NVIDIAPersonaPlexClient(
+            model_id="nvidia/personaplex-7b-v1",
+            text_prompt=persona_prompt,
+            voice_prompt=voice_prompt
         )
         chroma_client.load()
 

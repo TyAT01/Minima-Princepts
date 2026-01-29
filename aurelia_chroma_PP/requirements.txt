@@ -31,3 +31,10 @@ pydantic
 pydantic-settings
 PyYAML
 psutil
+
+# NVIDIA PersonaPlex (Moshi architecture)
+sentencepiece
+huggingface_hub
+librosa
+soundfile
+pyopus
