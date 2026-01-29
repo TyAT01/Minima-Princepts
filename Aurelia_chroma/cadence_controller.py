@@ -222,6 +222,8 @@ class AureliaCadenceController:
 
         speech_intent = self._build_intent(intent_kind, now, chat_activity, hype, focus, silence_pressure)
 
+        logger.debug(f"Emitting intent: {speech_intent.kind} (urgency={speech_intent.urgency:.2f}, energy={speech_intent.energy:.2f})")
+
         # side effects
         self.last_spoke_ts = now
         self.last_intent_kind = speech_intent.kind

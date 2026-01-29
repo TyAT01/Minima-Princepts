@@ -1,8 +1,6 @@
 import sys
 import os
-import time
 import unittest
-from unittest.mock import MagicMock
 
 # Add Aurelia_chroma to path
 sys.path.append(os.path.abspath("Aurelia_chroma"))
