@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import math
 import random
+import logging
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -61,6 +62,8 @@ class SpeechIntent:
 # -----------------------------
 # Utilities
 # -----------------------------
+
+logger = logging.getLogger(__name__)
 
 def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
