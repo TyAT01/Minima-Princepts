@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class AureliaOrchestrator:
     def __init__(
         self,
-        chroma_client: PersonaPlexClient,
+        personaplex_client: PersonaPlexClient,
         memory_store: ChromaMemoryStore,
         whisper_client: WhisperClient,
         twitch_adapter: Optional[TwitchChatAdapter] = None,
@@ -30,7 +30,7 @@ class AureliaOrchestrator:
         local_audio_player: Any = None,
         personaplex: Optional[PersonaPlex] = None
     ):
-        self.chroma_client = chroma_client
+        self.personaplex_client = personaplex_client
         self.memory_store = memory_store
         self.whisper_client = whisper_client
         self.twitch_adapter = twitch_adapter
@@ -51,7 +51,7 @@ class AureliaOrchestrator:
 
         # Learning components
         self.simulation_manager = SimulationManager()
-        self.reflector = Reflector(chroma_client, memory_store)
+        self.reflector = Reflector(personaplex_client, memory_store)
         self.cycle_count = 0
 
     async def start(self):
@@ -113,7 +113,7 @@ class AureliaOrchestrator:
 
         loop = asyncio.get_event_loop()
         audio_data, response_text = await loop.run_in_executor(
-            None, self.chroma_client.respond_to_text, text, full_context
+            None, self.personaplex_client.respond_to_text, text, full_context
         )
 
         if response_text:
@@ -148,7 +148,7 @@ class AureliaOrchestrator:
 
         # Generate response using direct audio input
         audio_data, response_text = await loop.run_in_executor(
-            None, self.chroma_client.respond_to_audio, audio_path, full_context
+            None, self.personaplex_client.respond_to_audio, audio_path, full_context
         )
 
         if response_text:
@@ -307,7 +307,7 @@ class AureliaOrchestrator:
     async def run_autonomous_simulation(self):
         """Runs a simulation during idle time to improve skills."""
         logger.info("Aurelia is running an autonomous mental simulation...")
-        await self.simulation_manager.run_simulation(self.chroma_client, self.memory_store)
+        await self.simulation_manager.run_simulation(self.personaplex_client, self.memory_store)
         self.last_interaction_time = time.time() # Reset idle timer after 'thinking'
 
     def _process_internal_commands(self, text: str) -> str:
@@ -337,7 +337,7 @@ class AureliaOrchestrator:
                 from llm.persona import load_persona_prompt
                 new_prompt = load_persona_prompt(self.personaplex)
                 voice_prompt = self.personaplex.get_active_voice_prompt()
-                self.chroma_client.set_persona(text_prompt=new_prompt, voice_prompt=voice_prompt)
+                self.personaplex_client.set_persona(text_prompt=new_prompt, voice_prompt=voice_prompt)
 
         # 3. Clean all tags
         cleaned = re.sub(cadence_pattern, "", text, flags=re.IGNORECASE)
@@ -397,7 +397,7 @@ class AureliaOrchestrator:
 
         loop = asyncio.get_event_loop()
         audio_data, response_text = await loop.run_in_executor(
-            None, self.chroma_client.respond_to_text, prompt, full_context
+            None, self.personaplex_client.respond_to_text, prompt, full_context
         )
 
         if response_text:
@@ -427,7 +427,7 @@ class AureliaOrchestrator:
         # Simple event-driven response
         loop = asyncio.get_event_loop()
         audio_data, response_text = await loop.run_in_executor(
-            None, self.chroma_client.respond_to_text, prompt, f"Event: {event_type}. User: {user}."
+            None, self.personaplex_client.respond_to_text, prompt, f"Event: {event_type}. User: {user}."
         )
 
         if response_text:
@@ -450,7 +450,7 @@ class AureliaOrchestrator:
 
         loop = asyncio.get_event_loop()
         audio_data, _ = await loop.run_in_executor(
-            None, self.chroma_client.respond_to_text, f"Internal Error: {error_message}. Say: {text}", ""
+            None, self.personaplex_client.respond_to_text, f"Internal Error: {error_message}. Say: {text}", ""
         )
 
         # Play via local audio and Discord if possible

@@ -125,10 +125,11 @@ async def logs_stream(request: Request):
                 try:
                     # Use wait_for to periodically check for disconnection even if no logs
                     log_msg = await asyncio.wait_for(q.get(), timeout=1.0)
-                    # Handle multi-line logs for SSE
-                    lines = log_msg.splitlines()
-                    sse_msg = "".join([f"data: {line}\n" for line in lines])
-                    yield f"{sse_msg}\n"
+                    # Handle multi-line logs for SSE: each line must start with "data: "
+                    # The event is terminated by two newlines.
+                    # We escape any existing newlines and ensure proper SSE format.
+                    formatted_msg = log_msg.strip().replace("\n", "\ndata: ")
+                    yield f"data: {formatted_msg}\n\n"
                 except asyncio.TimeoutError:
                     continue
         finally:

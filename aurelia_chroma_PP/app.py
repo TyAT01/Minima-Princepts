@@ -100,7 +100,7 @@ async def main() -> None:
 
         # Initialize Orchestrator
         orchestrator = AureliaOrchestrator(
-            chroma_client=chroma_client,
+            personaplex_client=chroma_client,
             memory_store=memory_store,
             whisper_client=whisper_client,
             twitch_adapter=twitch_adapter,
