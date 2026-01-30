@@ -288,7 +288,10 @@ class AureliaCadenceController:
         hi_pending = self._count_high_signal_pending()
 
         w_react = 0.05 + 0.60 * hype + 0.20 * chat_activity
-        w_reply = 0.15 + 0.50 * chat_activity + 0.35 * (1.0 if pending > 0 else 0.0) + 0.40 * (1.0 if hi_pending > 0 else 0.0)
+        w_reply = 0.0
+        if pending > 0:
+            w_reply = 0.15 + 0.50 * chat_activity + 0.35 + 0.40 * (1.0 if hi_pending > 0 else 0.0)
+
         w_riff  = 0.08 + 0.30 * chat_activity + 0.40 * hype + 0.15 * (1.0 - focus) - 0.20 * gameplay_bias
         w_fill  = 0.12 + 0.60 * silence_pressure + 0.20 * (1.0 - chat_activity)
 
