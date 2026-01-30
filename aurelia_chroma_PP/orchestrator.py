@@ -48,6 +48,7 @@ class AureliaOrchestrator:
 
         # Callback for playing audio via Discord (set by AlwaysListenBot)
         self.discord_play_callback = None
+        self.discord_stop_callback = None
 
         # Learning components
         self.simulation_manager = SimulationManager()
@@ -66,6 +67,21 @@ class AureliaOrchestrator:
         if self.autonomous_task:
             self.autonomous_task.cancel()
         logger.info("Aurelia Orchestrator stopped.")
+
+    async def stop_speaking(self):
+        """Interrupts current audio playback on all platforms."""
+        logger.info("Interrupting Aurelia's speech...")
+
+        # 1. Stop local playback
+        if self.local_audio_player:
+            self.local_audio_player.stop()
+
+        # 2. Stop Discord playback
+        if self.discord_stop_callback:
+            await self.discord_stop_callback()
+
+        # 3. Mark as not busy in cadence controller
+        self.cadence_controller.last_spoke_ts = 0 # Allow immediate re-entry
 
     def _build_full_context(self, user: str, source: str, query_text: str) -> str:
         """Centralized method to build the prompt context with categorized insights."""
@@ -104,37 +120,67 @@ class AureliaOrchestrator:
         )
         return full_context
 
+    async def _stream_llm_response(self, text: str, context: str, is_audio: bool = False, audio_path: Optional[str] = None):
+        """Async generator that yields fragments from the LLM stream without blocking the event loop."""
+        loop = asyncio.get_running_loop()
+        queue = asyncio.Queue()
+
+        def producer():
+            if is_audio and audio_path:
+                gen = self.personaplex_client.stream_respond_to_audio(audio_path, context)
+            else:
+                gen = self.personaplex_client.stream_respond_to_text(text, context)
+
+            for chunk in gen:
+                loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            loop.call_soon_threadsafe(queue.put_nowait, None) # Signal end
+
+        # Run the synchronous generator in a thread
+        await loop.run_in_executor(None, producer)
+
+        full_response = ""
+        current_fragment = ""
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                break
+
+            full_response += chunk
+            current_fragment += chunk
+
+            # Improved fragment detection logic
+            if any(punct in chunk for punct in (".", "!", "?", ",", ";", "\n")):
+                yield current_fragment
+                current_fragment = ""
+
+        if current_fragment.strip():
+            yield current_fragment
+
     async def process_text_input(self, text: str, user: str, source: str) -> str:
-        """Processes text input from any source and generates a response."""
+        """Processes text input from any source and generates a response via streaming fragments."""
         self.last_interaction_time = time.time()
         logger.info(f"Processing input from {user} ({source}): {text}")
 
         full_context = self._build_full_context(user, source, text)
+        full_response = ""
 
-        loop = asyncio.get_event_loop()
-        audio_data, response_text = await loop.run_in_executor(
-            None, self.personaplex_client.respond_to_text, text, full_context
-        )
+        async for fragment in self._stream_llm_response(text, full_context):
+            full_response += fragment
+            await self._dispatch_fragment(fragment, source)
 
-        if response_text:
-            # Detect and apply autonomous cadence adjustments, then clean response
-            response_text = self._process_internal_commands(response_text)
-
-            # Store in memory
-            self.memory_store.store_memory(text, response_text)
-
-            # Handle outputs
-            await self.dispatch_response(response_text, audio_data, source)
+        if full_response:
+            cleaned_response = self._process_internal_commands(full_response)
+            self.memory_store.store_memory(text, cleaned_response)
             self.cadence_controller.last_spoke_ts = time.time()
+            return cleaned_response
 
-        return response_text
+        return ""
 
     async def process_audio_input(self, audio_path: str, user: str, source: str) -> str:
-        """Processes audio input (e.g. from Discord) and generates a response."""
+        """Processes audio input and generates a response via streaming fragments."""
         self.last_interaction_time = time.time()
 
-        loop = asyncio.get_event_loop()
-        # Transcribe first for memory search context
+        loop = asyncio.get_running_loop()
         user_text = await loop.run_in_executor(
             None, self.whisper_client.transcribe, audio_path
         )
@@ -143,23 +189,39 @@ class AureliaOrchestrator:
             return ""
 
         logger.info(f"Transcribed audio from {user} ({source}): {user_text}")
-
         full_context = self._build_full_context(user, source, user_text)
+        full_response = ""
 
-        # Generate response using direct audio input
-        audio_data, response_text = await loop.run_in_executor(
-            None, self.personaplex_client.respond_to_audio, audio_path, full_context
+        async for fragment in self._stream_llm_response(user_text, full_context, is_audio=True, audio_path=audio_path):
+            full_response += fragment
+            await self._dispatch_fragment(fragment, source)
+
+        if full_response:
+            cleaned_response = self._process_internal_commands(full_response)
+            self.memory_store.store_memory(user_text, cleaned_response)
+            self.cadence_controller.last_spoke_ts = time.time()
+            return cleaned_response
+
+        return ""
+
+    async def _dispatch_fragment(self, text: str, source: str, broadcast: bool = False):
+        """Generates audio for a fragment and dispatches it immediately."""
+        text = text.strip()
+        if not text:
+            return
+
+        # Clean tags before speaking
+        speech_text = re.sub(r"\[CADENCE:.*?\]", "", text, flags=re.IGNORECASE)
+        speech_text = re.sub(r"\[PERSONAPLEX:.*?\]", "", speech_text, flags=re.IGNORECASE).strip()
+        if not speech_text:
+            return
+
+        loop = asyncio.get_event_loop()
+        audio_data = await loop.run_in_executor(
+            None, self.personaplex_client.generate_audio_for_fragment, speech_text
         )
 
-        if response_text:
-            # Detect and apply autonomous cadence adjustments, then clean response
-            response_text = self._process_internal_commands(response_text)
-
-            self.memory_store.store_memory(user_text, response_text)
-            await self.dispatch_response(response_text, audio_data, source)
-            self.cadence_controller.last_spoke_ts = time.time()
-
-        return response_text
+        await self.dispatch_response(speech_text, audio_data, source, broadcast)
 
     async def dispatch_response(self, text: str, audio_data: Optional[bytes], source: str, broadcast: bool = False):
         """Dispatches the response to appropriate platforms."""
@@ -395,18 +457,14 @@ class AureliaOrchestrator:
         memory_context = "\n".join([f"- User: {mem['user_text']}, Bot: {mem['bot_text']}" for mem in memories])
         full_context = f"{state_context}\n\n{memory_context}"
 
-        loop = asyncio.get_event_loop()
-        audio_data, response_text = await loop.run_in_executor(
-            None, self.personaplex_client.respond_to_text, prompt, full_context
-        )
+        full_response = ""
+        async for fragment in self._stream_llm_response(prompt, full_context):
+            full_response += fragment
+            await self._dispatch_fragment(fragment, "autonomous", broadcast=True)
 
-        if response_text:
-            # Apply cadence commands even from autonomous thoughts, then clean response
-            response_text = self._process_internal_commands(response_text)
-
-            logger.info(f"Autonomous action ({style}): {response_text}")
-            # Broadcast autonomous actions to all platforms
-            await self.dispatch_response(response_text, audio_data, "autonomous", broadcast=True)
+        if full_response:
+            cleaned_response = self._process_internal_commands(full_response)
+            logger.info(f"Autonomous action ({style}): {cleaned_response}")
             self.last_interaction_time = time.time()
             self.cadence_controller.last_spoke_ts = time.time()
 
