@@ -99,6 +99,10 @@ class NVIDIAPersonaPlexClient:
         """Mock audio generation for fragments."""
         return None
 
+    def filter_text(self, text: str) -> str:
+        """Mock filter for PersonaPlex."""
+        return text
+
     def set_persona_prompt(self, prompt: str):
         """Compatibility method for orchestrator."""
         self.set_persona(text_prompt=prompt)

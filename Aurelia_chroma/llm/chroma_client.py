@@ -254,5 +254,9 @@ class ChromaClient:
             logger.error(f"Error during generation: {e}")
             return None, "I encountered a cognitive glitch while trying to respond."
 
+    def filter_text(self, text: str) -> str:
+        """Applies the content filter to the given text."""
+        return self._filter.filter_text(text)
+
     def set_persona_prompt(self, prompt: str):
         self._persona_prompt = prompt

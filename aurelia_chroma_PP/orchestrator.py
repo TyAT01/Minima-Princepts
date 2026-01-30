@@ -49,6 +49,7 @@ class AureliaOrchestrator:
         # Callback for playing audio via Discord (set by AlwaysListenBot)
         self.discord_play_callback = None
         self.discord_stop_callback = None
+        self._current_generation_task = None
 
         # Learning components
         self.simulation_manager = SimulationManager()
@@ -69,18 +70,23 @@ class AureliaOrchestrator:
         logger.info("Aurelia Orchestrator stopped.")
 
     async def stop_speaking(self):
-        """Interrupts current audio playback on all platforms."""
-        logger.info("Interrupting Aurelia's speech...")
+        """Interrupts current audio playback and LLM generation on all platforms."""
+        logger.info("Interrupting Aurelia's speech and thinking process...")
 
-        # 1. Stop local playback
+        # 1. Cancel current LLM/Fragment processing task
+        if self._current_generation_task and not self._current_generation_task.done():
+            self._current_generation_task.cancel()
+            logger.info("Current generation task cancelled.")
+
+        # 2. Stop local playback
         if self.local_audio_player:
             self.local_audio_player.stop()
 
-        # 2. Stop Discord playback
+        # 3. Stop Discord playback
         if self.discord_stop_callback:
             await self.discord_stop_callback()
 
-        # 3. Mark as not busy in cadence controller
+        # 4. Mark as not busy in cadence controller
         self.cadence_controller.last_spoke_ts = 0 # Allow immediate re-entry
 
     def _build_full_context(self, user: str, source: str, query_text: str) -> str:
@@ -126,17 +132,22 @@ class AureliaOrchestrator:
         queue = asyncio.Queue()
 
         def producer():
-            if is_audio and audio_path:
-                gen = self.personaplex_client.stream_respond_to_audio(audio_path, context)
-            else:
-                gen = self.personaplex_client.stream_respond_to_text(text, context)
+            try:
+                if is_audio and audio_path:
+                    gen = self.personaplex_client.stream_respond_to_audio(audio_path, context)
+                else:
+                    gen = self.personaplex_client.stream_respond_to_text(text, context)
 
-            for chunk in gen:
-                loop.call_soon_threadsafe(queue.put_nowait, chunk)
-            loop.call_soon_threadsafe(queue.put_nowait, None) # Signal end
+                for chunk in gen:
+                    loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            except Exception as e:
+                logger.error(f"Error in LLM producer thread: {e}")
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None) # Signal end
 
-        # Run the synchronous generator in a thread
-        await loop.run_in_executor(None, producer)
+        # Run the synchronous generator in a thread in the background
+        # Do NOT await this here, as it would block until completion.
+        loop.run_in_executor(None, producer)
 
         full_response = ""
         current_fragment = ""
@@ -164,9 +175,16 @@ class AureliaOrchestrator:
         full_context = self._build_full_context(user, source, text)
         full_response = ""
 
-        async for fragment in self._stream_llm_response(text, full_context):
-            full_response += fragment
-            await self._dispatch_fragment(fragment, source)
+        self._current_generation_task = asyncio.current_task()
+        try:
+            async for fragment in self._stream_llm_response(text, full_context):
+                full_response += fragment
+                await self._dispatch_fragment(fragment, source)
+        except asyncio.CancelledError:
+            logger.info("Fragment processing task cancelled.")
+            raise
+        finally:
+            self._current_generation_task = None
 
         if full_response:
             cleaned_response = self._process_internal_commands(full_response)
@@ -192,9 +210,16 @@ class AureliaOrchestrator:
         full_context = self._build_full_context(user, source, user_text)
         full_response = ""
 
-        async for fragment in self._stream_llm_response(user_text, full_context, is_audio=True, audio_path=audio_path):
-            full_response += fragment
-            await self._dispatch_fragment(fragment, source)
+        self._current_generation_task = asyncio.current_task()
+        try:
+            async for fragment in self._stream_llm_response(user_text, full_context, is_audio=True, audio_path=audio_path):
+                full_response += fragment
+                await self._dispatch_fragment(fragment, source)
+        except asyncio.CancelledError:
+            logger.info("Fragment processing task cancelled.")
+            raise
+        finally:
+            self._current_generation_task = None
 
         if full_response:
             cleaned_response = self._process_internal_commands(full_response)
@@ -213,6 +238,11 @@ class AureliaOrchestrator:
         # Clean tags before speaking
         speech_text = re.sub(r"\[CADENCE:.*?\]", "", text, flags=re.IGNORECASE)
         speech_text = re.sub(r"\[PERSONAPLEX:.*?\]", "", speech_text, flags=re.IGNORECASE).strip()
+        if not speech_text:
+            return
+
+        # Apply content filter to fragment
+        speech_text = self.personaplex_client.filter_text(speech_text)
         if not speech_text:
             return
 
@@ -458,9 +488,16 @@ class AureliaOrchestrator:
         full_context = f"{state_context}\n\n{memory_context}"
 
         full_response = ""
-        async for fragment in self._stream_llm_response(prompt, full_context):
-            full_response += fragment
-            await self._dispatch_fragment(fragment, "autonomous", broadcast=True)
+        self._current_generation_task = asyncio.current_task()
+        try:
+            async for fragment in self._stream_llm_response(prompt, full_context):
+                full_response += fragment
+                await self._dispatch_fragment(fragment, "autonomous", broadcast=True)
+        except asyncio.CancelledError:
+            logger.info("Autonomous fragment processing task cancelled.")
+            raise
+        finally:
+            self._current_generation_task = None
 
         if full_response:
             cleaned_response = self._process_internal_commands(full_response)
