@@ -33,6 +33,7 @@ PyYAML
 psutil
 
 # NVIDIA PersonaPlex (Moshi architecture)
+moshi
 sentencepiece
 huggingface_hub
 librosa
