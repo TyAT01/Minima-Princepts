@@ -39,3 +39,6 @@ huggingface_hub
 librosa
 soundfile
 pyopus
+gradio
+plotly
+pandas
