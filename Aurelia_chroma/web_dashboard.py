@@ -22,7 +22,7 @@ orchestrator = None # Global reference
 
 # Global log buffer for Gradio UI
 log_buffer = []
-MAX_LOG_BUFFER = 100
+MAX_LOG_BUFFER = 500
 
 class QueueHandler(logging.Handler):
     def emit(self, record):

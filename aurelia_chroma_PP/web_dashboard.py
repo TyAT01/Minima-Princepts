@@ -23,7 +23,7 @@ orchestrator = None # Global reference
 
 # Global log buffer for Gradio UI
 log_buffer = []
-MAX_LOG_BUFFER = 100
+MAX_LOG_BUFFER = 500
 
 class QueueHandler(logging.Handler):
     def emit(self, record):
@@ -115,8 +115,10 @@ def get_module_content(name):
 
 def save_module_content(name, content):
     if not name or not content: return "Invalid input."
+    # Prevent path traversal
+    safe_name = os.path.basename(name)
     modules_dir = Path(settings.persona_modules_dir)
-    path = modules_dir / f"{name}.yaml"
+    path = modules_dir / f"{safe_name}.yaml"
     try:
         yaml.safe_load(content) # Validate YAML
         with open(path, "w", encoding="utf-8") as f:
