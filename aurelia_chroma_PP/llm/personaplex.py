@@ -50,7 +50,7 @@ class PersonaPlex:
     def get_merged_persona_data(self, base_data: Dict[str, Any]) -> Dict[str, Any]:
         """Merges base persona data with all active modules."""
         import copy
-        merged = copy.deepcopy(base_data)
+        merged = copy.deepcopy(base_data) if base_data is not None else {}
         for mod_name in self.active_modules:
             mod_data = self.load_module(mod_name)
             if mod_data:
@@ -68,6 +68,9 @@ class PersonaPlex:
 
     def _merge_dicts(self, base: Dict[str, Any], overlay: Dict[str, Any]):
         """Recursively merges overlay into base."""
+        if base is None:
+            return
+
         for key, value in overlay.items():
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
                 self._merge_dicts(base[key], value)

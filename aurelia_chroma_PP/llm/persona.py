@@ -9,23 +9,24 @@ if TYPE_CHECKING:
 def load_persona_prompt(personaplex: Optional[PersonaPlex] = None) -> str:
     """Loads the persona from the yaml file and constructs the system prompt for PersonaPlex."""
     with open(settings.persona_yaml, "r", encoding="utf-8") as f:
-        persona_data = yaml.safe_load(f)
+        persona_data = yaml.safe_load(f) or {}
 
     if personaplex:
-        persona_data = personaplex.get_merged_persona_data(persona_data)
+        persona_data = personaplex.get_merged_persona_data(persona_data) or {}
 
-    character = persona_data.get("character", {})
-    name = character.get("name", "Aurelia")
-    role = character.get("role", "AI Companion")
-    goals = character.get("goals", [])
-    core_identity = character.get("core_identity", {}).get("self_awareness", "I am an AI.")
-    speech_style = character.get("speech_patterns", {}).get("style", "friendly and helpful.")
+    character = persona_data.get("character") or {}
+    name = character.get("name") or "Aurelia Vale"
+    role = character.get("role") or "AI Companion"
+    goals = character.get("goals") or []
+    core_identity = (character.get("core_identity") or {}).get("self_awareness") or "I am an AI."
+    speech_patterns = character.get("speech_patterns") or {}
+    speech_style = speech_patterns.get("style") or "friendly and helpful."
 
     # Build a concise but descriptive prompt suitable for NVIDIA PersonaPlex
     goals_str = " ".join(goals)
 
     # Extract personality traits
-    traits = character.get("personality_traits", {})
+    traits = character.get("personality_traits") or {}
     traits_list = []
     for trait_name, trait_data in traits.items():
         if isinstance(trait_data, dict):
