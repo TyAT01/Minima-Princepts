@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     sample_rate: int = 24000
     discord_sample_rate: int = 48000
 
+    # Web Dashboard
+    web_port: int = 8000
+
     class Config:
         env_prefix = "AURELIA_VALE_"
         case_sensitive = False

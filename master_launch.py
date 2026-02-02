@@ -112,7 +112,7 @@ def launch_app(venv_python, version_dir):
     if env_path.exists():
         with open(env_path, "r") as f:
             for line in f:
-                if "PORT=" in line.upper():
+                if "AURELIA_VALE_WEB_PORT=" in line.upper():
                     try:
                         port = int(line.split("=")[1].strip())
                     except ValueError:
