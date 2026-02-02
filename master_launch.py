@@ -132,7 +132,15 @@ def launch_app(venv_python, version_dir):
 
     # Change to version directory and run app.py
     os.chdir(version_dir)
-    subprocess.run([str(venv_python), "app.py"])
+    return subprocess.run([str(venv_python), "app.py"])
+
+def log_error(message):
+    """Logs error to a local file."""
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    with open(log_dir / "launcher.log", "a") as f:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"[{timestamp}] {message}\n")
 
 if __name__ == "__main__":
     if "--help" in sys.argv:
@@ -146,17 +154,32 @@ if __name__ == "__main__":
 
     print("🌸 Starting Aurelia Vale Master Setup 🌸")
 
-    # 1. Start Ollama
-    start_ollama()
+    try:
+        # 1. Start Ollama
+        start_ollama()
 
-    # 2. Setup Venv
-    venv_python = setup_venv()
+        # 2. Setup Venv
+        venv_python = setup_venv()
 
-    # 3. Select Version
-    version_dir = select_version()
+        # 3. Select Version
+        version_dir = select_version()
 
-    # 4. Check dependencies and .env
-    check_dependencies(venv_python, version_dir)
+        # 4. Check dependencies and .env
+        check_dependencies(venv_python, version_dir)
 
-    # 5. Launch
-    launch_app(venv_python, version_dir)
+        # 5. Launch
+        result = launch_app(venv_python, version_dir)
+
+        if result and result.returncode != 0:
+            print(f"\n❌ Application exited with error code {result.returncode}")
+            log_error(f"Application exited with error code {result.returncode}")
+            input("\nPress Enter to exit...")
+            sys.exit(result.returncode)
+
+    except Exception as e:
+        print(f"\n❌ A critical error occurred in the launcher: {e}")
+        import traceback
+        traceback.print_exc()
+        log_error(f"Launcher error: {e}\n{traceback.format_exc()}")
+        input("\nPress Enter to exit...")
+        sys.exit(1)
