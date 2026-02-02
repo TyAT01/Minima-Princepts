@@ -13,6 +13,7 @@ app = FastAPI(title="Aurelia Vale Dashboard")
 
 subscribers: set[asyncio.Queue] = set()
 main_loop: asyncio.AbstractEventLoop | None = None
+orchestrator = None # Global reference
 
 class QueueHandler(logging.Handler):
     def emit(self, record):
@@ -45,6 +46,10 @@ templates_html = """
         .status { padding: 10px; border-radius: 4px; background: #333; margin-bottom: 20px; }
         .logs { background: #000; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; font-size: 0.9em; line-height: 1.4; }
         .persona { border-left: 4px solid #bb86fc; padding-left: 10px; margin-top: 20px; }
+        .controls { margin-top: 20px; padding: 10px; background: #333; border-radius: 4px; }
+        .btn { background: #bb86fc; color: #000; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px; }
+        .btn:hover { background: #9965f4; }
+        .btn-secondary { background: #666; color: #fff; }
         .log-entry { margin-bottom: 2px; border-bottom: 1px solid #222; white-space: pre-wrap; }
     </style>
 </head>
@@ -61,6 +66,14 @@ templates_html = """
             <p>{{ persona_name }} - {{ persona_role }}</p>
             <p><i>{{ persona_archetype }}</i></p>
         </div>
+
+        <div class="controls">
+            <h3>Discord Controls</h3>
+            <input type="text" id="channel_id" placeholder="Voice Channel ID" style="padding: 8px; border-radius: 4px; border: 1px solid #444; background: #222; color: #fff;">
+            <button class="btn" onclick="joinVoice()">Join Voice</button>
+            <button class="btn btn-secondary" onclick="leaveVoice()">Leave Voice</button>
+        </div>
+
         <h3>System Logs</h3>
         <div class="logs" id="logs">
             <div class="log-entry">[System] Dashboard initialized.</div>
@@ -81,6 +94,22 @@ templates_html = """
         eventSource.onerror = function(err) {
             console.error("EventSource failed:", err);
         };
+
+        async function joinVoice() {
+            const channelId = document.getElementById('channel_id').value;
+            if (!channelId) return alert("Please enter a Channel ID");
+            const resp = await fetch('/discord/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel_id: channelId })
+            });
+            if (resp.ok) console.log("Join command sent");
+        }
+
+        async function leaveVoice() {
+            const resp = await fetch('/discord/leave', { method: 'POST' });
+            if (resp.ok) console.log("Leave command sent");
+        }
     </script>
 </body>
 </html>
@@ -137,7 +166,31 @@ async def logs_stream(request: Request):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-async def run_dashboard(host: str = "0.0.0.0", port: int = 8000):
+@app.post("/discord/join")
+async def discord_join(request: Request):
+    data = await request.json()
+    channel_id = data.get("channel_id")
+    if orchestrator and orchestrator.discord_bot and channel_id:
+        try:
+            await orchestrator.discord_bot.join_voice(int(channel_id))
+            return {"status": "ok"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    return {"status": "error", "message": "Bot or Channel ID missing"}
+
+@app.post("/discord/leave")
+async def discord_leave():
+    if orchestrator and orchestrator.discord_bot:
+        try:
+            await orchestrator.discord_bot.leave_voice()
+            return {"status": "ok"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    return {"status": "error", "message": "Bot missing"}
+
+async def run_dashboard(orch=None, host: str = "0.0.0.0", port: int = 8000):
+    global orchestrator
+    orchestrator = orch
     import uvicorn
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)

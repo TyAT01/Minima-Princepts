@@ -46,6 +46,7 @@ class AureliaOrchestrator:
         # Callback for playing audio via Discord (set by AlwaysListenBot)
         self.discord_play_callback = None
         self.discord_stop_callback = None
+        self.discord_bot = None # Reference to AlwaysListenBot
         self._current_generation_task = None
 
         # Learning components

@@ -111,7 +111,7 @@ async def main() -> None:
             tasks.append(run_discord(orchestrator))
 
         if args.web:
-            tasks.append(web_dashboard.run_dashboard())
+            tasks.append(web_dashboard.run_dashboard(orch=orchestrator, port=settings.web_port))
 
         if tasks:
             await asyncio.gather(*tasks)

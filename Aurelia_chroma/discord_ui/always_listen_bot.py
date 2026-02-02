@@ -146,6 +146,7 @@ class AlwaysListenBot:
         self._worker_task = None
 
     async def run(self) -> None:
+        self._orchestrator.discord_bot = self
         self._worker_task = asyncio.create_task(self._response_worker())
         intents = nextcord.Intents.default()
         intents.message_content = True
@@ -210,17 +211,35 @@ class AlwaysListenBot:
             logger.info(f"Current members in voice: {members}")
 
     async def _connect_to_voice(self, bot):
-        guild = bot.get_guild(self._config.guild_id)
-        if not guild:
-            logger.error(f"Guild {self._config.guild_id} not found.")
-            return
-        channel = guild.get_channel(self._config.voice_channel_id)
-        if not channel:
-            logger.error(f"Channel {self._config.voice_channel_id} not found.")
+        await self.join_voice(self._config.voice_channel_id)
+
+    async def join_voice(self, channel_id: int):
+        if not self.bot:
+            logger.error("Bot not initialized.")
             return
 
-        self._voice_client = await channel.connect(cls=ListenVoiceClient)
-        asyncio.create_task(self.start_listening())
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            # Try to fetch it if it's not in cache
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except Exception as e:
+                logger.error(f"Could not find or fetch channel {channel_id}: {e}")
+                return
+
+        if self._voice_client:
+            await self._voice_client.move_to(channel)
+        else:
+            self._voice_client = await channel.connect(cls=ListenVoiceClient)
+            asyncio.create_task(self.start_listening())
+        logger.info(f"Connected to voice channel: {channel.name}")
+
+    async def leave_voice(self):
+        if self._voice_client:
+            await self._voice_client.disconnect()
+            self._voice_client = None
+            self._is_listening = False
+            logger.info("Disconnected from voice channel.")
 
     async def _response_worker(self):
         """Processes the response queue and plays audio sequentially."""
