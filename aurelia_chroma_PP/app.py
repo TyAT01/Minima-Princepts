@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sys
 from pathlib import Path
 import yaml
 
@@ -37,6 +38,16 @@ async def run_discord(orchestrator: AureliaOrchestrator) -> None:
     await bot.run()
 
 async def main() -> None:
+    # Setup file logging immediately
+    try:
+        log_dir = settings.data_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_dir / "app.log")
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        logger.addHandler(file_handler)
+    except Exception as e:
+        print(f"⚠️ Could not set up file logging: {e}")
+
     web_dashboard.main_loop = asyncio.get_running_loop()
     parser = argparse.ArgumentParser(description="Aurelia Vale Companion")
     parser.add_argument("--discord", action="store_true", dest="discord", help="Run Discord always-listening bot")
@@ -123,8 +134,7 @@ async def main() -> None:
             logger.info("No UI selected. Exiting.")
     except Exception as e:
         logger.critical(f"Critical failure during startup: {e}")
-        # In a real scenario, we might want to try to notify someone,
-        # but here we just log and exit.
+        sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
