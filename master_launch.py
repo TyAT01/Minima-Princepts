@@ -53,14 +53,19 @@ def setup_venv():
     else:
         print("✅ Existing virtual environment found.")
 
-    # Return the path to the venv's python executable
+    # Return the absolute path to the venv's python executable
     if sys.platform == "win32":
-        return venv_dir / "Scripts" / "python.exe"
+        return (venv_dir / "Scripts" / "python.exe").resolve()
     else:
-        return venv_dir / "bin" / "python"
+        return (venv_dir / "bin" / "python").resolve()
 
 def select_version():
     """Asks the user to select which version to run."""
+    if "--chroma" in sys.argv:
+        return "Aurelia_chroma"
+    if "--pp" in sys.argv:
+        return "aurelia_chroma_PP"
+
     print("\n--- 🌸 Select Aurelia Version 🌸 ---")
     print("1) Aurelia Chroma (Standard)")
     print("2) Aurelia Chroma PP (Personaplex)")
@@ -101,25 +106,38 @@ def launch_app(venv_python, version_dir):
     """Launches the AI application and the web dashboard."""
     print(f"\n🎨 Launching Aurelia Vale from {version_dir}...")
 
-    # Resolve absolute path before changing directory
-    abs_python = venv_python.resolve()
+    # Try to detect port from .env or config, default to 8000
+    port = 8000
+    env_path = Path(version_dir) / ".env"
+    if env_path.exists():
+        with open(env_path, "r") as f:
+            for line in f:
+                if "PORT=" in line.upper():
+                    try:
+                        port = int(line.split("=")[1].strip())
+                    except ValueError:
+                        pass
 
     # Run browser in a separate thread
     def open_browser():
         time.sleep(10) # Give the server some time to start
-        print("\n🌐 Opening Web Dashboard at http://localhost:8000")
-        webbrowser.open("http://localhost:8000")
+        print(f"\n🌐 Opening Web Dashboard at http://localhost:{port}")
+        webbrowser.open(f"http://localhost:{port}")
 
     Thread(target=open_browser, daemon=True).start()
 
     # Change to version directory and run app.py
     os.chdir(version_dir)
-    subprocess.run([str(abs_python), "app.py"])
+    subprocess.run([str(venv_python), "app.py"])
 
 if __name__ == "__main__":
     if "--help" in sys.argv:
         print("🌸 Aurelia Vale Master Launcher 🌸")
-        print("Usage: python3 master_launch.py")
+        print("Usage: python3 master_launch.py [options]")
+        print("Options:")
+        print("  --chroma    Launch Aurelia Chroma (Standard)")
+        print("  --pp        Launch Aurelia Chroma PP (Personaplex)")
+        print("  --help      Show this help message")
         sys.exit(0)
 
     print("🌸 Starting Aurelia Vale Master Setup 🌸")
