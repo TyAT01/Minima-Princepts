@@ -17,11 +17,15 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("StandaloneSim")
 
 def load_persona_prompt() -> str:
-    with open(settings.persona_yaml, "r", encoding="utf-8") as f:
-        persona_data = yaml.safe_load(f)
+    try:
+        with open(settings.persona_yaml, "r", encoding="utf-8") as f:
+            persona_data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        persona_data = {}
+
     character = persona_data.get("character", {})
-    name = character.get("name", "Aurelia")
-    core_identity = character.get("core_identity", {}).get("self_awareness", "I am an AI.")
+    name = character.get("name", "Aurelia Vale")
+    core_identity = (character.get("core_identity") or {}).get("self_awareness") or "I am Aurelia Vale, an AI companion."
     system_prompt = f"You are {name}. Your core identity is: '{core_identity}'."
     return system_prompt
 

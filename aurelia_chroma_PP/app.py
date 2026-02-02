@@ -122,7 +122,9 @@ async def main() -> None:
         else:
             logger.info("No UI selected. Exiting.")
     except Exception as e:
+        import traceback
         logger.critical(f"Critical failure during startup: {e}")
+        logger.critical(traceback.format_exc())
         # In a real scenario, we might want to try to notify someone,
         # but here we just log and exit.
 
