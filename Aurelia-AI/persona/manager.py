@@ -15,9 +15,16 @@ class PersonaManager:
         self.system_prompt: str = ""
 
     def load_persona(self):
-        """Loads the YAML character sheet with fallback path discovery."""
+        """Loads the YAML character sheet with robust path discovery."""
+        # Get the directory where the script is located (Aurelia-AI or the root)
+        current_dir = Path(__file__).resolve().parent
+        project_root = current_dir.parent # Parent of persona/ is Aurelia-AI/
+
+        # Search paths relative to script location and common structures
         search_paths = [
             self.sheet_path,
+            project_root / "Aurelia_chroma" / "aurelia_sheet.yaml",
+            project_root.parent / "Aurelia_chroma" / "aurelia_sheet.yaml",
             Path("Aurelia_chroma/aurelia_sheet.yaml"),
             Path("../Aurelia_chroma/aurelia_sheet.yaml"),
             Path("aurelia_sheet.yaml")
@@ -25,12 +32,15 @@ class PersonaManager:
 
         found_path = None
         for p in search_paths:
-            if p.exists():
-                found_path = p
-                break
+            try:
+                if p.exists():
+                    found_path = p
+                    break
+            except:
+                continue
 
         if not found_path:
-            logger.error(f"Character sheet not found in any common locations. Searched: {search_paths}")
+            logger.error(f"Character sheet not found. Searched in common locations.")
             # Fallback to a basic persona if file is missing
             self.system_prompt = "You are Aurelia Vale, a helpful AI companion."
             return
@@ -47,6 +57,10 @@ class PersonaManager:
 
     def _build_system_prompt(self):
         """Constructs the system prompt from the persona data."""
+        if not self.persona_data:
+            self.system_prompt = "You are Aurelia Vale, a helpful AI companion."
+            return
+
         char = self.persona_data.get('character', {})
         name = char.get('name', 'Aurelia Vale')
         role = char.get('role', 'AI Companion')
@@ -78,7 +92,7 @@ class PersonaManager:
         prompt += "### SPEECH PATTERNS\n"
         prompt += f"Style: {speech.get('style', 'Natural')}\n"
         prompt += "Examples:\n"
-        if speech.get('examples'):
+        if isinstance(speech.get('examples'), list):
             for example in speech.get('examples', []):
                 prompt += f"  - \"{example}\"\n"
         prompt += "\n"
