@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import soundfile as sf
 import nextcord
 from nextcord.ext import commands
-from nextcord.ext.listening import AudioSink, VoiceClient as ListenVoiceClient
+from nextcord.ext.listening import AudioSink, VoiceClient as ListenVoiceClient, AudioProcessPool
 import numpy as np
 import librosa
 
@@ -144,6 +144,8 @@ class AlwaysListenBot:
         self.bot = None
         self._response_queue = asyncio.Queue()
         self._worker_task = None
+        self._processing_pool = None
+        self._join_lock = asyncio.Lock()
 
     async def run(self) -> None:
         self._orchestrator.discord_bot = self
@@ -200,7 +202,23 @@ class AlwaysListenBot:
                 logger.exception("Error in on_message")
                 await self._orchestrator.report_error(str(e))
 
-        await bot.start(self._config.token)
+        try:
+            await bot.start(self._config.token)
+        finally:
+            await self.cleanup()
+
+    async def cleanup(self):
+        """Cleans up resources, including the audio processing pool."""
+        if self._processing_pool:
+            try:
+                self._processing_pool.cleanup_processes()
+                logger.info("Cleaned up audio processing pool.")
+            except Exception as e:
+                logger.warning(f"Error cleaning up processing pool: {e}")
+            self._processing_pool = None
+
+        if self._worker_task:
+            self._worker_task.cancel()
 
     def _update_members(self):
         if self._voice_client and self._voice_client.channel:
@@ -214,61 +232,62 @@ class AlwaysListenBot:
         await self.join_voice(self._config.voice_channel_id)
 
     async def join_voice(self, channel_id: int):
-        if not self.bot:
-            logger.error("Bot not initialized.")
-            return
-
-        channel = self.bot.get_channel(channel_id)
-        if not channel:
-            # Try to fetch it if it's not in cache
-            try:
-                channel = await self.bot.fetch_channel(channel_id)
-            except Exception as e:
-                logger.error(f"Could not find or fetch channel {channel_id}: {e}")
+        async with self._join_lock:
+            if not self.bot:
+                logger.error("Bot not initialized.")
                 return
 
-        # Thoroughly clean up any existing voice clients for this guild to prevent 4006/Already Connected errors
-        for vc in self.bot.voice_clients:
-            if vc.guild.id == channel.guild.id:
-                if vc.is_connected() and vc.channel.id == channel_id:
-                    logger.info("Already connected to the correct channel.")
-                    self._voice_client = vc
-                    if not self._is_listening:
-                         asyncio.create_task(self.start_listening())
-                    return
-                else:
-                    logger.info(f"Forcing disconnect of existing voice client in guild {vc.guild.id}")
-                    try:
-                        await vc.disconnect(force=True)
-                        await asyncio.sleep(1) # Give Discord a moment to process disconnect
-                    except Exception as e:
-                        logger.warning(f"Error during forced disconnect: {e}")
-
-        self._voice_client = None
-        self._is_listening = False
-
-        if True: # Always attempt fresh connection if we reached here
-            max_retries = 3
-            for attempt in range(max_retries):
+            channel = self.bot.get_channel(channel_id)
+            if not channel:
+                # Try to fetch it if it's not in cache
                 try:
-                    logger.info(f"Connecting to voice channel (attempt {attempt + 1}/{max_retries})...")
-                    self._voice_client = await channel.connect(cls=ListenVoiceClient, timeout=20.0, reconnect=True)
-                    asyncio.create_task(self.start_listening())
-                    logger.info(f"Connected to voice channel: {channel.name}")
-                    break
+                    channel = await self.bot.fetch_channel(channel_id)
                 except Exception as e:
-                    logger.error(f"Failed to connect to voice (attempt {attempt + 1}): {e}")
-                    if self._voice_client:
-                        try:
-                            await self._voice_client.disconnect(force=True)
-                        except Exception:
-                            pass
-                        self._voice_client = None
+                    logger.error(f"Could not find or fetch channel {channel_id}: {e}")
+                    return
 
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(5)
+            # Thoroughly clean up any existing voice clients for this guild to prevent 4006/Already Connected errors
+            for vc in self.bot.voice_clients:
+                if vc.guild.id == channel.guild.id:
+                    if vc.is_connected() and vc.channel.id == channel_id:
+                        logger.info("Already connected to the correct channel.")
+                        self._voice_client = vc
+                        if not self._is_listening:
+                             asyncio.create_task(self.start_listening())
+                        return
                     else:
-                        logger.error("All voice connection attempts failed.")
+                        logger.info(f"Forcing disconnect of existing voice client in guild {vc.guild.id}")
+                        try:
+                            await vc.disconnect(force=True)
+                            await asyncio.sleep(1) # Give Discord a moment to process disconnect
+                        except Exception as e:
+                            logger.warning(f"Error during forced disconnect: {e}")
+
+            self._voice_client = None
+            self._is_listening = False
+
+            if True: # Always attempt fresh connection if we reached here
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        logger.info(f"Connecting to voice channel (attempt {attempt + 1}/{max_retries})...")
+                        self._voice_client = await channel.connect(cls=ListenVoiceClient, timeout=20.0, reconnect=True)
+                        asyncio.create_task(self.start_listening())
+                        logger.info(f"Connected to voice channel: {channel.name}")
+                        break
+                    except Exception as e:
+                        logger.error(f"Failed to connect to voice (attempt {attempt + 1}): {e}")
+                        if self._voice_client:
+                            try:
+                                await self._voice_client.disconnect(force=True)
+                            except Exception:
+                                pass
+                            self._voice_client = None
+
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(5)
+                        else:
+                            logger.error("All voice connection attempts failed.")
 
     async def leave_voice(self):
         if self._voice_client:
@@ -344,10 +363,12 @@ class AlwaysListenBot:
     async def start_listening(self):
         if self._voice_client and not self._is_listening:
             self._is_listening = True
+            if not self._processing_pool:
+                self._processing_pool = AudioProcessPool(2)
             # VAD config for Discord's 48kHz audio
             vad_config = VADConfig(aggressiveness=3, sample_rate=self._config.discord_sample_rate)
             sink = AureliaAudioSink(self, vad_config)
-            self._voice_client.listen(sink)
+            self._voice_client.listen(sink, self._processing_pool)
             logger.info("Started listening in voice channel.")
 
     async def process_audio_data(self, user, data):
