@@ -3,6 +3,7 @@ import logging
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor, TextIteratorStreamer
 import numpy as np
+import librosa
 from threading import Thread
 from typing import Generator, Tuple, Optional
 from llm.filters import ContentFilter
@@ -70,7 +71,12 @@ class ChromaClient:
             {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
             {"role": "user", "content": [{"type": "audio", "audio": audio_path}]}
         ]]
-        audio, text = self._generate_response(conversation)
+
+        # Load audio data as it's now required by the processor
+        audio_data, _ = librosa.load(audio_path, sr=16000)
+        audio_tensor = torch.from_numpy(audio_data).to(torch.float32).to(self._device)
+
+        audio, text = self._generate_response(conversation, prompt_audio=audio_tensor)
         return audio, self._filter.filter_text(text) if text else text
 
     def respond_to_text(self, text: str, context: str = "") -> tuple[np.ndarray | None, str | None]:
@@ -88,7 +94,7 @@ class ChromaClient:
             {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
             {"role": "user", "content": [{"type": "text", "text": text}]}
         ]]
-        audio, text = self._generate_response(conversation)
+        audio, text = self._generate_response(conversation, prompt_audio=None)
         return audio, self._filter.filter_text(text) if text else text
 
     def stream_respond_to_text(self, text: str, context: str = "") -> Generator[str, None, None]:
@@ -107,7 +113,7 @@ class ChromaClient:
             {"role": "user", "content": [{"type": "text", "text": text}]}
         ]]
 
-        inputs = self._processor(conversation, add_generation_prompt=True, return_tensors="pt")
+        inputs = self._processor(prompt_audio=None, prompt_text=conversation, add_generation_prompt=True, return_tensors="pt")
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
         streamer = TextIteratorStreamer(self._processor, skip_prompt=True, skip_special_tokens=True)
@@ -144,7 +150,11 @@ class ChromaClient:
             {"role": "user", "content": [{"type": "audio", "audio": audio_path}]}
         ]]
 
-        inputs = self._processor(conversation, add_generation_prompt=True, return_tensors="pt")
+        # Load audio data for processor
+        audio_data, _ = librosa.load(audio_path, sr=16000)
+        audio_tensor = torch.from_numpy(audio_data).to(torch.float32).to(self._device)
+
+        inputs = self._processor(prompt_audio=audio_tensor, prompt_text=conversation, add_generation_prompt=True, return_tensors="pt")
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
         streamer = TextIteratorStreamer(self._processor, skip_prompt=True, skip_special_tokens=True)
@@ -180,7 +190,7 @@ class ChromaClient:
         try:
             # We want the model to generate audio tokens for the text we just gave it.
             # Some models might need a specific prompt to 'read' the text.
-            inputs = self._processor(conversation, add_generation_prompt=False, return_tensors="pt")
+            inputs = self._processor(prompt_audio=None, prompt_text=conversation, add_generation_prompt=False, return_tensors="pt")
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             output = self._model.generate(
@@ -198,10 +208,10 @@ class ChromaClient:
 
         return None
 
-    def _generate_response(self, conversation: list, do_sample: bool = True) -> tuple[np.ndarray | None, str | None]:
+    def _generate_response(self, conversation: list, prompt_audio: Optional[torch.Tensor] = None, do_sample: bool = True) -> tuple[np.ndarray | None, str | None]:
         try:
             # return_tensors="pt" is usually required for the model
-            inputs = self._processor(conversation, add_generation_prompt=True, return_tensors="pt")
+            inputs = self._processor(prompt_audio=prompt_audio, prompt_text=conversation, add_generation_prompt=True, return_tensors="pt")
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             output = self._model.generate(
