@@ -35,18 +35,14 @@ def require_env(name: str) -> str:
     return value
 
 async def run_discord(orchestrator: AureliaOrchestrator) -> None:
-    try:
-        token = require_env("AURELIA_VALE_DISCORD_TOKEN")
-        guild_id = int(require_env("AURELIA_VALE_DISCORD_GUILD_ID"))
-        voice_id = int(require_env("AURELIA_VALE_DISCORD_VOICE_CHANNEL_ID"))
-    except (RuntimeError, ValueError) as e:
-        logger.warning(f"Discord config incomplete ({e}). Skipping Discord bot.")
+    if not settings.discord_token or not settings.discord_guild_id or not settings.discord_voice_channel_id:
+        logger.warning("Discord config incomplete (check your .env file). Skipping Discord bot.")
         return
 
     config = DiscordVoiceConfig(
-        token=token,
-        guild_id=guild_id,
-        voice_channel_id=voice_id,
+        token=settings.discord_token,
+        guild_id=int(settings.discord_guild_id),
+        voice_channel_id=int(settings.discord_voice_channel_id),
         sample_rate=settings.sample_rate,
         discord_sample_rate=settings.discord_sample_rate,
     )
