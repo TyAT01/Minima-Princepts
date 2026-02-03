@@ -44,7 +44,7 @@ class ChromaClient:
                 self._model_id,
                 trust_remote_code=True,
                 device_map="auto",
-                torch_dtype=dtype,
+                dtype=dtype,
                 quantization_config=quant_config
             )
             self._processor = AutoProcessor.from_pretrained(self._model_id, trust_remote_code=True)
