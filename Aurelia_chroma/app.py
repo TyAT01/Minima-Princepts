@@ -1,9 +1,13 @@
 from __future__ import annotations
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, message=".*pkg_resources is deprecated.*")
+# Suppress noisy model loading reports from transformers
+import logging
+logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+
 import argparse
 import asyncio
-import logging
 import os
 from pathlib import Path
 import yaml
