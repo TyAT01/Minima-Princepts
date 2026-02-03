@@ -30,12 +30,17 @@ You can define personalities by modifying the config file.
 
 ## 🛠️ Setup
 
-### Install Dependencies
+### Windows (Recommended)
+Run the automated setup script to create a virtual environment and install all dependencies:
+1. Double-click `setup_venv.bat`
+2. Wait for the installation to finish.
 
+### Manual / Linux
 ```bash
-pip install uv
-uv pip install -r extra-req.txt
-uv pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+pip install -r requirements.txt
+pip install -r extra-req.txt
 ```
 
 **GPU Support (RTX 3070 optimized):**
