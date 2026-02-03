@@ -16,7 +16,7 @@ from ui.web_gui import AureliaGUI
 from utils.error_handler import ErrorHandler
 
 class AureliaApp:
-    def __init__(self, config_path: str = "Aurelia-AI/config.yaml"):
+    def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
 
         self.error_handler = ErrorHandler(ai_comment_callback=self.ai_comment_on_error)
@@ -44,6 +44,7 @@ class AureliaApp:
         )
 
         pers_cfg = self.config.get('persona', {})
+        # Note: sheet_path in config might be relative to the version folder
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'Aurelia_chroma/aurelia_sheet.yaml'))
 
         ui_cfg = self.config.get('ui', {})
@@ -56,10 +57,19 @@ class AureliaApp:
 
     def _load_config(self, path: str) -> dict:
         try:
+            if not os.path.exists(path):
+                # Try one level up if not found (e.g. if run from root)
+                alt_path = os.path.join("Aurelia-AI", path)
+                if os.path.exists(alt_path):
+                    path = alt_path
+                else:
+                    print(f"Warning: Config file {path} not found. Using defaults.")
+                    return {}
+
             with open(path, 'r') as f:
                 return yaml.safe_load(f)
         except Exception as e:
-            print(f"Warning: Could not load config from {path}, using defaults. Error: {e}")
+            print(f"Warning: Error loading config from {path}: {e}")
             return {}
 
     def initialize(self):
@@ -80,8 +90,7 @@ class AureliaApp:
 
             self.memory.add_interaction(text, response)
 
-            # Intelligent background: check if we should "reflect" (every 10 interactions for example)
-            # This is a simple hook for "years of storage" intelligence
+            # Intelligent background: check if we should "reflect" (every 10 interactions)
             if len(self.memory._collection.get()['ids']) % 10 == 0:
                  self.reflect()
 
