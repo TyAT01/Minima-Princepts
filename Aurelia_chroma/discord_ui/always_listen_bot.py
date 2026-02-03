@@ -227,21 +227,27 @@ class AlwaysListenBot:
                 logger.error(f"Could not find or fetch channel {channel_id}: {e}")
                 return
 
-        # Cleanup existing but broken or mismatched connection
-        if self._voice_client:
-            if not self._voice_client.is_connected():
-                logger.info("Cleaning up disconnected voice client.")
-                try:
-                    await self._voice_client.disconnect(force=True)
-                except Exception:
-                    pass
-                self._voice_client = None
-            elif self._voice_client.channel.id != channel_id:
-                logger.info(f"Moving from {self._voice_client.channel.id} to {channel_id}")
-                await self._voice_client.move_to(channel)
-                return
+        # Thoroughly clean up any existing voice clients for this guild to prevent 4006/Already Connected errors
+        for vc in self.bot.voice_clients:
+            if vc.guild.id == channel.guild.id:
+                if vc.is_connected() and vc.channel.id == channel_id:
+                    logger.info("Already connected to the correct channel.")
+                    self._voice_client = vc
+                    if not self._is_listening:
+                         asyncio.create_task(self.start_listening())
+                    return
+                else:
+                    logger.info(f"Forcing disconnect of existing voice client in guild {vc.guild.id}")
+                    try:
+                        await vc.disconnect(force=True)
+                        await asyncio.sleep(1) # Give Discord a moment to process disconnect
+                    except Exception as e:
+                        logger.warning(f"Error during forced disconnect: {e}")
 
-        if not self._voice_client:
+        self._voice_client = None
+        self._is_listening = False
+
+        if True: # Always attempt fresh connection if we reached here
             max_retries = 3
             for attempt in range(max_retries):
                 try:
