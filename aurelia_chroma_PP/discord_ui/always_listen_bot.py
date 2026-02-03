@@ -227,12 +227,42 @@ class AlwaysListenBot:
                 logger.error(f"Could not find or fetch channel {channel_id}: {e}")
                 return
 
+        # Cleanup existing but broken or mismatched connection
         if self._voice_client:
-            await self._voice_client.move_to(channel)
-        else:
-            self._voice_client = await channel.connect(cls=ListenVoiceClient)
-            asyncio.create_task(self.start_listening())
-        logger.info(f"Connected to voice channel: {channel.name}")
+            if not self._voice_client.is_connected():
+                logger.info("Cleaning up disconnected voice client.")
+                try:
+                    await self._voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                self._voice_client = None
+            elif self._voice_client.channel.id != channel_id:
+                logger.info(f"Moving from {self._voice_client.channel.id} to {channel_id}")
+                await self._voice_client.move_to(channel)
+                return
+
+        if not self._voice_client:
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Connecting to voice channel (attempt {attempt + 1}/{max_retries})...")
+                    self._voice_client = await channel.connect(cls=ListenVoiceClient, timeout=20.0, reconnect=True)
+                    asyncio.create_task(self.start_listening())
+                    logger.info(f"Connected to voice channel: {channel.name}")
+                    break
+                except Exception as e:
+                    logger.error(f"Failed to connect to voice (attempt {attempt + 1}): {e}")
+                    if self._voice_client:
+                        try:
+                            await self._voice_client.disconnect(force=True)
+                        except Exception:
+                            pass
+                        self._voice_client = None
+
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(5)
+                    else:
+                        logger.error("All voice connection attempts failed.")
 
     async def leave_voice(self):
         if self._voice_client:

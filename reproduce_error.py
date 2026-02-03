@@ -18,11 +18,11 @@ try:
     ]]
 
     try:
-        print("Testing with prompt_audio and prompt_text...")
-        inputs = processor(prompt_audio=None, prompt_text=conversation, add_generation_prompt=True, return_tensors="pt")
-        print("Success with prompt_audio and prompt_text!")
+        print("Testing with prompt_audio and conversations...")
+        inputs = processor(prompt_audio=None, conversations=conversation, add_generation_prompt=True, return_tensors="pt")
+        print("Success with prompt_audio and conversations!")
     except Exception as e:
-        print(f"Error with prompt_audio and prompt_text: {e}")
+        print(f"Error with prompt_audio and conversations: {e}")
 
 except Exception as e:
     print(f"Failed to load processor: {e}")
