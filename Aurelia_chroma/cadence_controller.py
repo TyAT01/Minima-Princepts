@@ -136,7 +136,8 @@ class AureliaCadenceController:
         self._last_update_ts = now
 
         # ingest messages
-        for m in signals.chat_messages:
+        messages = signals.chat_messages or []
+        for m in messages:
             msg_id = (m.user, m.ts, m.text)
             if msg_id in self._seen_msg_ids:
                 continue

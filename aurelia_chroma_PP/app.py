@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 from pathlib import Path
 import yaml
 
@@ -21,15 +22,25 @@ import web_dashboard
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aurelia_vale")
 
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 async def run_discord(orchestrator: AureliaOrchestrator) -> None:
-    if not (settings.discord_token and settings.discord_guild_id and settings.discord_voice_channel_id):
-        logger.warning("Discord config missing. Skipping Discord bot.")
+    try:
+        token = require_env("AURELIA_VALE_DISCORD_TOKEN")
+        guild_id = int(require_env("AURELIA_VALE_DISCORD_GUILD_ID"))
+        voice_id = int(require_env("AURELIA_VALE_DISCORD_VOICE_CHANNEL_ID"))
+    except (RuntimeError, ValueError) as e:
+        logger.warning(f"Discord config incomplete ({e}). Skipping Discord bot.")
         return
 
     config = DiscordVoiceConfig(
-        token=settings.discord_token,
-        guild_id=settings.discord_guild_id,
-        voice_channel_id=settings.discord_voice_channel_id,
+        token=token,
+        guild_id=guild_id,
+        voice_channel_id=voice_id,
         sample_rate=settings.sample_rate,
         discord_sample_rate=settings.discord_sample_rate,
     )
@@ -81,17 +92,17 @@ async def main() -> None:
         twitch_adapter = None
         if args.twitch:
             twitch_adapter = TwitchChatAdapter(
-                username=settings.twitch_username,
-                token=settings.twitch_token,
-                channel=settings.twitch_channel
+                username=require_env("AURELIA_VALE_TWITCH_USERNAME"),
+                token=require_env("AURELIA_VALE_TWITCH_TOKEN"),
+                channel=require_env("AURELIA_VALE_TWITCH_CHANNEL")
             )
 
         youtube_adapter = None
         if args.youtube:
             youtube_adapter = YouTubeChatAdapter(
-                api_key=settings.youtube_api_key,
-                token=settings.youtube_token,
-                live_chat_id=settings.youtube_live_chat_id
+                api_key=require_env("AURELIA_VALE_YOUTUBE_API_KEY"),
+                token=require_env("AURELIA_VALE_YOUTUBE_TOKEN"),
+                live_chat_id=require_env("AURELIA_VALE_YOUTUBE_LIVE_CHAT_ID")
             )
 
         local_audio_player = None
@@ -123,8 +134,10 @@ async def main() -> None:
             logger.info("No UI selected. Exiting.")
     except Exception as e:
         import traceback
+        print("\n🔥 STARTUP CRASH 🔥")
         logger.critical(f"Critical failure during startup: {e}")
-        logger.critical(traceback.format_exc())
+        traceback.print_exc()
+        input("\nPress Enter to exit...")
         # In a real scenario, we might want to try to notify someone,
         # but here we just log and exit.
 
