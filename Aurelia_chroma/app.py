@@ -1,4 +1,6 @@
 from __future__ import annotations
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, message=".*pkg_resources is deprecated.*")
 import argparse
 import asyncio
 import logging

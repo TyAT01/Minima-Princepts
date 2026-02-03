@@ -44,6 +44,7 @@ class ChromaClient:
                 self._model_id,
                 trust_remote_code=True,
                 device_map="auto",
+                low_cpu_mem_usage=True,
                 dtype=dtype,
                 quantization_config=quant_config
             )
