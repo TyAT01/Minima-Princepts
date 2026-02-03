@@ -157,7 +157,7 @@ def build_gradio_ui():
 
         with gr.Tabs():
             with gr.TabItem("💬 Chat"):
-                chatbot = gr.Chatbot(label="Conversation", type="messages")
+                chatbot = gr.Chatbot(label="Conversation")
                 with gr.Row():
                     msg = gr.Textbox(placeholder="Type a message...", scale=4)
                     submit = gr.Button("Send", variant="primary")
