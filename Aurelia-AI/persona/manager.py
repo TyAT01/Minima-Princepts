@@ -2,7 +2,7 @@ import yaml
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -15,33 +15,38 @@ class PersonaManager:
         self.system_prompt: str = ""
 
     def load_persona(self):
-        """Loads the YAML character sheet with robust path discovery."""
-        # Get the directory where the script is located (Aurelia-AI or the root)
-        current_dir = Path(__file__).resolve().parent
-        project_root = current_dir.parent # Parent of persona/ is Aurelia-AI/
-
-        # Search paths relative to script location and common structures
-        search_paths = [
+        """Loads the YAML character sheet with aggressive path discovery."""
+        search_paths: List[Path] = [
             self.sheet_path,
-            project_root / "Aurelia_chroma" / "aurelia_sheet.yaml",
-            project_root.parent / "Aurelia_chroma" / "aurelia_sheet.yaml",
             Path("Aurelia_chroma/aurelia_sheet.yaml"),
             Path("../Aurelia_chroma/aurelia_sheet.yaml"),
-            Path("aurelia_sheet.yaml")
+            Path("aurelia_sheet.yaml"),
+            # Search from script location
+            Path(__file__).resolve().parent.parent / "Aurelia_chroma" / "aurelia_sheet.yaml",
+            Path(__file__).resolve().parent.parent.parent / "Aurelia_chroma" / "aurelia_sheet.yaml",
         ]
+
+        # Add even more candidate folders by looking for any folder named *chroma* or *Aurelia*
+        try:
+            cwd = Path.cwd()
+            for p in [cwd, cwd.parent]:
+                for candidate in p.glob("**/aurelia_sheet.yaml"):
+                    if candidate not in search_paths:
+                        search_paths.append(candidate)
+        except:
+            pass
 
         found_path = None
         for p in search_paths:
             try:
-                if p.exists():
+                if p.exists() and p.is_file():
                     found_path = p
                     break
             except:
                 continue
 
         if not found_path:
-            logger.error(f"Character sheet not found. Searched in common locations.")
-            # Fallback to a basic persona if file is missing
+            logger.error(f"Character sheet 'aurelia_sheet.yaml' not found. Please ensure it exists.")
             self.system_prompt = "You are Aurelia Vale, a helpful AI companion."
             return
 

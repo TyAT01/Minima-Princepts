@@ -101,9 +101,32 @@ class AureliaApp:
         try:
             logging.info("Initializing Aurelia AI...")
             self.persona.load_persona()
+
+            # Simple check for model availability in background
+            self._check_llm_ready()
+
             logging.info("Initialization complete.")
         except Exception as e:
             self.error_handler.handle_error(e, "Initialization")
+
+    def _check_llm_ready(self):
+        """Perform a non-blocking check if the model is available in Ollama."""
+        def check():
+            try:
+                base = self.llm.base_url
+                if base.endswith("/api"): base = base[:-4]
+                resp = requests.get(f"{base}/api/tags", timeout=5)
+                if resp.status_code == 200:
+                    models = [m.get("name") for m in resp.json().get("models", [])]
+                    target = self.llm.model
+                    # Handle both name and name:tag
+                    if target not in models and (target + ":latest") not in models:
+                        logging.warning(f"Model '{target}' might be missing from Ollama. Available: {models}")
+            except:
+                pass
+
+        import threading
+        threading.Thread(target=check, daemon=True).start()
 
     def process_text(self, text: Any) -> str:
         # Robustly handle list/dict inputs from Gradio

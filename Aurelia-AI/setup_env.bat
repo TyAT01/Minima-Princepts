@@ -33,5 +33,13 @@ if not exist "%ROCM2%" (
     mkdir "%ROCM2%" >nul 2>&1
 )
 
+echo [Aurelia-AI] Verifying persona files...
+if not exist "..\Aurelia_chroma\aurelia_sheet.yaml" (
+    if not exist "aurelia_sheet.yaml" (
+        echo [WARNING] Character sheet 'aurelia_sheet.yaml' not found!
+        echo Please ensure it is in the 'Aurelia_chroma' sibling folder or the current folder.
+    )
+)
+
 echo [Aurelia-AI] Setup complete! You can now use launch_aurelia.bat
 pause

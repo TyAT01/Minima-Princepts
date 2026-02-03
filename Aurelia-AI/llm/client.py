@@ -23,29 +23,58 @@ class LlamaClient:
         logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model}")
 
     def generate_response(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "") -> str:
-        """Generates a response using the Llama model with automatic endpoint discovery."""
+        """Generates a response using the Llama model with automatic endpoint discovery and model checks."""
         logger.info(f"Generating response for input: {user_input[:50]}...")
 
         if self.api_type == "ollama":
-            try:
-                return self._generate_ollama(system_prompt, user_input, history, context)
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 404 and self._endpoint_type == "chat":
-                    logger.warning("Ollama /api/chat not found (404). Falling back to /api/generate.")
-                    self._endpoint_type = "generate"
-                    return self._generate_ollama(system_prompt, user_input, history, context)
-                raise
+            return self._generate_ollama_with_fallback(system_prompt, user_input, history, context)
         else:
             return self._generate_openai(system_prompt, user_input, history, context)
 
-    def _generate_ollama(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str) -> str:
-        if self._endpoint_type == "chat":
-            return self._generate_ollama_chat(system_prompt, user_input, history, context)
-        else:
-            return self._generate_ollama_generate(system_prompt, user_input, history, context)
+    def _generate_ollama_with_fallback(self, system_prompt, user_input, history, context):
+        endpoints = ["chat", "generate", "openai"]
+        if self._endpoint_type != "chat":
+            # Rotate to put current preferred first
+            if self._endpoint_type in endpoints:
+                endpoints.remove(self._endpoint_type)
+                endpoints.insert(0, self._endpoint_type)
+
+        last_error = None
+        for etype in endpoints:
+            try:
+                if etype == "chat":
+                    res = self._generate_ollama_chat(system_prompt, user_input, history, context)
+                elif etype == "generate":
+                    res = self._generate_ollama_generate(system_prompt, user_input, history, context)
+                else: # openai style
+                    res = self._generate_openai(system_prompt, user_input, history, context)
+
+                self._endpoint_type = etype
+                return res
+            except requests.exceptions.HTTPError as e:
+                last_error = e
+                if e.response.status_code == 404:
+                    logger.warning(f"Ollama /{etype} not found (404). Trying next endpoint...")
+                    continue
+                # If it's a 404 with a specific body about the model, handle it
+                try:
+                    error_data = e.response.json()
+                    if "model" in error_data.get("error", "").lower() and "not found" in error_data.get("error", "").lower():
+                        raise Exception(f"Model '{self.model}' not found in Ollama. Please run: ollama pull {self.model}")
+                except:
+                    pass
+                raise
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Error with {etype}: {e}")
+                continue
+
+        # If all failed
+        if last_error:
+            raise last_error
+        raise Exception("All Ollama endpoints failed. Please check if Ollama is running and the model is pulled.")
 
     def _generate_ollama_chat(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str) -> str:
-        logger.debug("Using Ollama /api/chat endpoint")
         messages = [{"role": "system", "content": system_prompt}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
@@ -70,7 +99,6 @@ class LlamaClient:
         return data.get("message", {}).get("content", "").strip()
 
     def _generate_ollama_generate(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str) -> str:
-        logger.debug("Using Ollama /api/generate endpoint (fallback)")
         # Fallback for old Ollama versions without /api/chat
         full_prompt = f"{system_prompt}\n\n"
         if context:
@@ -113,23 +141,21 @@ class LlamaClient:
             "max_tokens": 512,
         }
 
-        # Recent Ollama versions support OpenAI style at /v1/chat/completions
-        # But for general OpenAI compatible servers, we use /chat/completions
-        # If the base_url is .../api, we might need to strip /api
+        # Determine base from self.base_url
         base = self.base_url
         if base.endswith("/api"):
              base = base[:-4]
 
-        endpoint = f"{base}/v1/chat/completions"
-        try:
-            response = requests.post(endpoint, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        except:
-            # Fallback to the provided base if /v1 fails
-            endpoint = f"{self.base_url}/chat/completions"
-            response = requests.post(endpoint, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        # Try /v1 first, then fallback
+        endpoints = [f"{base}/v1/chat/completions", f"{self.base_url}/chat/completions"]
+
+        for ep in endpoints:
+            try:
+                response = requests.post(ep, json=payload, timeout=60)
+                response.raise_for_status()
+                data = response.json()
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            except:
+                continue
+
+        raise Exception(f"Failed to connect to OpenAI-compatible API at {base}")
