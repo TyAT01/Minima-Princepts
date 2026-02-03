@@ -65,34 +65,41 @@ class AureliaGUI:
                 return "", history + [[user_input, None]]
 
             def bot_response(history):
-                if not history: return []
+                if not history: return [], ""
                 user_input = history[-1][0]
                 try:
                     response = self.process_text_cb(user_input)
                     history[-1][1] = response
+                    return history, "" # Clear error box on success
                 except Exception as e:
-                    history[-1][1] = f"[System Error]: {str(e)}"
-                return history
+                    err_msg = str(e)
+                    history[-1][1] = f"[System Error]: {err_msg}"
+                    return history, err_msg
 
             def handle_audio(audio_path, history):
                 if history is None: history = []
                 if not audio_path:
-                    return history
+                    return history, ""
 
-                user_txt, bot_txt = self.process_audio_cb(audio_path)
-                history.append([user_txt, bot_txt])
-                return history
+                try:
+                    user_txt, bot_txt = self.process_audio_cb(audio_path)
+                    history.append([user_txt, bot_txt])
+                    return history, ""
+                except Exception as e:
+                    err_msg = str(e)
+                    history.append(["[Audio Input]", f"[System Error]: {err_msg}"])
+                    return history, err_msg
 
             msg.submit(user_message, [msg, chatbot], [msg, chatbot], queue=False).then(
-                bot_response, chatbot, chatbot
+                bot_response, chatbot, [chatbot, error_box]
             )
             submit_btn.click(user_message, [msg, chatbot], [msg, chatbot], queue=False).then(
-                bot_response, chatbot, chatbot
+                bot_response, chatbot, [chatbot, error_box]
             )
 
-            stt_btn.click(handle_audio, [audio_input, chatbot], chatbot)
+            stt_btn.click(handle_audio, [audio_input, chatbot], [chatbot, error_box])
 
-            clear_btn.click(lambda: None, None, chatbot, queue=False)
+            clear_btn.click(lambda: (None, ""), None, [chatbot, error_box], queue=False)
 
         self.interface = demo
 

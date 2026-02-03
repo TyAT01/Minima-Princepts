@@ -1,5 +1,6 @@
 import yaml
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Any
 
@@ -14,20 +15,34 @@ class PersonaManager:
         self.system_prompt: str = ""
 
     def load_persona(self):
-        """Loads the YAML character sheet."""
-        if not self.sheet_path.exists():
-            logger.error(f"Character sheet not found at {self.sheet_path}")
+        """Loads the YAML character sheet with fallback path discovery."""
+        search_paths = [
+            self.sheet_path,
+            Path("Aurelia_chroma/aurelia_sheet.yaml"),
+            Path("../Aurelia_chroma/aurelia_sheet.yaml"),
+            Path("aurelia_sheet.yaml")
+        ]
+
+        found_path = None
+        for p in search_paths:
+            if p.exists():
+                found_path = p
+                break
+
+        if not found_path:
+            logger.error(f"Character sheet not found in any common locations. Searched: {search_paths}")
             # Fallback to a basic persona if file is missing
             self.system_prompt = "You are Aurelia Vale, a helpful AI companion."
             return
 
         try:
-            with open(self.sheet_path, 'r', encoding='utf-8') as f:
+            logger.info(f"Loading persona from: {found_path.resolve()}")
+            with open(found_path, 'r', encoding='utf-8') as f:
                 self.persona_data = yaml.safe_load(f)
             self._build_system_prompt()
             logger.info("Persona loaded successfully.")
         except Exception as e:
-            logger.error(f"Error loading persona: {e}")
+            logger.error(f"Error loading persona from {found_path}: {e}")
             self.system_prompt = "You are Aurelia Vale, a helpful AI companion."
 
     def _build_system_prompt(self):
@@ -47,21 +62,25 @@ class PersonaManager:
         prompt += f"Background: {identity}\n\n"
 
         prompt += "### GOALS\n"
-        for goal in goals:
-            prompt += f"- {goal}\n"
+        if goals:
+            for goal in goals:
+                prompt += f"- {goal}\n"
         prompt += "\n"
 
         prompt += "### PERSONALITY TRAITS\n"
-        for trait_name, trait_data in traits.items():
-            desc = trait_data.get('description', '')
-            prompt += f"- {trait_name.replace('_', ' ').title()}: {desc}\n"
+        if traits:
+            for trait_name, trait_data in traits.items():
+                if isinstance(trait_data, dict):
+                    desc = trait_data.get('description', '')
+                    prompt += f"- {trait_name.replace('_', ' ').title()}: {desc}\n"
         prompt += "\n"
 
         prompt += "### SPEECH PATTERNS\n"
         prompt += f"Style: {speech.get('style', 'Natural')}\n"
         prompt += "Examples:\n"
-        for example in speech.get('examples', []):
-            prompt += f"  - \"{example}\"\n"
+        if speech.get('examples'):
+            for example in speech.get('examples', []):
+                prompt += f"  - \"{example}\"\n"
         prompt += "\n"
 
         prompt += "### LOGIC CONSTRAINTS\n"

@@ -105,14 +105,18 @@ class AureliaApp:
             self.error_handler.handle_error(e, "Initialization")
 
     def process_text(self, text: str) -> str:
+        logging.info(f"--- Processing Message: '{text}' ---")
         try:
             system_prompt = self.persona.get_system_prompt()
             history = self.memory.get_history()
             context = self.memory.get_full_context(text)
 
+            logging.info(f"Context retrieved ({len(context)} chars). History depth: {len(history)}")
+
             response = self.llm.generate_response(system_prompt, text, history, context)
 
             self.memory.add_interaction(text, response)
+            logging.info(f"Successfully processed message. Response: '{response[:50]}...'")
 
             # Intelligent background: check if we should "reflect" (every 10 interactions)
             if len(self.memory._collection.get()['ids']) % 10 == 0:
