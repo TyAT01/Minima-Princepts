@@ -28,6 +28,7 @@ uvicorn
 jinja2
 
 # Other
+python-dotenv
 webrtcvad
 pydantic
 pydantic-settings

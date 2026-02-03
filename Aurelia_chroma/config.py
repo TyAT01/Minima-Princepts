@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     class Config:
         env_prefix = "AURELIA_VALE_"
         case_sensitive = False
-        env_file = ".env"
+        env_file = str(Path(__file__).resolve().parent / ".env")
         env_file_encoding = "utf-8"
 
 settings = Settings()
