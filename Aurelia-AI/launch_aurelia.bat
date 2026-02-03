@@ -22,6 +22,6 @@ echo [Aurelia-AI] Activating environment...
 call .venv\Scripts\activate
 
 echo [Aurelia-AI] Starting Aurelia AI Dashboard...
-python app.py
+python main.py
 
 pause

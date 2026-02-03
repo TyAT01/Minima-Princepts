@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 class PersonaManager:
     """Manages the AI's personality by loading and parsing the character sheet."""
 
-    def __init__(self, sheet_path: str = "Aurelia_chroma/aurelia_sheet.yaml"):
+    def __init__(self, sheet_path: str = "../Aurelia_chroma/aurelia_sheet.yaml"):
         self.sheet_path = Path(sheet_path)
         self.persona_data: Dict[str, Any] = {}
         self.system_prompt: str = ""

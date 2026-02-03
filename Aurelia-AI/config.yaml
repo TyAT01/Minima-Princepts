@@ -23,4 +23,4 @@ ui:
   share: false
 
 persona:
-  sheet_path: "Aurelia_chroma/aurelia_sheet.yaml"
+  sheet_path: "../Aurelia_chroma/aurelia_sheet.yaml"
