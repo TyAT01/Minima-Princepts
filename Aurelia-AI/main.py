@@ -18,12 +18,15 @@ if sys.platform == "win32":
         if "_rocm_sdk_core" in str(e):
             # Try to create the missing directory to satisfy the buggy import
             import re
-            match = re.search(r"cannot find the path specified: '(.*?)'", str(e))
+            # Extract path from error message (usually inside quotes)
+            match = re.search(r"'(.*?)'", str(e))
             if match:
                 missing_path = match.group(1)
                 try:
-                    os.makedirs(missing_path, exist_ok=True)
-                    print(f"[System] Applied ctranslate2 ROCm path fix: Created {missing_path}")
+                    # Resolve path to handle /../
+                    abs_path = os.path.abspath(missing_path)
+                    os.makedirs(abs_path, exist_ok=True)
+                    print(f"[System] Applied ctranslate2 ROCm path fix: Created {abs_path}")
                 except:
                     pass
 

@@ -15,7 +15,8 @@ if sys.platform == "win32":
             if match:
                 missing_path = match.group(1)
                 try:
-                    os.makedirs(missing_path, exist_ok=True)
+                    abs_path = os.path.abspath(missing_path)
+                    os.makedirs(abs_path, exist_ok=True)
                     from faster_whisper import WhisperModel
                 except:
                     raise e
