@@ -36,6 +36,8 @@ class AureliaGUI:
 
             with gr.Row():
                 with gr.Column(scale=4):
+                    # We omit type="messages" for cross-version compatibility as per internal guidelines,
+                    # but we will provide the dictionary-based data structure.
                     chatbot = gr.Chatbot(label="Chat History", height=500)
                     msg = gr.Textbox(
                         label="Type your message...",
@@ -62,18 +64,20 @@ class AureliaGUI:
             # Handlers
             def user_message(user_input, history):
                 if history is None: history = []
-                return "", history + [[user_input, None]]
+                history.append({"role": "user", "content": user_input})
+                return "", history
 
             def bot_response(history):
                 if not history: return [], ""
-                user_input = history[-1][0]
+                # Get the content of the last message (which should be from the user)
+                user_input = history[-1]["content"]
                 try:
                     response = self.process_text_cb(user_input)
-                    history[-1][1] = response
+                    history.append({"role": "assistant", "content": response})
                     return history, "" # Clear error box on success
                 except Exception as e:
                     err_msg = str(e)
-                    history[-1][1] = f"[System Error]: {err_msg}"
+                    history.append({"role": "assistant", "content": f"[System Error]: {err_msg}"})
                     return history, err_msg
 
             def handle_audio(audio_path, history):
@@ -83,11 +87,12 @@ class AureliaGUI:
 
                 try:
                     user_txt, bot_txt = self.process_audio_cb(audio_path)
-                    history.append([user_txt, bot_txt])
+                    history.append({"role": "user", "content": user_txt})
+                    history.append({"role": "assistant", "content": bot_txt})
                     return history, ""
                 except Exception as e:
                     err_msg = str(e)
-                    history.append(["[Audio Input]", f"[System Error]: {err_msg}"])
+                    history.append({"role": "assistant", "content": f"[System Error]: {err_msg}"})
                     return history, err_msg
 
             msg.submit(user_message, [msg, chatbot], [msg, chatbot], queue=False).then(
@@ -99,7 +104,7 @@ class AureliaGUI:
 
             stt_btn.click(handle_audio, [audio_input, chatbot], [chatbot, error_box])
 
-            clear_btn.click(lambda: (None, ""), None, [chatbot, error_box], queue=False)
+            clear_btn.click(lambda: ([], ""), None, [chatbot, error_box], queue=False)
 
         self.interface = demo
 
