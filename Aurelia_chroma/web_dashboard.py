@@ -106,7 +106,7 @@ async def leave_discord():
     return "Discord bot not available."
 
 def build_gradio_ui():
-    with gr.Blocks(title="Aurelia Vale Control Panel", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks() as demo:
         gr.Markdown("# 🌸 Aurelia Vale Control Panel")
 
         with gr.Tabs():
@@ -198,7 +198,8 @@ async def run_dashboard(orch=None, host: str = "0.0.0.0", port: int = 8000):
     orchestrator = orch
 
     demo = build_gradio_ui()
-    gr.mount_gradio_app(app, demo, path="/")
+    # In Gradio 6.0+, title and theme moved from Blocks constructor to launch/mount
+    gr.mount_gradio_app(app, demo, path="/", title="Aurelia Vale Control Panel", theme=gr.themes.Soft())
 
     import uvicorn
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
