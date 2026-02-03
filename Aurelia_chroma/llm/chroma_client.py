@@ -113,7 +113,7 @@ class ChromaClient:
             {"role": "user", "content": [{"type": "text", "text": text}]}
         ]]
 
-        inputs = self._processor(prompt_audio=None, prompt_text=conversation, add_generation_prompt=True, return_tensors="pt")
+        inputs = self._processor(conversations=conversation, prompt_audio=None, add_generation_prompt=True, return_tensors="pt")
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
         streamer = TextIteratorStreamer(self._processor, skip_prompt=True, skip_special_tokens=True)
@@ -154,7 +154,7 @@ class ChromaClient:
         audio_data, _ = librosa.load(audio_path, sr=16000)
         audio_tensor = torch.from_numpy(audio_data).to(torch.float32).to(self._device)
 
-        inputs = self._processor(prompt_audio=audio_tensor, prompt_text=conversation, add_generation_prompt=True, return_tensors="pt")
+        inputs = self._processor(conversations=conversation, prompt_audio=audio_tensor, add_generation_prompt=True, return_tensors="pt")
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
         streamer = TextIteratorStreamer(self._processor, skip_prompt=True, skip_special_tokens=True)
@@ -190,7 +190,7 @@ class ChromaClient:
         try:
             # We want the model to generate audio tokens for the text we just gave it.
             # Some models might need a specific prompt to 'read' the text.
-            inputs = self._processor(prompt_audio=None, prompt_text=conversation, add_generation_prompt=False, return_tensors="pt")
+            inputs = self._processor(conversations=conversation, prompt_audio=None, add_generation_prompt=False, return_tensors="pt")
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             output = self._model.generate(
@@ -211,7 +211,7 @@ class ChromaClient:
     def _generate_response(self, conversation: list, prompt_audio: Optional[torch.Tensor] = None, do_sample: bool = True) -> tuple[np.ndarray | None, str | None]:
         try:
             # return_tensors="pt" is usually required for the model
-            inputs = self._processor(prompt_audio=prompt_audio, prompt_text=conversation, add_generation_prompt=True, return_tensors="pt")
+            inputs = self._processor(conversations=conversation, prompt_audio=prompt_audio, add_generation_prompt=True, return_tensors="pt")
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             output = self._model.generate(
