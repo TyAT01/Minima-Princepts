@@ -1,8 +1,30 @@
 from __future__ import annotations
 import logging
 import os
+import sys
 import torch
-from faster_whisper import WhisperModel
+
+# [FIX] ctranslate2 ROCm path workaround for Windows
+if sys.platform == "win32":
+    try:
+        from faster_whisper import WhisperModel
+    except FileNotFoundError as e:
+        if "_rocm_sdk_core" in str(e):
+            import re
+            match = re.search(r"'(.*?)'", str(e))
+            if match:
+                missing_path = match.group(1)
+                try:
+                    os.makedirs(missing_path, exist_ok=True)
+                    from faster_whisper import WhisperModel
+                except:
+                    raise e
+            else:
+                raise e
+        else:
+            raise e
+else:
+    from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 

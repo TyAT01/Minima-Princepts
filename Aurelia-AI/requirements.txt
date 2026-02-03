@@ -3,12 +3,14 @@ requests
 PyYAML
 chromadb
 sentence-transformers
-faster-whisper
+faster-whisper==1.0.3
+ctranslate2==4.3.1
 torch
 gradio
 sounddevice
 numpy
+onnxruntime-gpu
 
-# Hardware acceleration (Optional but recommended for RTX 3070)
-# bitsandbytes (for quantization if using local transformers)
-# llama-cpp-python (if using llama-cpp instead of Ollama)
+# Hardware acceleration (RTX 3070)
+# bitsandbytes
+# llama-cpp-python

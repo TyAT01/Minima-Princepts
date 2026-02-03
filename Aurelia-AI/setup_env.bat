@@ -19,5 +19,13 @@ call .venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
+:: [FIX] Workaround for ctranslate2 ROCm path error on Windows
+echo [Aurelia-AI] Applying compatibility patches...
+set "ROCM_PATH=.venv\Lib\site-packages\_rocm_sdk_core\bin"
+if not exist "%ROCM_PATH%" (
+    echo [Aurelia-AI] Creating compatibility directory for ctranslate2...
+    mkdir "%ROCM_PATH%" >nul 2>&1
+)
+
 echo [Aurelia-AI] Setup complete! You can now use launch_aurelia.bat
 pause

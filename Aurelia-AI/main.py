@@ -8,6 +8,25 @@ from pathlib import Path
 # Add the current directory to sys.path
 sys.path.append(str(Path(__file__).parent))
 
+# [FIX] ctranslate2 ROCm path workaround for Windows
+if sys.platform == "win32":
+    try:
+        import ctranslate2
+    except ImportError:
+        pass # Will be handled when stt.whisper is imported
+    except FileNotFoundError as e:
+        if "_rocm_sdk_core" in str(e):
+            # Try to create the missing directory to satisfy the buggy import
+            import re
+            match = re.search(r"cannot find the path specified: '(.*?)'", str(e))
+            if match:
+                missing_path = match.group(1)
+                try:
+                    os.makedirs(missing_path, exist_ok=True)
+                    print(f"[System] Applied ctranslate2 ROCm path fix: Created {missing_path}")
+                except:
+                    pass
+
 from llm.client import LlamaClient
 from memory.store import MemoryStore
 from stt.whisper import STTSystem
