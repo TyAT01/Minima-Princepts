@@ -51,16 +51,22 @@ def get_logs():
     return "\n".join(log_buffer)
 
 async def handle_chat(message, history):
+    history = history or []
     if not orchestrator:
-        return history + [["Error", "Orchestrator not initialized."]]
+        history.append({"role": "assistant", "content": "Error: Orchestrator not initialized."})
+        return history, ""
     response = await orchestrator.process_text_input(message, "WebUser", "web")
-    return history + [[message, response]]
+    history.append({"role": "user", "content": message})
+    history.append({"role": "assistant", "content": response})
+    return history, ""
 
 async def handle_audio(audio_path, history):
+    history = history or []
     if not orchestrator or not audio_path:
-        return history
+        return history, None
     response = await orchestrator.process_audio_input(audio_path, "WebUser", "web")
-    return history + [[None, response]]
+    history.append({"role": "assistant", "content": response})
+    return history, None
 
 def get_system_metrics():
     profiler = HardwareProfiler()
@@ -151,16 +157,16 @@ def build_gradio_ui():
 
         with gr.Tabs():
             with gr.TabItem("💬 Chat"):
-                chatbot = gr.Chatbot(label="Conversation")
+                chatbot = gr.Chatbot(label="Conversation", type="messages")
                 with gr.Row():
                     msg = gr.Textbox(placeholder="Type a message...", scale=4)
                     submit = gr.Button("Send", variant="primary")
                 with gr.Row():
                     audio_input = gr.Audio(label="Voice Input", type="filepath")
                     audio_submit = gr.Button("Transcribe & Send")
-                submit.click(handle_chat, [msg, chatbot], [chatbot])
-                msg.submit(handle_chat, [msg, chatbot], [chatbot])
-                audio_submit.click(handle_audio, [audio_input, chatbot], [chatbot])
+                submit.click(handle_chat, [msg, chatbot], [chatbot, msg])
+                msg.submit(handle_chat, [msg, chatbot], [chatbot, msg])
+                audio_submit.click(handle_audio, [audio_input, chatbot], [chatbot, audio_input])
 
             with gr.TabItem("🎭 Personaplex"):
                 with gr.Row():
