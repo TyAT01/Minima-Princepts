@@ -277,12 +277,13 @@ class AlwaysListenBot:
                         break
                     except Exception as e:
                         logger.error(f"Failed to connect to voice (attempt {attempt + 1}): {e}")
-                        if self._voice_client:
+                        # Forcefully disconnect to clean up session
+                        if channel.guild.voice_client:
                             try:
-                                await self._voice_client.disconnect(force=True)
+                                await channel.guild.voice_client.disconnect(force=True)
                             except Exception:
                                 pass
-                            self._voice_client = None
+                        self._voice_client = None
 
                         if attempt < max_retries - 1:
                             await asyncio.sleep(5)
@@ -368,8 +369,12 @@ class AlwaysListenBot:
             # VAD config for Discord's 48kHz audio
             vad_config = VADConfig(aggressiveness=3, sample_rate=self._config.discord_sample_rate)
             sink = AureliaAudioSink(self, vad_config)
-            self._voice_client.listen(sink, self._processing_pool)
-            logger.info("Started listening in voice channel.")
+            if self._voice_client and self._voice_client.is_connected():
+                self._voice_client.listen(sink, self._processing_pool)
+                logger.info("Started listening in voice channel.")
+            else:
+                logger.warning("Cannot start listening: Voice client is not connected.")
+                self._is_listening = False
 
     async def process_audio_data(self, user, data):
         fp_name = None
