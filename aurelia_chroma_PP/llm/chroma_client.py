@@ -169,17 +169,22 @@ class ChromaClient:
         if not self._model or not self._processor:
             return None
 
+        # To generate just audio for a text fragment, we feed it as assistant content
+        # and hope the model generates the corresponding audio tokens.
+        # This is a bit of a hack for multimodal models but often works if they are duplex.
         conversation = [[
             {"role": "assistant", "content": [{"type": "text", "text": fragment}]}
         ]]
 
         try:
+            # We want the model to generate audio tokens for the text we just gave it.
+            # Some models might need a specific prompt to 'read' the text.
             inputs = self._processor(conversation, add_generation_prompt=False, return_tensors="pt")
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             output = self._model.generate(
                 **inputs,
-                max_new_tokens=self._max_new_tokens,
+                max_new_tokens=self._max_new_tokens, # Should be enough for the fragment
                 do_sample=False,
                 use_cache=True
             )
