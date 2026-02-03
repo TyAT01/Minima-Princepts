@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
@@ -10,7 +10,7 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 logger = logging.getLogger(__name__)
 
 class MemoryStore:
-    """Intelligent memory system with short-term buffer and long-term vector storage."""
+    """Intelligent memory system with short-term buffer, long-term vector storage, and insights."""
 
     def __init__(self, db_path: Path | str = "./aurelia_memory", collection_name: str = "aurelia_ai_memories", max_short_term: int = 15):
         self.db_path = Path(db_path)
@@ -56,19 +56,61 @@ class MemoryStore:
             self.short_term_buffer.pop(0)
             self.short_term_buffer.pop(0)
 
-    def search_relevant_memories(self, query: str, n_results: int = 5) -> str:
-        """Searches long-term memory for relevant past interactions."""
+    def store_insight(self, insight: str, source: str = "reflection"):
+        """Stores a lesson learned or a significant fact for long-term recall."""
+        now = datetime.now(timezone.utc)
+        insight_id = f"insight_{now.timestamp()}"
+
+        self._collection.add(
+            ids=[insight_id],
+            documents=[insight],
+            metadatas=[{
+                "insight": insight,
+                "source": source,
+                "timestamp": now.isoformat(),
+                "type": "insight"
+            }]
+        )
+        logger.info(f"Stored insight: {insight_id}")
+
+    def search_relevant_memories(self, query: str, n_results: int = 5, filter_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Searches memory for relevant past interactions or insights."""
+        where = {}
+        if filter_type:
+            where["type"] = filter_type
+
         results = self._collection.query(
             query_texts=[query],
             n_results=n_results,
-            where={"type": "interaction"}
+            where=where if where else None
         )
 
-        if not results or not results.get("documents") or not results["documents"][0]:
-            return "No relevant past interactions found."
+        memories = []
+        if results and results.get("metadatas") and results["metadatas"][0]:
+            for i, metadata in enumerate(results["metadatas"][0]):
+                if metadata:
+                    memories.append({
+                        "content": results["documents"][0][i],
+                        "metadata": metadata
+                    })
+        return memories
 
-        relevant_docs = results["documents"][0]
-        return "\n---\n".join(relevant_docs)
+    def get_full_context(self, query: str) -> str:
+        """Combines relevant long-term memories and insights into a context string."""
+        # Query for both interactions and insights
+        memories = self.search_relevant_memories(query, n_results=5)
+
+        interactions = [m["content"] for m in memories if m["metadata"].get("type") == "interaction"]
+        insights = [m["content"] for m in memories if m["metadata"].get("type") == "insight"]
+
+        context_parts = []
+        if insights:
+            context_parts.append("### [CORE INSIGHTS & LESSONS]\n" + "\n".join([f"- {i}" for i in insights]))
+
+        if interactions:
+            context_parts.append("### [PAST RELEVANT INTERACTIONS]\n" + "\n---\n".join(interactions))
+
+        return "\n\n".join(context_parts) if context_parts else "No specific past context found."
 
     def get_history(self) -> List[Dict[str, str]]:
         """Returns the current short-term conversation history."""
@@ -77,9 +119,3 @@ class MemoryStore:
     def clear_short_term(self):
         """Clears the short-term buffer."""
         self.short_term_buffer = []
-
-    def get_full_context(self, query: str) -> str:
-        """Combines relevant long-term memories into a context string."""
-        relevant = self.search_relevant_memories(query)
-        context = f"### [PAST RELEVANT INTERACTIONS]\n{relevant}"
-        return context
