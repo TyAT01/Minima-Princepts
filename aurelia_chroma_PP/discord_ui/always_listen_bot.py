@@ -246,22 +246,15 @@ class AlwaysListenBot:
                     logger.error(f"Could not find or fetch channel {channel_id}: {e}")
                     return
 
-            # Thoroughly clean up any existing voice clients for this guild to prevent 4006/Already Connected errors
-            for vc in self.bot.voice_clients:
-                if vc.guild.id == channel.guild.id:
-                    if vc.is_connected() and vc.channel.id == channel_id:
-                        logger.info("Already connected to the correct channel.")
-                        self._voice_client = vc
-                        if not self._is_listening:
-                             asyncio.create_task(self.start_listening())
-                        return
-                    else:
-                        logger.info(f"Forcing disconnect of existing voice client in guild {vc.guild.id}")
-                        try:
-                            await vc.disconnect(force=True)
-                            await asyncio.sleep(1) # Give Discord a moment to process disconnect
-                        except Exception as e:
-                            logger.warning(f"Error during forced disconnect: {e}")
+            # 1. CLEANUP: If the bot has a voice client in this guild, force disconnect it to ensure a fresh session (resolves 4006).
+            existing_vc = channel.guild.voice_client
+            if existing_vc:
+                logger.info(f"Found existing voice connection in guild {channel.guild.id}. Forcing disconnect...")
+                try:
+                    await existing_vc.disconnect(force=True)
+                    await asyncio.sleep(1) # Give Discord a moment to process disconnect
+                except Exception as e:
+                    logger.warning(f"Error during forced disconnect: {e}")
 
             self._voice_client = None
             self._is_listening = False
