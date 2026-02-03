@@ -64,13 +64,28 @@ class AureliaGUI:
             # Handlers
             def user_message(user_input, history):
                 if history is None: history = []
-                history.append({"role": "user", "content": user_input})
+
+                # Gradio 5+ multimodal fix: Extract text if it's a list/dict
+                processed_input = user_input
+                if isinstance(user_input, list) and len(user_input) > 0:
+                    processed_input = user_input[0].get("text", str(user_input))
+                elif isinstance(user_input, dict):
+                    processed_input = user_input.get("text", str(user_input))
+
+                history.append({"role": "user", "content": processed_input})
                 return "", history
 
             def bot_response(history):
                 if not history: return [], ""
                 # Get the content of the last message (which should be from the user)
                 user_input = history[-1]["content"]
+
+                # Double check extraction in case it bypassed user_message
+                if isinstance(user_input, list) and len(user_input) > 0:
+                    user_input = user_input[0].get("text", str(user_input))
+                elif isinstance(user_input, dict):
+                    user_input = user_input.get("text", str(user_input))
+
                 try:
                     response = self.process_text_cb(user_input)
                     history.append({"role": "assistant", "content": response})

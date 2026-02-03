@@ -4,6 +4,7 @@ import os
 import sys
 import yaml
 from pathlib import Path
+from typing import Any
 
 # Add the current directory to sys.path
 sys.path.append(str(Path(__file__).parent))
@@ -90,7 +91,7 @@ class AureliaApp:
                     print(f"Warning: Config file {path} not found. Using defaults.")
                     return {}
 
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
         except Exception as e:
             print(f"Warning: Error loading config from {path}: {e}")
@@ -104,7 +105,13 @@ class AureliaApp:
         except Exception as e:
             self.error_handler.handle_error(e, "Initialization")
 
-    def process_text(self, text: str) -> str:
+    def process_text(self, text: Any) -> str:
+        # Robustly handle list/dict inputs from Gradio
+        if isinstance(text, list) and len(text) > 0:
+            text = text[0].get("text", str(text))
+        elif isinstance(text, dict):
+            text = text.get("text", str(text))
+
         logging.info(f"--- Processing Message: '{text}' ---")
         try:
             system_prompt = self.persona.get_system_prompt()
