@@ -15,7 +15,7 @@ if sys.platform == "win32":
     except ImportError:
         pass # Will be handled when stt.whisper is imported
     except FileNotFoundError as e:
-        if "_rocm_sdk_core" in str(e):
+        if "_rocm" in str(e).lower():
             # Try to create the missing directory to satisfy the buggy import
             import re
             # Extract path from error message (usually inside quotes)
@@ -27,6 +27,8 @@ if sys.platform == "win32":
                     abs_path = os.path.abspath(missing_path)
                     os.makedirs(abs_path, exist_ok=True)
                     print(f"[System] Applied ctranslate2 ROCm path fix: Created {abs_path}")
+                    # Try importing again now that the path exists
+                    import ctranslate2
                 except:
                     pass
 

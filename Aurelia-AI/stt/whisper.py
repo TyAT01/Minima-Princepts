@@ -9,7 +9,7 @@ if sys.platform == "win32":
     try:
         from faster_whisper import WhisperModel
     except FileNotFoundError as e:
-        if "_rocm_sdk_core" in str(e):
+        if "_rocm" in str(e).lower():
             import re
             match = re.search(r"'(.*?)'", str(e))
             if match:
