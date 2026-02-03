@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class LlamaClient:
     """A client for interacting with a local Llama 3.1 8B instance (Ollama or llama.cpp)."""
 
-    def __init__(self, base_url: str = "http://localhost:11434/api", model: str = "llama3.1:8b", api_type: str = "ollama"):
+    def __init__(self, base_url: str = "http://localhost:11434/api", model: str = "llama3.1:8b-instruct-q4_K_M", api_type: str = "ollama"):
         """
         Args:
             base_url: The base URL of the local model server.
