@@ -1,0 +1,14 @@
+# Core
+requests
+PyYAML
+chromadb
+sentence-transformers
+faster-whisper
+torch
+gradio
+sounddevice
+numpy
+
+# Hardware acceleration (Optional but recommended for RTX 3070)
+# bitsandbytes (for quantization if using local transformers)
+# llama-cpp-python (if using llama-cpp instead of Ollama)
