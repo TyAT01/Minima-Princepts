@@ -48,6 +48,7 @@ class AureliaApp:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
         self.processing_lock = threading.Lock()
+        self.current_user_name = "Tyler" # Default
         self.error_handler = ErrorHandler(ai_comment_callback=self.ai_comment_on_error)
 
         # Initialize components with config
@@ -77,8 +78,14 @@ class AureliaApp:
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'aurelia_sheet.yaml'))
 
         self.results_queue = Queue()
+        self.interrupt_event = threading.Event()
+        self.is_responding = False
+
         from stt.whisper import VoiceMonitor
-        self.voice_monitor = VoiceMonitor(callback=self.process_background_audio)
+        self.voice_monitor = VoiceMonitor(
+            callback=self.process_background_audio,
+            interrupt_callback=self.handle_interrupt
+        )
 
         ui_cfg = self.config.get('ui', {})
         self.gui = AureliaGUI(
@@ -120,8 +127,34 @@ class AureliaApp:
         except Exception as e:
             self.error_handler.handle_error(e, "Initialization")
 
-    def process_text(self, text: Any):
-        """Generator that yields sentence fragments from the LLM."""
+    def handle_interrupt(self):
+        """Sets the interrupt flag to stop current AI response."""
+        if self.is_responding:
+            logging.info("!!! Interrupt received !!!")
+            self.interrupt_event.set()
+
+    def _generate_thought(self, user_input: str, history: list, context: str) -> str:
+        """Generates an inner monologue entry before responding."""
+        try:
+            thought_prompt = (
+                "You are Aurelia Vale. Before responding to the user, record your private internal thoughts. "
+                "What do you really think about what they said? How does it make you feel? "
+                "What is your current state of mind? (Keep this concise, ~20 words)."
+            )
+            # Use full response for thought to avoid complex streaming here
+            thought = self.llm.generate_response(thought_prompt, f"User said: {user_input}", history, context)
+            return thought.strip()
+        except Exception as e:
+            logging.warning(f"Failed to generate thought: {e}")
+            return "Processing..."
+
+    def process_text(self, text: Any, user_name: str = None):
+        """Generator that yields sentence fragments from the LLM with inner monologue and interrupt checks."""
+        if user_name:
+            self.current_user_name = user_name
+        else:
+            user_name = self.current_user_name
+
         # Robustly handle list/dict inputs from Gradio
         if isinstance(text, list) and len(text) > 0:
             text = text[0].get("text", str(text))
@@ -130,51 +163,95 @@ class AureliaApp:
 
         logging.info(f"--- Processing Message: '{text}' ---")
 
-        # Use a lock to prevent simultaneous LLM calls which can crash Ollama/GPU
+        # Use a lock to prevent simultaneous LLM calls
         if self.processing_lock.locked():
              logging.warning("System is busy processing another request.")
              yield "Wait a moment, I'm still thinking about our last exchange..."
              return
 
         with self.processing_lock:
+            self.is_responding = True
+            self.interrupt_event.clear()
             try:
                 system_prompt = self.persona.get_system_prompt()
                 history = self.memory.get_history()
-                context = self.memory.get_full_context(text)
+                context = self.memory.get_full_context(text, user_id=user_name)
 
-                logging.info(f"Context retrieved ({len(context)} chars). History depth: {len(history)}")
+                # 1. Inner Monologue Phase
+                thought = self._generate_thought(text, history, context)
+                logging.info(f"Aurelia's Thought: {thought}")
+                self.memory.store_insight(f"Thought: {thought}", source="inner_monologue")
 
+                # Prepend thought to system prompt for the actual response
+                augmented_system = f"{system_prompt}\n\nYour current internal thought: {thought}\nUse this thought to guide your response but don't repeat it verbatim."
+
+                # 2. Response Phase
                 full_response = ""
-                stream = self.llm.stream_response(system_prompt, text, history, context)
+                stream = self.llm.stream_response(augmented_system, text, history, context)
 
                 for fragment in split_into_sentences(stream):
+                    if self.interrupt_event.is_set():
+                        logging.info("Response halted by interrupt.")
+                        yield "... [Interrupted]"
+                        break
+
                     full_response += fragment + " "
                     yield fragment
 
-                self.memory.add_interaction(text, full_response.strip())
-                logging.info(f"Successfully processed message. Response length: {len(full_response)}")
+                if not self.interrupt_event.is_set():
+                    self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
+                    logging.info(f"Successfully processed message. Response length: {len(full_response)}")
 
-                # Intelligent background: check if we should "reflect" (every 10 interactions)
+                # Periodic reflection
                 if len(self.memory._collection.get()['ids']) % 10 == 0:
                      self.reflect()
 
             except Exception as e:
                 self.error_handler.handle_error(e, "Text Processing")
                 yield self.error_handler.get_ai_fallback_response()
+            finally:
+                self.is_responding = False
+                self.interrupt_event.clear()
 
     def reflect(self):
-        """Asks the LLM to summarize recent interactions into a long-term insight."""
+        """Asks the LLM to analyze recent interactions for profiles, events, and insights."""
         try:
             logging.info("Aurelia is reflecting on recent experiences...")
             history = self.memory.get_history()
             if not history: return
 
-            prompt = "Please summarize our recent conversation into one or two significant lessons or facts about the user or our journey. Format it as a concise insight for long-term memory."
-            reflection_prompt = f"System: You are reflecting on your journey.\nRecent History: {history}\n\nTask: {prompt}"
+            reflection_prompt = (
+                "You are Aurelia Vale, performing deep reflection. Analyze our recent chat history and extract the following:\n"
+                "1. User Profile: Any new facts, likes, or dislikes about the person I'm talking to.\n"
+                "2. Notable Events: Any significant moments or 'firsts' that happened.\n"
+                "3. Insights: Lessons learned about myself or the world.\n\n"
+                "Format your response as a valid YAML block with keys: 'user_facts' (list), 'events' (list), 'insights' (list)."
+            )
 
-            insight = self.llm.generate_response("You are Aurelia Vale, reflecting on your experiences.", reflection_prompt, [])
-            if insight:
-                self.memory.store_insight(insight, source="automatic_reflection")
+            analysis_raw = self.llm.generate_response("You are Aurelia Vale, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
+
+            # Simple parser for the YAML-like response
+            try:
+                # Look for YAML block
+                if "```yaml" in analysis_raw:
+                    analysis_raw = analysis_raw.split("```yaml")[1].split("```")[0]
+                elif "```" in analysis_raw:
+                    analysis_raw = analysis_raw.split("```")[1].split("```")[0]
+
+                data = yaml.safe_load(analysis_raw)
+                if isinstance(data, dict):
+                    for fact in data.get('user_facts', []):
+                        self.memory.update_user_profile("default_user", fact)
+                    for event in data.get('events', []):
+                        self.memory.store_episodic_memory(event)
+                    for insight in data.get('insights', []):
+                        self.memory.store_insight(insight, source="reflection")
+                    logging.info("Deep reflection complete. Memories filed.")
+            except Exception as pe:
+                logging.warning(f"Failed to parse reflection data: {pe}. Raw: {analysis_raw[:100]}")
+                # Fallback to general insight if YAML parsing fails
+                self.memory.store_insight(analysis_raw[:500], source="reflection_fallback")
+
         except Exception as e:
             logging.warning(f"Reflection failed: {e}")
 
@@ -186,9 +263,9 @@ class AureliaApp:
                 return
 
             # For background audio, we'll collect the whole response to put in queue
-            # because the queue poller expects full (user, bot) pairs currently.
             full_bot_txt = ""
-            for fragment in self.process_text(transcribed_text):
+            # Pass current_user_name since we don't have it directly from the callback
+            for fragment in self.process_text(transcribed_text, self.current_user_name):
                 full_bot_txt += fragment + " "
 
             self.results_queue.put((transcribed_text, full_bot_txt.strip()))
@@ -209,7 +286,7 @@ class AureliaApp:
             results.append(self.results_queue.get())
         return results
 
-    def process_audio(self, audio_source: Any):
+    def process_audio(self, audio_source: Any, user_name: str = None):
         """Generator that transcribes and then streams the bot response."""
         try:
             transcribed_text = self.stt.transcribe(audio_source)
@@ -220,7 +297,7 @@ class AureliaApp:
             yield transcribed_text, "" # Yield transcription first
 
             full_response = ""
-            for fragment in self.process_text(transcribed_text):
+            for fragment in self.process_text(transcribed_text, user_name):
                 full_response += fragment + " "
                 yield transcribed_text, full_response.strip()
 

@@ -9,8 +9,8 @@ class AureliaGUI:
 
     def __init__(
         self,
-        process_text_cb: Callable[[str], str],
-        process_audio_cb: Callable[[str], Tuple[str, str]],
+        process_text_cb: Callable[[str, str], str],
+        process_audio_cb: Callable[[str, str], Tuple[str, str]],
         toggle_mic_cb: Callable[[bool], None],
         poll_results_cb: Callable[[], List[Tuple[str, str]]],
         title: str = "⚔️ Aurelia Vale: The Hedge-Knight Squire",
@@ -51,6 +51,9 @@ class AureliaGUI:
                         clear_btn = gr.Button("Clear Chat")
 
                 with gr.Column(scale=1):
+                    gr.Markdown("### 👤 User Profile")
+                    user_name = gr.Textbox(label="Your Name", value="Tyler", placeholder="Enter your name...")
+
                     gr.Markdown("### 🎙️ Hands-Free Mic")
                     mic_toggle = gr.Checkbox(label="Open Mic (Hands-Free)", value=False)
 
@@ -74,7 +77,7 @@ class AureliaGUI:
                 history.append({"role": "user", "content": processed_input})
                 return "", history
 
-            def bot_response(history):
+            def bot_response(history, name):
                 if not history: yield [], ""; return
                 user_input = history[-1]["content"]
 
@@ -86,7 +89,7 @@ class AureliaGUI:
                 try:
                     history.append({"role": "assistant", "content": ""})
                     full_response = ""
-                    for fragment in self.process_text_cb(user_input):
+                    for fragment in self.process_text_cb(user_input, name):
                         full_response += fragment + " "
                         history[-1]["content"] = full_response.strip()
                         yield history, ""
@@ -109,10 +112,10 @@ class AureliaGUI:
                 return history
 
             msg.submit(user_message, [msg, chatbot], [msg, chatbot], queue=False).then(
-                bot_response, chatbot, [chatbot, error_box]
+                bot_response, [chatbot, user_name], [chatbot, error_box]
             )
             submit_btn.click(user_message, [msg, chatbot], [msg, chatbot], queue=False).then(
-                bot_response, chatbot, [chatbot, error_box]
+                bot_response, [chatbot, user_name], [chatbot, error_box]
             )
 
             mic_toggle.change(on_mic_toggle, mic_toggle, None)

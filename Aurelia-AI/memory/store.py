@@ -27,19 +27,20 @@ class MemoryStore:
         self.short_term_buffer: List[Dict[str, str]] = []
         self.max_short_term = max_short_term
 
-    def add_interaction(self, user_text: str, bot_text: str):
+    def add_interaction(self, user_text: str, bot_text: str, user_id: str = "default_user"):
         """Adds a new interaction to both short-term and long-term memory."""
         now = datetime.now(timezone.utc)
         timestamp_str = now.isoformat()
 
         # 1. Add to Vector DB (Long-term)
         memory_id = f"mem_{now.timestamp()}"
-        document = f"User: {user_text}\nAurelia: {bot_text}"
+        document = f"User ({user_id}): {user_text}\nAurelia: {bot_text}"
 
         self._collection.add(
             ids=[memory_id],
             documents=[document],
             metadatas=[{
+                "user_id": user_id,
                 "user_text": user_text,
                 "bot_text": bot_text,
                 "timestamp": timestamp_str,
@@ -56,28 +57,72 @@ class MemoryStore:
             self.short_term_buffer.pop(0)
             self.short_term_buffer.pop(0)
 
-    def store_insight(self, insight: str, source: str = "reflection"):
+    def store_insight(self, insight: str, source: str = "reflection", user_id: Optional[str] = None):
         """Stores a lesson learned or a significant fact for long-term recall."""
         now = datetime.now(timezone.utc)
         insight_id = f"insight_{now.timestamp()}"
 
+        metadata = {
+            "insight": insight,
+            "source": source,
+            "timestamp": now.isoformat(),
+            "type": "insight"
+        }
+        if user_id:
+            metadata["user_id"] = user_id
+
         self._collection.add(
             ids=[insight_id],
             documents=[insight],
-            metadatas=[{
-                "insight": insight,
-                "source": source,
-                "timestamp": now.isoformat(),
-                "type": "insight"
-            }]
+            metadatas=[metadata]
         )
         logger.info(f"Stored insight: {insight_id}")
 
-    def search_relevant_memories(self, query: str, n_results: int = 5, filter_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Searches memory for relevant past interactions or insights."""
+    def store_episodic_memory(self, event_description: str, importance: int = 5):
+        """Stores a notable event or personal experience."""
+        now = datetime.now(timezone.utc)
+        event_id = f"event_{now.timestamp()}"
+
+        self._collection.add(
+            ids=[event_id],
+            documents=[event_description],
+            metadatas=[{
+                "description": event_description,
+                "importance": importance,
+                "timestamp": now.isoformat(),
+                "type": "episodic"
+            }]
+        )
+        logger.info(f"Stored episodic memory: {event_id}")
+
+    def update_user_profile(self, user_id: str, fact: str):
+        """Adds a specific fact about a person to their profile."""
+        now = datetime.now(timezone.utc)
+        fact_id = f"profile_{user_id}_{now.timestamp()}"
+
+        self._collection.add(
+            ids=[fact_id],
+            documents=[f"Fact about {user_id}: {fact}"],
+            metadatas=[{
+                "user_id": user_id,
+                "fact": fact,
+                "timestamp": now.isoformat(),
+                "type": "profile_fact"
+            }]
+        )
+        logger.info(f"Updated profile for {user_id}")
+
+    def search_relevant_memories(self, query: str, n_results: int = 8, filter_type: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Searches memory for relevant past interactions, insights, or profile facts."""
         where = {}
         if filter_type:
             where["type"] = filter_type
+        if user_id:
+            # Note: ChromaDB 'where' with multiple conditions usually needs '$and'
+            if filter_type:
+                where = {"$and": [{"type": filter_type}, {"user_id": user_id}]}
+            else:
+                where = {"user_id": user_id}
 
         results = self._collection.query(
             query_texts=[query],
@@ -95,20 +140,30 @@ class MemoryStore:
                     })
         return memories
 
-    def get_full_context(self, query: str) -> str:
-        """Combines relevant long-term memories and insights into a context string."""
-        # Query for both interactions and insights
-        memories = self.search_relevant_memories(query, n_results=5)
+    def get_full_context(self, query: str, user_id: Optional[str] = None) -> str:
+        """Combines relevant long-term memories, insights, and user profile facts into a context string."""
+        # Increase results for broader context
+        memories = self.search_relevant_memories(query, n_results=10, user_id=user_id)
 
         interactions = [m["content"] for m in memories if m["metadata"].get("type") == "interaction"]
         insights = [m["content"] for m in memories if m["metadata"].get("type") == "insight"]
+        profile_facts = [m["content"] for m in memories if m["metadata"].get("type") == "profile_fact"]
+        episodic = [m["content"] for m in memories if m["metadata"].get("type") == "episodic"]
 
         context_parts = []
+        if user_id:
+            context_parts.append(f"### [USER PROFILE: {user_id}]\n" + (f"Recognized {user_id}. Relevant facts: " + ", ".join(profile_facts) if profile_facts else f"New user or no specific facts stored for {user_id}."))
+        elif profile_facts:
+            context_parts.append("### [PEOPLE & PROFILES]\n" + "\n".join([f"- {f}" for f in profile_facts]))
+
+        if episodic:
+            context_parts.append("### [NOTABLE EVENTS & EXPERIENCES]\n" + "\n".join([f"- {e}" for e in episodic]))
+
         if insights:
             context_parts.append("### [CORE INSIGHTS & LESSONS]\n" + "\n".join([f"- {i}" for i in insights]))
 
         if interactions:
-            context_parts.append("### [PAST RELEVANT INTERACTIONS]\n" + "\n---\n".join(interactions))
+            context_parts.append("### [PAST RELEVANT INTERACTIONS]\n" + "\n---\n".join(interactions[:5]))
 
         return "\n\n".join(context_parts) if context_parts else "No specific past context found."
 

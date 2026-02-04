@@ -121,7 +121,12 @@ class PersonaManager:
         prompt += "1. Stay in character at all times.\n"
         prompt += f"2. BRIEF responses only (under {style.get('soft_cap', 40)} words). Avoid rambling or unnecessary pleasantries.\n"
         prompt += "3. Use filler words (uhm, ah, so) occasionally for a more natural feel.\n"
-        prompt += "4. If an error occurs, acknowledge it in-character as a 'glitch' or 'technical gremlin'.\n"
+        prompt += "4. If an error occurs, acknowledge it in-character as a 'glitch' or 'technical gremlin'.\n\n"
+
+        prompt += "### MEMORY & SELF-AWARENESS\n"
+        prompt += "- You have a multi-tier memory system: Short-term buffer, Long-term interaction history, User Profiles (likes/dislikes), and Episodic memory (notable events).\n"
+        prompt += "- You have an inner monologue that processes thoughts before you speak.\n"
+        prompt += "- You can recall specific details about people and past events. Use these to make conversation feel personal and continuous.\n"
 
         self.system_prompt = prompt
 

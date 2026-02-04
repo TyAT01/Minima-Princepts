@@ -87,8 +87,9 @@ class STTSystem:
 class VoiceMonitor:
     """Background monitor that captures audio from the default mic and segments speech."""
 
-    def __init__(self, callback, sample_rate=16000, frame_duration_ms=30):
+    def __init__(self, callback, sample_rate=16000, frame_duration_ms=30, interrupt_callback=None):
         self.callback = callback
+        self.interrupt_callback = interrupt_callback
         self.sample_rate = sample_rate
         self.frame_duration_ms = frame_duration_ms
         self.frame_size = int(sample_rate * frame_duration_ms / 1000)
@@ -180,6 +181,8 @@ class VoiceMonitor:
                         self.buffer.append(frame)
                         if is_speech:
                             logger.info("Speech detected! Recording...")
+                            if self.interrupt_callback:
+                                self.interrupt_callback()
                             self.triggered = True
                             self.voiced_frames.extend(list(self.buffer))
                             self.buffer.clear()
