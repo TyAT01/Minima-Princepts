@@ -3,6 +3,13 @@ import logging
 import os
 import sys
 import torch
+import collections
+import threading
+import time
+import tempfile
+import wave
+import numpy as np
+import sounddevice as sd
 
 # [FIX] ctranslate2 ROCm path workaround for Windows
 if sys.platform == "win32":
@@ -26,6 +33,12 @@ if sys.platform == "win32":
             raise e
 else:
     from faster_whisper import WhisperModel
+
+# Optional import for VAD
+try:
+    import webrtcvad
+except ImportError:
+    webrtcvad = None
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +67,107 @@ class STTSystem:
             self.model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
             logger.info("Faster-Whisper model loaded.")
 
-    def transcribe(self, audio_path: str) -> str:
-        """Transcribes an audio file to text."""
+    def transcribe(self, audio_source: str | np.ndarray) -> str:
+        """Transcribes an audio file or numpy array to text."""
         if self.model is None:
             self.load_model()
 
-        segments, info = self.model.transcribe(audio_path, beam_size=5)
+        segments, info = self.model.transcribe(audio_source, beam_size=5)
 
         full_text = ""
         for segment in segments:
             full_text += segment.text + " "
 
         return full_text.strip()
+
+class VoiceMonitor:
+    """Background monitor that captures audio from the default mic and segments speech."""
+
+    def __init__(self, callback, sample_rate=16000, frame_duration_ms=30):
+        self.callback = callback
+        self.sample_rate = sample_rate
+        self.frame_duration_ms = frame_duration_ms
+        self.frame_size = int(sample_rate * frame_duration_ms / 1000)
+
+        if webrtcvad:
+            self.vad = webrtcvad.Vad(3) # Aggressiveness 3
+        else:
+            self.vad = None
+            logger.warning("webrtcvad not found. Hands-free mic will not work correctly.")
+
+        self.buffer = collections.deque(maxlen=20) # 600ms pre-roll
+        self.triggered = False
+        self.voiced_frames = []
+        self.stop_event = threading.Event()
+        self.is_listening = False
+        self.thread = None
+
+    def start(self):
+        if self.is_listening: return
+        self.is_listening = True
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._listen_loop, daemon=True)
+        self.thread.start()
+        logger.info("Voice Monitor started.")
+
+    def stop(self):
+        self.is_listening = False
+        self.stop_event.set()
+        if self.thread:
+            self.thread.join(timeout=2)
+        logger.info("Voice Monitor stopped.")
+
+    def _listen_loop(self):
+        if not self.vad: return
+
+        # Open default input stream
+        try:
+            with sd.RawInputStream(samplerate=self.sample_rate, channels=1, dtype='int16',
+                                  blocksize=self.frame_size) as stream:
+
+                num_silent_frames = 0
+                max_silent_frames = int(1000 / self.frame_duration_ms) # 1 second of silence to trigger
+
+                while not self.stop_event.is_set() and self.is_listening:
+                    frame, overflowed = stream.read(self.frame_size)
+                    if overflowed:
+                        logger.debug("Audio input overflowed.")
+
+                    is_speech = self.vad.is_speech(frame, self.sample_rate)
+
+                    if not self.triggered:
+                        self.buffer.append(frame)
+                        if is_speech:
+                            self.triggered = True
+                            self.voiced_frames.extend(list(self.buffer))
+                            self.buffer.clear()
+                            num_silent_frames = 0
+                    else:
+                        self.voiced_frames.append(frame)
+                        if not is_speech:
+                            num_silent_frames += 1
+                        else:
+                            num_silent_frames = 0
+
+                        if num_silent_frames > max_silent_frames:
+                            # User stopped speaking
+                            self.triggered = False
+                            full_audio = b"".join(self.voiced_frames)
+                            self.voiced_frames = []
+
+                            # Process the segment
+                            if len(full_audio) > self.sample_rate: # Min 0.5s of audio (approx)
+                                self._process_segment(full_audio)
+
+        except Exception as e:
+            logger.error(f"Error in Voice Monitor loop: {e}")
+            self.is_listening = False
+
+    def _process_segment(self, audio_bytes):
+        # Convert bytes to float32 numpy array as expected by faster-whisper
+        audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+        audio_float32 = audio_int16.astype(np.float32) / 32768.0
+
+        # Call the callback (which should handle STT and AI response)
+        # We run this in a separate thread to not block the listener
+        threading.Thread(target=self.callback, args=(audio_float32,), daemon=True).start()

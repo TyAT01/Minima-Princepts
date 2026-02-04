@@ -1,6 +1,6 @@
 import gradio as gr
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -10,12 +10,16 @@ class AureliaGUI:
     def __init__(
         self,
         process_text_cb: Callable[[str], str],
-        process_audio_cb: Callable[[str], str],
+        process_audio_cb: Callable[[str], Tuple[str, str]],
+        toggle_mic_cb: Callable[[bool], None],
+        poll_results_cb: Callable[[], List[Tuple[str, str]]],
         title: str = "⚔️ Aurelia Vale: The Hedge-Knight Squire",
         theme: str = "soft"
     ):
         self.process_text_cb = process_text_cb
         self.process_audio_cb = process_audio_cb
+        self.toggle_mic_cb = toggle_mic_cb
+        self.poll_results_cb = poll_results_cb
         self.title = title
         self.theme = theme
         self.interface = None
@@ -36,8 +40,6 @@ class AureliaGUI:
 
             with gr.Row():
                 with gr.Column(scale=4):
-                    # We omit type="messages" for cross-version compatibility as per internal guidelines,
-                    # but we will provide the dictionary-based data structure.
                     chatbot = gr.Chatbot(label="Chat History", height=500)
                     msg = gr.Textbox(
                         label="Type your message...",
@@ -49,23 +51,20 @@ class AureliaGUI:
                         clear_btn = gr.Button("Clear Chat")
 
                 with gr.Column(scale=1):
-                    gr.Markdown("### 🎙️ Voice Input")
-                    audio_input = gr.Audio(
-                        label="Record Speech",
-                        sources=["microphone"],
-                        type="filepath",
-                    )
-                    stt_btn = gr.Button("Process Speech", variant="secondary")
+                    gr.Markdown("### 🎙️ Hands-Free Mic")
+                    mic_toggle = gr.Checkbox(label="Open Mic (Hands-Free)", value=False)
 
                     gr.Markdown("### 🛠️ Status")
                     gr.Markdown("System: **Online**")
                     error_box = gr.Textbox(label="Last System Error", interactive=False)
 
+            # Timer for polling background STT results
+            timer = gr.Timer(value=1.0, active=True)
+
             # Handlers
             def user_message(user_input, history):
                 if history is None: history = []
 
-                # Gradio 5+ multimodal fix: Extract text if it's a list/dict
                 processed_input = user_input
                 if isinstance(user_input, list) and len(user_input) > 0:
                     processed_input = user_input[0].get("text", str(user_input))
@@ -77,10 +76,8 @@ class AureliaGUI:
 
             def bot_response(history):
                 if not history: return [], ""
-                # Get the content of the last message (which should be from the user)
                 user_input = history[-1]["content"]
 
-                # Double check extraction in case it bypassed user_message
                 if isinstance(user_input, list) and len(user_input) > 0:
                     user_input = user_input[0].get("text", str(user_input))
                 elif isinstance(user_input, dict):
@@ -89,26 +86,25 @@ class AureliaGUI:
                 try:
                     response = self.process_text_cb(user_input)
                     history.append({"role": "assistant", "content": response})
-                    return history, "" # Clear error box on success
+                    return history, ""
                 except Exception as e:
                     err_msg = str(e)
                     history.append({"role": "assistant", "content": f"[System Error]: {err_msg}"})
                     return history, err_msg
 
-            def handle_audio(audio_path, history):
+            def on_mic_toggle(value):
+                self.toggle_mic_cb(value)
+                return f"Mic: {'**ON**' if value else '**OFF**'}"
+
+            def poll_results(history):
                 if history is None: history = []
-                if not audio_path:
-                    return history, ""
-
-                try:
-                    user_txt, bot_txt = self.process_audio_cb(audio_path)
-                    history.append({"role": "user", "content": user_txt})
-                    history.append({"role": "assistant", "content": bot_txt})
-                    return history, ""
-                except Exception as e:
-                    err_msg = str(e)
-                    history.append({"role": "assistant", "content": f"[System Error]: {err_msg}"})
-                    return history, err_msg
+                new_results = self.poll_results_cb()
+                if new_results:
+                    for u, b in new_results:
+                        history.append({"role": "user", "content": u})
+                        history.append({"role": "assistant", "content": b})
+                    return history
+                return history
 
             msg.submit(user_message, [msg, chatbot], [msg, chatbot], queue=False).then(
                 bot_response, chatbot, [chatbot, error_box]
@@ -117,7 +113,9 @@ class AureliaGUI:
                 bot_response, chatbot, [chatbot, error_box]
             )
 
-            stt_btn.click(handle_audio, [audio_input, chatbot], [chatbot, error_box])
+            mic_toggle.change(on_mic_toggle, mic_toggle, None)
+
+            timer.tick(poll_results, chatbot, chatbot)
 
             clear_btn.click(lambda: ([], ""), None, [chatbot, error_box], queue=False)
 

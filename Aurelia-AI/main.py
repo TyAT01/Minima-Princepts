@@ -40,6 +40,7 @@ from stt.whisper import STTSystem
 from persona.manager import PersonaManager
 from ui.web_gui import AureliaGUI
 from utils.error_handler import ErrorHandler
+from queue import Queue
 
 class AureliaApp:
     def __init__(self, config_path: str = "config.yaml"):
@@ -73,10 +74,16 @@ class AureliaApp:
         # Note: sheet_path in config might be relative to the version folder
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'Aurelia_chroma/aurelia_sheet.yaml'))
 
+        self.results_queue = Queue()
+        from stt.whisper import VoiceMonitor
+        self.voice_monitor = VoiceMonitor(callback=self.process_background_audio)
+
         ui_cfg = self.config.get('ui', {})
         self.gui = AureliaGUI(
             process_text_cb=self.process_text,
             process_audio_cb=self.process_audio,
+            toggle_mic_cb=self.toggle_mic,
+            poll_results_cb=self.poll_results,
             title=ui_cfg.get('title', "⚔️ Aurelia Vale: The Hedge-Knight Squire"),
             theme=ui_cfg.get('theme', "soft")
         )
@@ -156,10 +163,33 @@ class AureliaApp:
         except Exception as e:
             logging.warning(f"Reflection failed: {e}")
 
-    def process_audio(self, audio_path: str) -> tuple[str, str]:
+    def process_background_audio(self, audio_data: Any):
+        """Callback for background STT."""
         try:
-            transcribed_text = self.stt.transcribe(audio_path)
-            if not transcribed_text.strip():
+            user_txt, bot_txt = self.process_audio(audio_data)
+            if user_txt != "[Inaudible]":
+                self.results_queue.put((user_txt, bot_txt))
+        except Exception as e:
+            logging.error(f"Background audio processing failed: {e}")
+
+    def toggle_mic(self, state: bool):
+        """Toggles the background voice monitor."""
+        if state:
+            self.voice_monitor.start()
+        else:
+            self.voice_monitor.stop()
+
+    def poll_results(self) -> list[tuple[str, str]]:
+        """Polls the queue for any new results from background STT."""
+        results = []
+        while not self.results_queue.empty():
+            results.append(self.results_queue.get())
+        return results
+
+    def process_audio(self, audio_source: Any) -> tuple[str, str]:
+        try:
+            transcribed_text = self.stt.transcribe(audio_source)
+            if not transcribed_text or not transcribed_text.strip():
                 return "[Inaudible]", "I'm sorry, I couldn't quite hear you. Could you repeat that?"
 
             response = self.process_text(transcribed_text)
@@ -177,17 +207,23 @@ class AureliaApp:
         ui_cfg = self.config.get('ui', {})
 
         # Setup signal handlers for graceful shutdown
-        def handle_exit(sig, frame):
-            logging.info("Graceful shutdown initiated...")
-            if self.gui and self.gui.interface:
-                try:
-                    self.gui.interface.close()
-                except:
-                    pass
-            sys.exit(0)
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            def handle_exit(sig, frame):
+                logging.info("Graceful shutdown initiated...")
+                if self.gui and self.gui.interface:
+                    try:
+                        self.gui.interface.close()
+                    except:
+                        pass
+                sys.exit(0)
 
-        signal.signal(signal.SIGINT, handle_exit)
-        signal.signal(signal.SIGTERM, handle_exit)
+            try:
+                signal.signal(signal.SIGINT, handle_exit)
+                signal.signal(signal.SIGTERM, handle_exit)
+            except ValueError:
+                # Still might fail if not in main interpreter even if main thread
+                pass
 
         self.gui.launch(share=ui_cfg.get('share', False))
 
