@@ -1,6 +1,7 @@
 import yaml
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -75,7 +76,12 @@ class PersonaManager:
         speech = char.get('speech_patterns', {})
         constraints = char.get('llm_logic_constraints', {}).get('chroma_4b', '')
 
-        prompt = f"### IDENTITY\n"
+        # Add Real-time Temporal Awareness
+        now = datetime.now()
+        prompt = f"### SYSTEM CONTEXT\n"
+        prompt += f"Current Date & Time: {now.strftime('%A, %B %d, %Y - %I:%M %p')}\n\n"
+
+        prompt += f"### IDENTITY\n"
         prompt += f"Name: {name}\n"
         prompt += f"Role: {role}\n"
         prompt += f"Background: {identity}\n\n"

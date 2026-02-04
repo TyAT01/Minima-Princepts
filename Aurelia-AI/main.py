@@ -5,6 +5,7 @@ import sys
 import yaml
 import signal
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +177,25 @@ class AureliaApp:
                 system_prompt = self.persona.get_system_prompt()
                 history = self.memory.get_history()
                 context = self.memory.get_full_context(text, user_id=user_name)
+
+                # Add Temporal Context (Time Awareness)
+                last_time = self.memory.get_last_interaction_time()
+                temporal_note = ""
+                if last_time:
+                    delta = datetime.now(timezone.utc) - last_time
+                    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+                    minutes, _ = divmod(remainder, 60)
+
+                    if hours > 0:
+                        temporal_note = f"You haven't spoken to {user_name} for {hours} hours and {minutes} minutes."
+                    else:
+                        temporal_note = f"You last spoke to {user_name} {minutes} minutes ago."
+
+                    if delta.days > 0:
+                        temporal_note = f"It has been {delta.days} days since your last interaction."
+
+                if temporal_note:
+                    context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
 
                 # 1. Inner Monologue Phase
                 thought = self._generate_thought(text, history, context)

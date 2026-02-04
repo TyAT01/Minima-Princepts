@@ -174,3 +174,27 @@ class MemoryStore:
     def clear_short_term(self):
         """Clears the short-term buffer."""
         self.short_term_buffer = []
+
+    def get_last_interaction_time(self) -> Optional[datetime]:
+        """Retrieves the timestamp of the very last interaction stored."""
+        try:
+            # Query the latest interaction
+            results = self._collection.get(
+                limit=1,
+                where={"type": "interaction"},
+                # ChromaDB get doesn't have direct sort, but we can query by ID if we use timestamp-based IDs
+                # Actually interaction IDs are mem_{timestamp}. We might need to query all and find max or just query with specific IDs
+            )
+
+            # Since IDs are f"mem_{now.timestamp()}", we can get all and find the latest.
+            # But get() with limit=1 and no sort might not be reliable.
+            # Let's try to get all interaction metadata and find the max timestamp.
+            all_meta = self._collection.get(where={"type": "interaction"}, include=["metadatas"])
+            if not all_meta or not all_meta["metadatas"]:
+                return None
+
+            latest_iso = max([m["timestamp"] for m in all_meta["metadatas"]])
+            return datetime.fromisoformat(latest_iso)
+        except Exception as e:
+            logger.debug(f"Error getting last interaction time: {e}")
+            return None
