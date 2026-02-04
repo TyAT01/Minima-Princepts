@@ -75,7 +75,7 @@ class AureliaGUI:
                 return "", history
 
             def bot_response(history):
-                if not history: return [], ""
+                if not history: yield [], ""; return
                 user_input = history[-1]["content"]
 
                 if isinstance(user_input, list) and len(user_input) > 0:
@@ -84,17 +84,19 @@ class AureliaGUI:
                     user_input = user_input.get("text", str(user_input))
 
                 try:
-                    response = self.process_text_cb(user_input)
-                    history.append({"role": "assistant", "content": response})
-                    return history, ""
+                    history.append({"role": "assistant", "content": ""})
+                    full_response = ""
+                    for fragment in self.process_text_cb(user_input):
+                        full_response += fragment + " "
+                        history[-1]["content"] = full_response.strip()
+                        yield history, ""
                 except Exception as e:
                     err_msg = str(e)
                     history.append({"role": "assistant", "content": f"[System Error]: {err_msg}"})
-                    return history, err_msg
+                    yield history, err_msg
 
             def on_mic_toggle(value):
                 self.toggle_mic_cb(value)
-                return f"Mic: {'**ON**' if value else '**OFF**'}"
 
             def poll_results(history):
                 if history is None: history = []

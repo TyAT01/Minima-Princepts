@@ -118,26 +118,48 @@ class VoiceMonitor:
         logger.info("Voice Monitor stopped.")
 
     def _listen_loop(self):
-        if not self.vad: return
+        if not self.vad:
+            logger.error("VAD not initialized. Cannot start listen loop.")
+            return
+
+        # Diagnostics: log default device
+        try:
+            device_info = sd.query_devices(kind='input')
+            logger.info(f"Using default input device: {device_info.get('name')} (SR: {device_info.get('default_samplerate')})")
+        except Exception as e:
+            logger.error(f"Could not query audio devices: {e}")
+            self.is_listening = False
+            return
 
         # Open default input stream
         try:
+            logger.info(f"Opening audio stream: {self.sample_rate}Hz, 1 channel...")
             with sd.RawInputStream(samplerate=self.sample_rate, channels=1, dtype='int16',
                                   blocksize=self.frame_size) as stream:
 
                 num_silent_frames = 0
                 max_silent_frames = int(1000 / self.frame_duration_ms) # 1 second of silence to trigger
 
+                # Counter for logging periodically
+                frame_count = 0
+
                 while not self.stop_event.is_set() and self.is_listening:
                     frame, overflowed = stream.read(self.frame_size)
+                    frame_count += 1
+
                     if overflowed:
                         logger.debug("Audio input overflowed.")
 
                     is_speech = self.vad.is_speech(frame, self.sample_rate)
 
+                    # Periodic heartbeat log
+                    if frame_count % 100 == 0:
+                        logger.debug(f"Monitor heartbeat: frames={frame_count}, is_speech={is_speech}, triggered={self.triggered}")
+
                     if not self.triggered:
                         self.buffer.append(frame)
                         if is_speech:
+                            logger.info("Speech detected! Recording...")
                             self.triggered = True
                             self.voiced_frames.extend(list(self.buffer))
                             self.buffer.clear()
@@ -151,13 +173,16 @@ class VoiceMonitor:
 
                         if num_silent_frames > max_silent_frames:
                             # User stopped speaking
+                            logger.info("Speech ended. Processing segment...")
                             self.triggered = False
                             full_audio = b"".join(self.voiced_frames)
                             self.voiced_frames = []
 
                             # Process the segment
-                            if len(full_audio) > self.sample_rate: # Min 0.5s of audio (approx)
+                            if len(full_audio) > self.sample_rate * 0.5: # Min 0.5s of audio
                                 self._process_segment(full_audio)
+                            else:
+                                logger.info("Segment too short, skipping.")
 
         except Exception as e:
             logger.error(f"Error in Voice Monitor loop: {e}")

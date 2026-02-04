@@ -4,6 +4,7 @@ import os
 import sys
 import yaml
 import signal
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ if sys.platform == "win32":
 from llm.client import LlamaClient
 from memory.store import MemoryStore
 from stt.whisper import STTSystem
+from utils.text_utils import split_into_sentences
 from persona.manager import PersonaManager
 from ui.web_gui import AureliaGUI
 from utils.error_handler import ErrorHandler
@@ -45,7 +47,7 @@ from queue import Queue
 class AureliaApp:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
-
+        self.processing_lock = threading.Lock()
         self.error_handler = ErrorHandler(ai_comment_callback=self.ai_comment_on_error)
 
         # Initialize components with config
@@ -118,7 +120,8 @@ class AureliaApp:
         except Exception as e:
             self.error_handler.handle_error(e, "Initialization")
 
-    def process_text(self, text: Any) -> str:
+    def process_text(self, text: Any):
+        """Generator that yields sentence fragments from the LLM."""
         # Robustly handle list/dict inputs from Gradio
         if isinstance(text, list) and len(text) > 0:
             text = text[0].get("text", str(text))
@@ -126,26 +129,38 @@ class AureliaApp:
             text = text.get("text", str(text))
 
         logging.info(f"--- Processing Message: '{text}' ---")
-        try:
-            system_prompt = self.persona.get_system_prompt()
-            history = self.memory.get_history()
-            context = self.memory.get_full_context(text)
 
-            logging.info(f"Context retrieved ({len(context)} chars). History depth: {len(history)}")
+        # Use a lock to prevent simultaneous LLM calls which can crash Ollama/GPU
+        if self.processing_lock.locked():
+             logging.warning("System is busy processing another request.")
+             yield "Wait a moment, I'm still thinking about our last exchange..."
+             return
 
-            response = self.llm.generate_response(system_prompt, text, history, context)
+        with self.processing_lock:
+            try:
+                system_prompt = self.persona.get_system_prompt()
+                history = self.memory.get_history()
+                context = self.memory.get_full_context(text)
 
-            self.memory.add_interaction(text, response)
-            logging.info(f"Successfully processed message. Response: '{response[:50]}...'")
+                logging.info(f"Context retrieved ({len(context)} chars). History depth: {len(history)}")
 
-            # Intelligent background: check if we should "reflect" (every 10 interactions)
-            if len(self.memory._collection.get()['ids']) % 10 == 0:
-                 self.reflect()
+                full_response = ""
+                stream = self.llm.stream_response(system_prompt, text, history, context)
 
-            return response
-        except Exception as e:
-            self.error_handler.handle_error(e, "Text Processing")
-            return self.error_handler.get_ai_fallback_response()
+                for fragment in split_into_sentences(stream):
+                    full_response += fragment + " "
+                    yield fragment
+
+                self.memory.add_interaction(text, full_response.strip())
+                logging.info(f"Successfully processed message. Response length: {len(full_response)}")
+
+                # Intelligent background: check if we should "reflect" (every 10 interactions)
+                if len(self.memory._collection.get()['ids']) % 10 == 0:
+                     self.reflect()
+
+            except Exception as e:
+                self.error_handler.handle_error(e, "Text Processing")
+                yield self.error_handler.get_ai_fallback_response()
 
     def reflect(self):
         """Asks the LLM to summarize recent interactions into a long-term insight."""
@@ -166,9 +181,17 @@ class AureliaApp:
     def process_background_audio(self, audio_data: Any):
         """Callback for background STT."""
         try:
-            user_txt, bot_txt = self.process_audio(audio_data)
-            if user_txt != "[Inaudible]":
-                self.results_queue.put((user_txt, bot_txt))
+            transcribed_text = self.stt.transcribe(audio_data)
+            if not transcribed_text or not transcribed_text.strip():
+                return
+
+            # For background audio, we'll collect the whole response to put in queue
+            # because the queue poller expects full (user, bot) pairs currently.
+            full_bot_txt = ""
+            for fragment in self.process_text(transcribed_text):
+                full_bot_txt += fragment + " "
+
+            self.results_queue.put((transcribed_text, full_bot_txt.strip()))
         except Exception as e:
             logging.error(f"Background audio processing failed: {e}")
 
@@ -186,17 +209,24 @@ class AureliaApp:
             results.append(self.results_queue.get())
         return results
 
-    def process_audio(self, audio_source: Any) -> tuple[str, str]:
+    def process_audio(self, audio_source: Any):
+        """Generator that transcribes and then streams the bot response."""
         try:
             transcribed_text = self.stt.transcribe(audio_source)
             if not transcribed_text or not transcribed_text.strip():
-                return "[Inaudible]", "I'm sorry, I couldn't quite hear you. Could you repeat that?"
+                yield "[Inaudible]", "I'm sorry, I couldn't quite hear you. Could you repeat that?"
+                return
 
-            response = self.process_text(transcribed_text)
-            return transcribed_text, response
+            yield transcribed_text, "" # Yield transcription first
+
+            full_response = ""
+            for fragment in self.process_text(transcribed_text):
+                full_response += fragment + " "
+                yield transcribed_text, full_response.strip()
+
         except Exception as e:
             self.error_handler.handle_error(e, "Audio Processing")
-            return "[Audio Error]", self.error_handler.get_ai_fallback_response()
+            yield "[Audio Error]", self.error_handler.get_ai_fallback_response()
 
     def ai_comment_on_error(self, error_details: str):
         logging.warning(f"AI noticing error: {error_details}")
@@ -207,7 +237,6 @@ class AureliaApp:
         ui_cfg = self.config.get('ui', {})
 
         # Setup signal handlers for graceful shutdown
-        import threading
         if threading.current_thread() is threading.main_thread():
             def handle_exit(sig, frame):
                 logging.info("Graceful shutdown initiated...")
