@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import yaml
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +175,20 @@ class AureliaApp:
         self.initialize()
         self.gui.build_ui()
         ui_cfg = self.config.get('ui', {})
+
+        # Setup signal handlers for graceful shutdown
+        def handle_exit(sig, frame):
+            logging.info("Graceful shutdown initiated...")
+            if self.gui and self.gui.interface:
+                try:
+                    self.gui.interface.close()
+                except:
+                    pass
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, handle_exit)
+        signal.signal(signal.SIGTERM, handle_exit)
+
         self.gui.launch(share=ui_cfg.get('share', False))
 
 if __name__ == "__main__":

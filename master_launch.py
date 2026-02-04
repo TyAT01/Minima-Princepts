@@ -82,19 +82,28 @@ def launch_app(venv_python):
 
     # Change to Aurelia-AI directory and run main.py
     os.chdir("Aurelia-AI")
-    subprocess.run([str(venv_python), "main.py"])
+    try:
+        subprocess.run([str(venv_python), "main.py"])
+    except KeyboardInterrupt:
+        # This catch is mainly for the subprocess.run call itself
+        pass
 
 if __name__ == "__main__":
-    print("🌸 Starting Aurelia Vale Master Launcher 🌸")
+    try:
+        print("🌸 Starting Aurelia Vale Master Launcher 🌸")
 
-    # 1. Start Ollama
-    start_ollama()
+        # 1. Start Ollama
+        start_ollama()
 
-    # 2. Setup Venv
-    venv_python = setup_venv()
+        # 2. Setup Venv
+        venv_python = setup_venv()
 
-    # 3. Check dependencies
-    check_dependencies(venv_python)
+        # 3. Check dependencies
+        check_dependencies(venv_python)
 
-    # 4. Launch
-    launch_app(venv_python)
+        # 4. Launch
+        launch_app(venv_python)
+
+    except KeyboardInterrupt:
+        print("\n🌸 Aurelia Vale launcher interrupted. Shutting down gracefully...")
+        sys.exit(0)
