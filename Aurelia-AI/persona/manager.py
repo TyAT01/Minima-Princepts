@@ -108,18 +108,18 @@ class PersonaManager:
         # Add Response Style Guidelines
         style = self.persona_data.get('character', {}).get('response_style', {})
         if style:
-            prompt += "### RESPONSE LENGTH & STYLE\n"
-            prompt += f"- Target Length: ~{style.get('default_words', 25)} words.\n"
-            prompt += f"- Soft Cap: {style.get('soft_cap', 40)} words.\n"
-            prompt += f"- Hard Cap: {style.get('hard_cap', 60)} words.\n"
-            prompt += "- Expand response length ONLY if:\n"
+            prompt += "### RESPONSE LENGTH & STYLE (STRICT)\n"
+            prompt += f"- MANDATORY Target Length: ~{style.get('default_words', 25)} words.\n"
+            prompt += f"- SOFT LIMIT: {style.get('soft_cap', 40)} words.\n"
+            prompt += f"- ABSOLUTE MAXIMUM: {style.get('hard_cap', 60)} words.\n"
+            prompt += "- Do NOT exceed these limits unless one of these conditions is met:\n"
             for condition in style.get('expand_only_if', []):
                 prompt += f"  * {condition}\n"
-            prompt += "\n"
+            prompt += "- If no expansion conditions are met, be extremely concise and stop talking once you've made your point.\n\n"
 
         prompt += "### RESPONSE GUIDELINES\n"
         prompt += "1. Stay in character at all times.\n"
-        prompt += f"2. Keep responses brief (under {style.get('soft_cap', 40)} words unless conditions met).\n"
+        prompt += f"2. BRIEF responses only (under {style.get('soft_cap', 40)} words). Avoid rambling or unnecessary pleasantries.\n"
         prompt += "3. Use filler words (uhm, ah, so) occasionally for a more natural feel.\n"
         prompt += "4. If an error occurs, acknowledge it in-character as a 'glitch' or 'technical gremlin'.\n"
 

@@ -96,11 +96,12 @@ class VoiceMonitor:
         try:
             if webrtcvad:
                 self.vad = webrtcvad.Vad(3) # Aggressiveness 3
+                logger.info("webrtcvad initialized successfully.")
             else:
                 self.vad = None
-                logger.warning("webrtcvad not found. Hands-free mic will not work correctly.")
+                logger.warning("webrtcvad not found. Using Energy-based fallback VAD.")
         except Exception as e:
-            logger.error(f"Failed to initialize webrtcvad: {e}")
+            logger.error(f"Failed to initialize webrtcvad: {e}. Using Energy-based fallback VAD.")
             self.vad = None
 
         self.buffer = collections.deque(maxlen=20) # 600ms pre-roll
@@ -125,11 +126,22 @@ class VoiceMonitor:
             self.thread.join(timeout=2)
         logger.info("Voice Monitor stopped.")
 
-    def _listen_loop(self):
-        if not self.vad:
-            logger.error("VAD not initialized. Cannot start listen loop.")
-            return
+    def _is_speech(self, frame_bytes):
+        """Detects speech using WebRTC VAD or Energy-based fallback."""
+        if self.vad:
+            try:
+                return self.vad.is_speech(frame_bytes, self.sample_rate)
+            except Exception as e:
+                logger.debug(f"WebRTC VAD error: {e}")
+                # Fallback to energy detection on error
 
+        # Energy-based VAD (RMS)
+        audio_data = np.frombuffer(frame_bytes, dtype=np.int16)
+        rms = np.sqrt(np.mean(audio_data.astype(np.float32)**2))
+        # Threshold for typical quiet room is ~50-100. Let's use 300 for speech.
+        return rms > 300
+
+    def _listen_loop(self):
         # Diagnostics: log default device
         try:
             device_info = sd.query_devices(kind='input')
@@ -158,7 +170,7 @@ class VoiceMonitor:
                     if overflowed:
                         logger.debug("Audio input overflowed.")
 
-                    is_speech = self.vad.is_speech(frame, self.sample_rate)
+                    is_speech = self._is_speech(frame)
 
                     # Periodic heartbeat log
                     if frame_count % 100 == 0:
