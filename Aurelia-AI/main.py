@@ -74,7 +74,7 @@ class AureliaApp:
 
         pers_cfg = self.config.get('persona', {})
         # Note: sheet_path in config might be relative to the version folder
-        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'Aurelia_chroma/aurelia_sheet.yaml'))
+        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'aurelia_sheet.yaml'))
 
         self.results_queue = Queue()
         from stt.whisper import VoiceMonitor
