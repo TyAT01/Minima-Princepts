@@ -26,10 +26,31 @@ class MemoryStore:
 
         self.short_term_buffer: List[Dict[str, str]] = []
         self.max_short_term = max_short_term
+        self._last_interaction_time: Optional[datetime] = None
+        self._load_last_interaction_time()
+
+    def _load_last_interaction_time(self):
+        """Initializes the last interaction time from the database."""
+        try:
+            # We have to fetch metadatas to find the max timestamp since Chroma doesn't support sorting
+            all_meta = self._collection.get(where={"type": "interaction"}, include=["metadatas"])
+            if all_meta and all_meta["metadatas"]:
+                # Filter out None and find max
+                valid_stamps = [m["timestamp"] for m in all_meta["metadatas"] if m and "timestamp" in m]
+                if valid_stamps:
+                    latest_iso = max(valid_stamps)
+                    self._last_interaction_time = datetime.fromisoformat(latest_iso)
+        except Exception as e:
+            logger.debug(f"Failed to load last interaction time: {e}")
+
+    def count(self) -> int:
+        """Returns the total number of items in the long-term collection."""
+        return self._collection.count()
 
     def add_interaction(self, user_text: str, bot_text: str, user_id: str = "default_user"):
         """Adds a new interaction to both short-term and long-term memory."""
         now = datetime.now(timezone.utc)
+        self._last_interaction_time = now # Update cache
         timestamp_str = now.isoformat()
 
         # 1. Add to Vector DB (Long-term)
@@ -176,25 +197,5 @@ class MemoryStore:
         self.short_term_buffer = []
 
     def get_last_interaction_time(self) -> Optional[datetime]:
-        """Retrieves the timestamp of the very last interaction stored."""
-        try:
-            # Query the latest interaction
-            results = self._collection.get(
-                limit=1,
-                where={"type": "interaction"},
-                # ChromaDB get doesn't have direct sort, but we can query by ID if we use timestamp-based IDs
-                # Actually interaction IDs are mem_{timestamp}. We might need to query all and find max or just query with specific IDs
-            )
-
-            # Since IDs are f"mem_{now.timestamp()}", we can get all and find the latest.
-            # But get() with limit=1 and no sort might not be reliable.
-            # Let's try to get all interaction metadata and find the max timestamp.
-            all_meta = self._collection.get(where={"type": "interaction"}, include=["metadatas"])
-            if not all_meta or not all_meta["metadatas"]:
-                return None
-
-            latest_iso = max([m["timestamp"] for m in all_meta["metadatas"]])
-            return datetime.fromisoformat(latest_iso)
-        except Exception as e:
-            logger.debug(f"Error getting last interaction time: {e}")
-            return None
+        """Retrieves the timestamp of the very last interaction stored (using cache)."""
+        return self._last_interaction_time

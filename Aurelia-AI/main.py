@@ -222,8 +222,8 @@ class AureliaApp:
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     logging.info(f"Successfully processed message. Response length: {len(full_response)}")
 
-                # Periodic reflection
-                if len(self.memory._collection.get()['ids']) % 10 == 0:
+                # Periodic reflection (every 10 interactions)
+                if self.memory.count() % 10 == 0:
                      self.reflect()
 
             except Exception as e:
