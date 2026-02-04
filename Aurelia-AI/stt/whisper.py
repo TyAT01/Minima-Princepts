@@ -38,7 +38,11 @@ else:
 try:
     import webrtcvad
 except ImportError:
-    webrtcvad = None
+    try:
+        # Some versions on Windows use webrtcvad-wheels
+        import webrtcvad
+    except ImportError:
+        webrtcvad = None
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +93,15 @@ class VoiceMonitor:
         self.frame_duration_ms = frame_duration_ms
         self.frame_size = int(sample_rate * frame_duration_ms / 1000)
 
-        if webrtcvad:
-            self.vad = webrtcvad.Vad(3) # Aggressiveness 3
-        else:
+        try:
+            if webrtcvad:
+                self.vad = webrtcvad.Vad(3) # Aggressiveness 3
+            else:
+                self.vad = None
+                logger.warning("webrtcvad not found. Hands-free mic will not work correctly.")
+        except Exception as e:
+            logger.error(f"Failed to initialize webrtcvad: {e}")
             self.vad = None
-            logger.warning("webrtcvad not found. Hands-free mic will not work correctly.")
 
         self.buffer = collections.deque(maxlen=20) # 600ms pre-roll
         self.triggered = False

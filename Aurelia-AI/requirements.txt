@@ -10,7 +10,7 @@ gradio
 sounddevice
 numpy
 onnxruntime-gpu
-webrtcvad
+webrtcvad-wheels
 
 # Hardware acceleration (RTX 3070)
 # bitsandbytes

@@ -105,9 +105,21 @@ class PersonaManager:
         prompt += "### LOGIC CONSTRAINTS\n"
         prompt += f"{constraints}\n\n"
 
+        # Add Response Style Guidelines
+        style = self.persona_data.get('character', {}).get('response_style', {})
+        if style:
+            prompt += "### RESPONSE LENGTH & STYLE\n"
+            prompt += f"- Target Length: ~{style.get('default_words', 25)} words.\n"
+            prompt += f"- Soft Cap: {style.get('soft_cap', 40)} words.\n"
+            prompt += f"- Hard Cap: {style.get('hard_cap', 60)} words.\n"
+            prompt += "- Expand response length ONLY if:\n"
+            for condition in style.get('expand_only_if', []):
+                prompt += f"  * {condition}\n"
+            prompt += "\n"
+
         prompt += "### RESPONSE GUIDELINES\n"
         prompt += "1. Stay in character at all times.\n"
-        prompt += "2. Be concise but engaging.\n"
+        prompt += f"2. Keep responses brief (under {style.get('soft_cap', 40)} words unless conditions met).\n"
         prompt += "3. Use filler words (uhm, ah, so) occasionally for a more natural feel.\n"
         prompt += "4. If an error occurs, acknowledge it in-character as a 'glitch' or 'technical gremlin'.\n"
 
