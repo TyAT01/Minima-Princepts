@@ -17,7 +17,6 @@ def start_ollama():
         return
 
     # Check if ollama serve is already running
-    # This is a bit OS dependent. On Linux/Mac we can use pgrep
     is_running = False
     try:
         if sys.platform == "win32":
@@ -44,7 +43,7 @@ def start_ollama():
             print(f"❌ Failed to start Ollama: {e}")
 
 def setup_venv():
-    """Creates or activates a virtual environment."""
+    """Creates or activates a virtual environment in the project root."""
     venv_dir = Path(".venv")
     if not venv_dir.exists():
         print("Creating virtual environment...")
@@ -59,92 +58,34 @@ def setup_venv():
     else:
         return (venv_dir / "bin" / "python").resolve()
 
-def select_version():
-    """Asks the user to select which version to run."""
-    if "--chroma" in sys.argv:
-        return "Aurelia_chroma"
-    if "--pp" in sys.argv:
-        return "aurelia_chroma_PP"
-
-    print("\n--- 🌸 Select Aurelia Version 🌸 ---")
-    print("1) Aurelia Chroma (Standard)")
-    print("2) Aurelia Chroma PP (Personaplex)")
-    print("-----------------------------------")
-
-    while True:
-        choice = input("Enter choice (1 or 2): ").strip()
-        if choice == "1":
-            return "Aurelia_chroma"
-        elif choice == "2":
-            return "aurelia_chroma_PP"
-        else:
-            print("Invalid choice. Please enter 1 or 2.")
-
-def check_dependencies(venv_python, version_dir):
-    """Installs dependencies and checks for .env file."""
-    print(f"\n📦 Checking dependencies for {version_dir}...")
-    req_file = Path(version_dir) / "requirements.txt"
+def check_dependencies(venv_python):
+    """Installs dependencies from Aurelia-AI/requirements.txt."""
+    print(f"\n📦 Checking dependencies for Aurelia-AI...")
+    req_file = Path("Aurelia-AI") / "requirements.txt"
     if req_file.exists():
         subprocess.run([str(venv_python), "-m", "pip", "install", "-r", str(req_file)], check=True)
         print("✅ Dependencies up to date.")
     else:
-        print(f"⚠️  No requirements.txt found in {version_dir}")
+        print(f"⚠️  No requirements.txt found in Aurelia-AI")
 
-    # Check for .env file
-    env_file = Path(version_dir) / ".env"
-    env_example = Path(version_dir) / ".env.example"
-    if not env_file.exists() and env_example.exists():
-        print(f"📄 .env file missing in {version_dir}. Copying from .env.example...")
-        shutil.copy(env_example, env_file)
-        print("✅ .env file created. Please edit it with your credentials later.")
-    elif not env_file.exists():
-        print(f"⚠️  No .env or .env.example found in {version_dir}.")
-    else:
-        print(f"✅ .env file found in {version_dir}.")
-
-def launch_app(venv_python, version_dir):
-    """Launches the AI application and the web dashboard."""
-    print(f"\n🎨 Launching Aurelia Vale from {version_dir}...")
-
-    # Try to detect port from .env or config, default to 8000
-    port = 8000
-    env_path = Path(version_dir) / ".env"
-    if env_path.exists():
-        with open(env_path, "r") as f:
-            for line in f:
-                if "AURELIA_VALE_WEB_PORT=" in line.upper():
-                    try:
-                        port = int(line.split("=")[1].strip())
-                    except ValueError:
-                        pass
+def launch_app(venv_python):
+    """Launches the Aurelia AI application."""
+    print(f"\n🎨 Launching Aurelia Vale from Aurelia-AI...")
 
     # Run browser in a separate thread
     def open_browser():
         time.sleep(10) # Give the server some time to start
-        print(f"\n🌐 Opening Web Dashboard at http://localhost:{port}")
-        webbrowser.open(f"http://localhost:{port}")
-
-        # Also open Discord
-        print("💬 Opening Discord...")
-        webbrowser.open("https://discord.com/app")
+        print(f"\n🌐 Opening Web Dashboard at http://localhost:7860")
+        webbrowser.open(f"http://localhost:7860")
 
     Thread(target=open_browser, daemon=True).start()
 
-    # Change to version directory and run app.py
-    os.chdir(version_dir)
-    subprocess.run([str(venv_python), "app.py"])
+    # Change to Aurelia-AI directory and run main.py
+    os.chdir("Aurelia-AI")
+    subprocess.run([str(venv_python), "main.py"])
 
 if __name__ == "__main__":
-    if "--help" in sys.argv:
-        print("🌸 Aurelia Vale Master Launcher 🌸")
-        print("Usage: python3 master_launch.py [options]")
-        print("Options:")
-        print("  --chroma    Launch Aurelia Chroma (Standard)")
-        print("  --pp        Launch Aurelia Chroma PP (Personaplex)")
-        print("  --help      Show this help message")
-        sys.exit(0)
-
-    print("🌸 Starting Aurelia Vale Master Setup 🌸")
+    print("🌸 Starting Aurelia Vale Master Launcher 🌸")
 
     # 1. Start Ollama
     start_ollama()
@@ -152,11 +93,8 @@ if __name__ == "__main__":
     # 2. Setup Venv
     venv_python = setup_venv()
 
-    # 3. Select Version
-    version_dir = select_version()
+    # 3. Check dependencies
+    check_dependencies(venv_python)
 
-    # 4. Check dependencies and .env
-    check_dependencies(venv_python, version_dir)
-
-    # 5. Launch
-    launch_app(venv_python, version_dir)
+    # 4. Launch
+    launch_app(venv_python)

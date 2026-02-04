@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class PersonaManager:
     """Manages the AI's personality by loading and parsing the character sheet."""
 
-    def __init__(self, sheet_path: str = "../Aurelia_chroma/aurelia_sheet.yaml"):
+    def __init__(self, sheet_path: str = "aurelia_sheet.yaml"):
         self.sheet_path = Path(sheet_path)
         self.persona_data: Dict[str, Any] = {}
         self.system_prompt: str = ""
@@ -18,12 +18,12 @@ class PersonaManager:
         """Loads the YAML character sheet with aggressive path discovery."""
         search_paths: List[Path] = [
             self.sheet_path,
-            Path("Aurelia_chroma/aurelia_sheet.yaml"),
-            Path("../Aurelia_chroma/aurelia_sheet.yaml"),
+            Path("Aurelia-AI/aurelia_sheet.yaml"),
+            Path("../Aurelia-AI/aurelia_sheet.yaml"),
             Path("aurelia_sheet.yaml"),
             # Search from script location
-            Path(__file__).resolve().parent.parent / "Aurelia_chroma" / "aurelia_sheet.yaml",
-            Path(__file__).resolve().parent.parent.parent / "Aurelia_chroma" / "aurelia_sheet.yaml",
+            Path(__file__).resolve().parent.parent / "aurelia_sheet.yaml",
+            Path(__file__).resolve().parent.parent.parent / "Aurelia-AI" / "aurelia_sheet.yaml",
         ]
 
         # Add even more candidate folders by looking for any folder named *chroma* or *Aurelia*

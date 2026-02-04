@@ -1,47 +1,39 @@
 # 🌸 Aurelia Vale 🌸
 
-Aurelia Vale is an advanced, multimodal AI companion designed for streamers and virtual interaction. She is powered by the **Chroma-4B** model, which enables her to understand audio directly and respond with both text and voice.
+Aurelia Vale is an advanced, local AI companion designed for interaction and long-term companionship. This version is a standalone recreation of the "Project Riko" architecture, optimized for local execution on Windows with NVIDIA hardware.
 
 ## 🚀 Key Features
-- **Multimodal Understanding**: Processes raw audio input for better emotional and contextual awareness.
-- **Autonomous Interaction**: Proactively engages with her environment when idle.
-- **Multi-Platform Support**: Integrated adapters for **Discord** (Always-Listening voice), **Twitch**, and **YouTube**.
-- **Long-Term Memory**: Uses ChromaDB to remember past interactions and build relationships.
-- **Web Dashboard**: Real-time log streaming and status monitoring via a FastAPI web interface.
-- **Hardware Optimized**: Specifically tuned for RTX 3070+ GPUs using 4-bit quantization.
+- **Brain**: Powered by **Llama 3.1 8B Instruct** for deep reasoning and personality.
+- **Ears**: Integrated **Faster-Whisper STT** for high-performance voice recognition.
+- **Memory**: Intelligent combined short-term buffer and **ChromaDB** long-term vector storage for multi-year context.
+- **Personality**: Character-driven responses defined by a robust YAML persona system.
+- **Professional GUI**: A clean, web-based chat interface with integrated voice recording capabilities.
+- **Hardware Optimized**: Specifically tuned for **RTX 3070** GPUs and external SSD execution.
 
 ## 🛠️ Quick Start
 
 ### 1. Prerequisites
-- **Python 3.9+**
+- **Python 3.10+**
+- **Ollama** (for local LLM serving)
 - **FFmpeg** (for audio processing)
-- **NVIDIA GPU** (recommended for local LLM execution)
+- **NVIDIA GPU** (RTX 3070 recommended)
 
-### 2. Installation
-1. Clone the repository.
-2. Navigate to the `Aurelia_chroma` directory.
-3. Run the automated setup and launch script:
-   - **Windows**: `run.bat`
-   - **Linux/macOS**: `./run.sh`
+### 2. Installation & Launch
+1. Clone the repository to your `F:\Aurelia-HK` or similar external drive.
+2. Navigate to the root directory.
+3. **Setup**: Run `Aurelia-AI\setup_env.bat` to create the virtual environment and install dependencies.
+4. **Launch**: Run `run.bat` (in root) or `Aurelia-AI\launch_aurelia.bat`.
 
 ### 3. Configuration
-Copy `Aurelia_chroma/.env.example` to `Aurelia_chroma/.env` and fill in your API tokens and channel IDs:
-```env
-AURELIA_VALE_DISCORD_TOKEN=your_discord_token
-AURELIA_VALE_DISCORD_GUILD_ID=your_guild_id
-AURELIA_VALE_DISCORD_VOICE_CHANNEL_ID=your_voice_channel_id
-```
-
-## 🖥️ Web Dashboard
-Once running, the dashboard is available at `http://localhost:8000`. It provides a live view of Aurelia's thoughts and system logs.
+All settings are managed in `Aurelia-AI/config.yaml`. You can adjust your Ollama URL, model name, and STT settings there.
 
 ## 📂 Project Structure
-- `adapters/`: Platform-specific integrations (Discord, Twitch, YouTube).
-- `llm/`: Chroma-4B client and content filters.
-- `memory/`: ChromaDB-backed memory store.
-- `stt/`: Faster-Whisper transcription for memory indexing.
-- `hardware/`: Hardware profiling and resource management.
-- `emotion/`: Emotional state engine.
+- `Aurelia-AI/main.py`: Main entry point and application logic.
+- `Aurelia-AI/llm/`: Llama 3.1 client with automatic fallback logic.
+- `Aurelia-AI/memory/`: ChromaDB-backed memory store with periodic reflection.
+- `Aurelia-AI/stt/`: Faster-Whisper transcription module.
+- `Aurelia-AI/persona/`: Character sheet management and prompt building.
+- `Aurelia-AI/ui/`: Gradio-based web interface.
 
 ---
 *Aurelia is a "Hedge-Knight Squire" on a quest to become real. Treat her with kindness!* 🌸
