@@ -1,5 +1,7 @@
 @echo off
-echo [Aurelia-AI] Initializing Setup...
+setlocal enabledelayedexpansion
+cd /d "%~dp0"
+echo [Aurelia-AI] Initializing Setup in %CD%...
 
 :: Check if Python is installed
 python --version >nul 2>&1
@@ -10,14 +12,25 @@ if %errorlevel% neq 0 (
 )
 
 :: Create virtual environment
-echo [Aurelia-AI] Creating virtual environment...
-python -m venv .venv
+if not exist ".venv" (
+    echo [Aurelia-AI] Creating virtual environment...
+    python -m venv .venv
+) else (
+    echo [Aurelia-AI] Virtual environment already exists.
+)
 
 :: Activate venv and install requirements
 echo [Aurelia-AI] Activating environment and installing dependencies...
 call .venv\Scripts\activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+
+if exist "requirements.txt" (
+    pip install -r requirements.txt
+) else (
+    echo [ERROR] requirements.txt not found in %CD%
+    pause
+    exit /b 1
+)
 
 :: [FIX] Workaround for ctranslate2 ROCm path error on Windows
 echo [Aurelia-AI] Applying compatibility patches...
@@ -34,11 +47,9 @@ if not exist "%ROCM2%" (
 )
 
 echo [Aurelia-AI] Verifying persona files...
-if not exist "..\Aurelia_chroma\aurelia_sheet.yaml" (
-    if not exist "aurelia_sheet.yaml" (
-        echo [WARNING] Character sheet 'aurelia_sheet.yaml' not found!
-        echo Please ensure it is in the 'Aurelia_chroma' sibling folder or the current folder.
-    )
+if not exist "aurelia_sheet.yaml" (
+    echo [WARNING] Character sheet 'aurelia_sheet.yaml' not found in %CD%!
+    echo Please ensure it is in the same folder as this script.
 )
 
 echo [Aurelia-AI] Setup complete! You can now use launch_aurelia.bat

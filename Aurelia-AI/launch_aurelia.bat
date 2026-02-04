@@ -1,5 +1,6 @@
 @echo off
-echo [Aurelia-AI] Launching Aurelia Vale...
+cd /d "%~dp0"
+echo [Aurelia-AI] Launching Aurelia Vale from %CD%...
 
 :: 1. Check/Start Ollama
 tasklist /FI "IMAGENAME eq ollama.exe" 2>NUL | find /I /N "ollama.exe">NUL
