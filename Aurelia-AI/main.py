@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import re
 import yaml
 import signal
 import threading
@@ -144,30 +145,51 @@ class AureliaApp:
         for chunk in stream:
             if not thought_extracted:
                 buffer += chunk
+                # Look for the closing tag or a pattern that suggests thoughts are done
                 if "[/THOUGHT]" in buffer:
                     parts = buffer.split("[/THOUGHT]", 1)
                     thought_part = parts[0]
                     if "[THOUGHT]" in thought_part:
                         self.last_thought = thought_part.split("[THOUGHT]", 1)[1].strip()
                     else:
-                        self.last_thought = thought_part.strip()
+                        # Strip bracket if model forgot opening tag but used closing
+                        self.last_thought = thought_part.replace("[THOUGHT]", "").strip().lstrip("[")
 
                     remaining = parts[1]
                     thought_extracted = True
                     if remaining.strip():
-                        yield remaining
+                        yield remaining.lstrip()
+                elif len(buffer) > 500: # Safety break if no closing tag is found
+                     # If we've reached 500 chars with no [/THOUGHT], assume it failed format
+                     thought_extracted = True
+                     if "[THOUGHT]" in buffer:
+                         parts = buffer.split("[THOUGHT]", 1)
+                         if parts[0].strip(): yield parts[0].strip()
+                         self.last_thought = parts[1].strip()
+                     else:
+                         yield buffer
                 continue
             else:
                 yield chunk
 
         if not thought_extracted:
-            # Fallback if tags were missing or model didn't follow format
-            if "[THOUGHT]" in buffer:
+            # Fallback if tags were missing
+            thought_match = re.search(r'\[THOUGHT\](.*?)\[/THOUGHT\]', buffer, re.DOTALL)
+            if thought_match:
+                self.last_thought = thought_match.group(1).strip()
+                yield buffer.replace(thought_match.group(0), "").strip()
+            elif "[THOUGHT]" in buffer:
                 self.last_thought = buffer.split("[THOUGHT]", 1)[1].strip()
-                yield "" # No response parsed
+                yield ""
             else:
-                self.last_thought = "Thinking..."
-                yield buffer
+                # Check for any bracketed text at the start
+                start_bracket = re.match(r'^\[(.*?)\]', buffer.strip())
+                if start_bracket:
+                    self.last_thought = start_bracket.group(1).strip()
+                    yield buffer.replace(start_bracket.group(0), "").strip()
+                else:
+                    self.last_thought = "Thinking..."
+                    yield buffer
 
     def process_text(self, text: Any, user_name: str = None):
         """Generator that yields sentence fragments from the LLM with combined thought/response and interrupt checks."""
@@ -239,8 +261,11 @@ class AureliaApp:
                         yield "... [Interrupted]"
                         break
 
-                    response_fragments.append(fragment)
-                    yield fragment
+                    # Remove any remaining bracketed text (leaked inner thoughts/actions)
+                    clean_fragment = re.sub(r'\[.*?\]', '', fragment).strip()
+                    if clean_fragment:
+                        response_fragments.append(clean_fragment)
+                        yield clean_fragment
 
                 full_response = " ".join(response_fragments)
 

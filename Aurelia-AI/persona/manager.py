@@ -86,6 +86,7 @@ class PersonaManager:
 
         prompt += f"### IDENTITY\n"
         prompt += f"Name: {name}\n"
+        prompt += f"Gender: {char.get('gender', 'Female')}\n"
         prompt += f"Role: {role}\n"
         prompt += f"Background: {identity}\n\n"
 
@@ -115,7 +116,7 @@ class PersonaManager:
 
         prompt += "### SPEECH PATTERNS\n"
         prompt += f"Style: {speech.get('style', 'Natural')}\n"
-        prompt += "IMPORTANT: Your 'Olde English' is a light accent, not a thick dialect. Sprinkle in archaisms (thou, hark, betwixt) naturally. Do NOT use heavy archaic sentence structures. Mix it with modern Gen-Z/Streamer slang.\n"
+        prompt += "CRITICAL: Your 'Olde English' is a very light accent. You must NOT use more than ONE archaic word per sentence. It should feel like it occasionally slips out, not like a constant dialect. Mix it with heavy modern Gen-Z/Streamer slang.\n"
         prompt += "Examples:\n"
         if isinstance(speech.get('examples'), list):
             for example in speech.get('examples', []):
@@ -124,7 +125,8 @@ class PersonaManager:
 
         prompt += "### RESPONSE FORMAT (MANDATORY)\n"
         prompt += "You must format every response as follows:\n"
-        prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n\n"
+        prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n"
+        prompt += "CRITICAL: The response portion must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n\n"
 
         prompt += "### LOGIC CONSTRAINTS\n"
         prompt += f"{constraints}\n\n"
