@@ -1,13 +1,13 @@
 @echo off
 cd /d "%~dp0"
-echo [Mina-AI] Launching Mina Kurenai from %CD%...
+echo [Yuzu-AI] Launching Yuzu from %CD%...
 
 :: 1. Check/Start Ollama
 tasklist /FI "IMAGENAME eq ollama.exe" 2>NUL | find /I /N "ollama.exe">NUL
 if "%ERRORLEVEL%"=="0" (
-    echo [Mina-AI] Ollama is already running.
+    echo [Yuzu-AI] Ollama is already running.
 ) else (
-    echo [Mina-AI] Starting Ollama serve...
+    echo [Yuzu-AI] Starting Ollama serve...
     start /B ollama serve
     timeout /t 5 >nul
 )
@@ -19,10 +19,10 @@ if not exist ".venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-echo [Mina-AI] Activating environment...
+echo [Yuzu-AI] Activating environment...
 call .venv\Scripts\activate
 
-echo [Mina-AI] Starting Mina AI Dashboard...
+echo [Yuzu-AI] Starting Yuzu AI Dashboard...
 python main.py
 
 pause

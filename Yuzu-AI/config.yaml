@@ -1,4 +1,4 @@
-# Mina-AI Configuration
+# Yuzu-AI Configuration
 
 llm:
   api_type: "ollama"  # 'ollama' or 'openai'
@@ -13,14 +13,14 @@ stt:
   compute_type: "float16"
 
 memory:
-  db_path: "./mina_memory"
-  collection_name: "mina_ai_memories"
+  db_path: "./yuzu_memory"
+  collection_name: "yuzu_ai_memories"
   max_short_term: 15
 
 ui:
-  title: "✨ Mina Kurenai: The Virtual Idol"
+  title: "✨ Yuzu: The Gremlin Streamer"
   theme: "soft"
   share: false
 
 persona:
-  sheet_path: "mina_sheet.yaml"
+  sheet_path: "yuzu_sheet.yaml"

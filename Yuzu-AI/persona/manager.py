@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class PersonaManager:
     """Manages the AI's personality by loading and parsing the character sheet."""
 
-    def __init__(self, sheet_path: str = "mina_sheet.yaml"):
+    def __init__(self, sheet_path: str = "yuzu_sheet.yaml"):
         self.sheet_path = Path(sheet_path)
         self.persona_data: Dict[str, Any] = {}
         self.system_prompt: str = ""
@@ -19,19 +19,19 @@ class PersonaManager:
         """Loads the YAML character sheet with aggressive path discovery."""
         search_paths: List[Path] = [
             self.sheet_path,
-            Path("mina-ai/mina_sheet.yaml"),
-            Path("../mina-ai/mina_sheet.yaml"),
-            Path("mina_sheet.yaml"),
+            Path("Yuzu-AI/yuzu_sheet.yaml"),
+            Path("../Yuzu-AI/yuzu_sheet.yaml"),
+            Path("yuzu_sheet.yaml"),
             # Search from script location
-            Path(__file__).resolve().parent.parent / "mina_sheet.yaml",
-            Path(__file__).resolve().parent.parent.parent / "mina-ai" / "mina_sheet.yaml",
+            Path(__file__).resolve().parent.parent / "yuzu_sheet.yaml",
+            Path(__file__).resolve().parent.parent.parent / "Yuzu-AI" / "yuzu_sheet.yaml",
         ]
 
-        # Add even more candidate folders by looking for any folder named *mina*
+        # Add even more candidate folders by looking for any folder named *yuzu*
         try:
             cwd = Path.cwd()
             for p in [cwd, cwd.parent]:
-                for candidate in p.glob("**/mina_sheet.yaml"):
+                for candidate in p.glob("**/yuzu_sheet.yaml"):
                     if candidate not in search_paths:
                         search_paths.append(candidate)
         except:
@@ -47,8 +47,8 @@ class PersonaManager:
                 continue
 
         if not found_path:
-            logger.error(f"Character sheet 'mina_sheet.yaml' not found. Please ensure it exists.")
-            self.system_prompt = "You are Mina Kurenai, a helpful AI companion."
+            logger.error(f"Character sheet 'yuzu_sheet.yaml' not found. Please ensure it exists.")
+            self.system_prompt = "You are Yuzu, a chaotic streamer girl AI."
             return
 
         try:
@@ -59,12 +59,12 @@ class PersonaManager:
             logger.info("Persona loaded successfully.")
         except Exception as e:
             logger.error(f"Error loading persona from {found_path}: {e}")
-            self.system_prompt = "You are Mina Kurenai, a helpful AI companion."
+            self.system_prompt = "You are Yuzu, a chaotic streamer girl AI."
 
     def _build_system_prompt(self, now: datetime = None):
         """Constructs the system prompt from the persona data."""
         if not self.persona_data:
-            self.system_prompt = "You are Mina Kurenai, a helpful AI companion."
+            self.system_prompt = "You are Yuzu, a chaotic streamer girl AI."
             return
 
         # Add Real-time Temporal Awareness
@@ -99,8 +99,8 @@ class PersonaManager:
 
         # Fallback to old nested structure
         char = self.persona_data.get('character', {})
-        name = char.get('name', 'Mina Kurenai')
-        role = char.get('role', 'AI Companion')
+        name = char.get('name', 'Yuzu')
+        role = char.get('role', 'Chaotic Streamer Girl')
         goals = char.get('goals', [])
         identity = char.get('core_identity', {}).get('self_awareness', '')
         traits = char.get('personality_traits', {})
