@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class MemoryStore:
     """Intelligent memory system with short-term buffer, long-term vector storage, and insights."""
 
-    def __init__(self, db_path: Path | str = "./mina_memory", collection_name: str = "mina_ai_memories", max_short_term: int = 15):
+    def __init__(self, db_path: Path | str = "./yuzu_memory", collection_name: str = "yuzu_ai_memories", max_short_term: int = 15):
         self.db_path = Path(db_path)
         self.db_path.mkdir(parents=True, exist_ok=True)
 
@@ -71,7 +71,7 @@ class MemoryStore:
 
         # 1. Add to Vector DB (Long-term)
         memory_id = f"mem_{now.timestamp()}"
-        document = f"User ({user_id}): {user_text}\nMina: {bot_text}"
+        document = f"User ({user_id}): {user_text}\nYuzu: {bot_text}"
 
         self._collection.add(
             ids=[memory_id],

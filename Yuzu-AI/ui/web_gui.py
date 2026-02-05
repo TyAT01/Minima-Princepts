@@ -4,8 +4,8 @@ from typing import Callable, Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
 
-class MinaGUI:
-    """Gradio-based Web GUI for Mina AI."""
+class YuzuGUI:
+    """Gradio-based Web GUI for Yuzu AI."""
 
     def __init__(
         self,
@@ -13,7 +13,7 @@ class MinaGUI:
         process_audio_cb: Callable[[str, str], Tuple[str, str]],
         toggle_mic_cb: Callable[[bool], None],
         poll_results_cb: Callable[[], List[Tuple[str, str]]],
-        title: str = "✨ Mina Kurenai: The Virtual Idol",
+        title: str = "✨ Yuzu: The Gremlin Streamer",
         theme: str = "soft"
     ):
         self.process_text_cb = process_text_cb
@@ -43,7 +43,7 @@ class MinaGUI:
                     chatbot = gr.Chatbot(label="Chat History", height=500)
                     msg = gr.Textbox(
                         label="Type your message...",
-                        placeholder="Say something to Mina...",
+                        placeholder="Say something to Yuzu...",
                         show_label=False,
                     )
                     with gr.Row():

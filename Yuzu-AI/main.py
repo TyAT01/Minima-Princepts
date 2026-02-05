@@ -42,11 +42,11 @@ from memory.store import MemoryStore
 from stt.whisper import STTSystem
 from utils.text_utils import split_into_sentences
 from persona.manager import PersonaManager
-from ui.web_gui import MinaGUI
+from ui.web_gui import YuzuGUI
 from utils.error_handler import ErrorHandler
 from queue import Queue
 
-class MinaApp:
+class YuzuApp:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
         self.processing_lock = threading.Lock()
@@ -56,8 +56,8 @@ class MinaApp:
         # Initialize components with config
         mem_cfg = self.config.get('memory', {})
         self.memory = MemoryStore(
-            db_path=mem_cfg.get('db_path', './mina_memory'),
-            collection_name=mem_cfg.get('collection_name', 'mina_ai_memories'),
+            db_path=mem_cfg.get('db_path', './yuzu_memory'),
+            collection_name=mem_cfg.get('collection_name', 'yuzu_ai_memories'),
             max_short_term=mem_cfg.get('max_short_term', 15)
         )
 
@@ -77,7 +77,7 @@ class MinaApp:
 
         pers_cfg = self.config.get('persona', {})
         # Note: sheet_path in config might be relative to the version folder
-        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'mina_sheet.yaml'))
+        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'yuzu_sheet.yaml'))
 
         self.results_queue = Queue()
         self.interrupt_event = threading.Event()
@@ -91,12 +91,12 @@ class MinaApp:
         )
 
         ui_cfg = self.config.get('ui', {})
-        self.gui = MinaGUI(
+        self.gui = YuzuGUI(
             process_text_cb=self.process_text,
             process_audio_cb=self.process_audio,
             toggle_mic_cb=self.toggle_mic,
             poll_results_cb=self.poll_results,
-            title=ui_cfg.get('title', "✨ Mina Kurenai: The Virtual Idol"),
+            title=ui_cfg.get('title', "✨ Yuzu: The Gremlin Streamer"),
             theme=ui_cfg.get('theme', "soft")
         )
 
@@ -104,7 +104,7 @@ class MinaApp:
         try:
             if not os.path.exists(path):
                 # Try one level up if not found (e.g. if run from root)
-                alt_path = os.path.join("mina-ai", path)
+                alt_path = os.path.join("Yuzu-AI", path)
                 if os.path.exists(alt_path):
                     path = alt_path
                 else:
@@ -119,7 +119,7 @@ class MinaApp:
 
     def initialize(self):
         try:
-            logging.info("Initializing Mina AI...")
+            logging.info("Initializing Yuzu AI...")
 
             # Run LLM Diagnostics first
             diag = self.llm.perform_diagnostics()
@@ -272,7 +272,7 @@ class MinaApp:
                 if not self.interrupt_event.is_set():
                     # Save both thought and interaction
                     if self.last_thought:
-                        logging.info(f"Mina's Thought: {self.last_thought}")
+                        logging.info(f"Yuzu's Thought: {self.last_thought}")
                         self.memory.store_insight(f"Thought: {self.last_thought}", source="inner_monologue")
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
@@ -292,19 +292,19 @@ class MinaApp:
     def reflect(self, user_id: str):
         """Asks the LLM to analyze recent interactions for profiles, events, and insights."""
         try:
-            logging.info(f"Mina is reflecting on recent experiences with {user_id}...")
+            logging.info(f"Yuzu is reflecting on recent experiences with {user_id}...")
             history = self.memory.get_history()
             if not history: return
 
             reflection_prompt = (
-                "You are Mina Kurenai, performing deep reflection. Analyze our recent chat history and extract the following:\n"
+                "You are Yuzu, performing deep reflection. Analyze our recent chat history and extract the following:\n"
                 "1. User Profile: Any new facts, likes, or dislikes about the person I'm talking to.\n"
                 "2. Notable Events: Any significant moments or 'firsts' that happened.\n"
                 "3. Insights: Lessons learned about myself or the world.\n\n"
                 "Format your response as a valid YAML block with keys: 'user_facts' (list), 'events' (list), 'insights' (list)."
             )
 
-            analysis_raw = self.llm.generate_response("You are Mina Kurenai, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
+            analysis_raw = self.llm.generate_response("You are Yuzu, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
 
             # Simple parser for the YAML-like response
             try:
@@ -412,9 +412,9 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("mina_ai.log")
+            logging.FileHandler("yuzu_ai.log")
         ]
     )
 
-    app = MinaApp()
+    app = YuzuApp()
     app.run()
