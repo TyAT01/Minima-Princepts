@@ -96,7 +96,7 @@ class FeniluxApp:
             process_audio_cb=self.process_audio,
             toggle_mic_cb=self.toggle_mic,
             poll_results_cb=self.poll_results,
-            title=ui_cfg.get('title', "🤖 Fenilux: Tactical Autonomous Intelligence Doll"),
+            title=ui_cfg.get('title', "✨ Fenilux: The Divine Diva"),
             theme=ui_cfg.get('theme', "soft")
         )
 
