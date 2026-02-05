@@ -34,15 +34,11 @@ if sys.platform == "win32":
 else:
     from faster_whisper import WhisperModel
 
-# Optional import for VAD
+# Optional import for VAD (some environments use webrtcvad-wheels)
 try:
     import webrtcvad
 except ImportError:
-    try:
-        # Some versions on Windows use webrtcvad-wheels
-        import webrtcvad
-    except ImportError:
-        webrtcvad = None
+    webrtcvad = None
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +73,7 @@ class STTSystem:
             self.load_model()
 
         segments, info = self.model.transcribe(audio_source, beam_size=5)
-
-        full_text = ""
-        for segment in segments:
-            full_text += segment.text + " "
-
-        return full_text.strip()
+        return " ".join(segment.text.strip() for segment in segments).strip()
 
 class VoiceMonitor:
     """Background monitor that captures audio from the default mic and segments speech."""

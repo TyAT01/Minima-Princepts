@@ -70,7 +70,11 @@ class AureliaGUI:
 
                 processed_input = user_input
                 if isinstance(user_input, list) and len(user_input) > 0:
-                    processed_input = user_input[0].get("text", str(user_input))
+                    first_item = user_input[0]
+                    if isinstance(first_item, dict):
+                        processed_input = first_item.get("text", str(first_item))
+                    else:
+                        processed_input = str(first_item)
                 elif isinstance(user_input, dict):
                     processed_input = user_input.get("text", str(user_input))
 
@@ -82,7 +86,11 @@ class AureliaGUI:
                 user_input = history[-1]["content"]
 
                 if isinstance(user_input, list) and len(user_input) > 0:
-                    user_input = user_input[0].get("text", str(user_input))
+                    first_item = user_input[0]
+                    if isinstance(first_item, dict):
+                        user_input = first_item.get("text", str(first_item))
+                    else:
+                        user_input = str(first_item)
                 elif isinstance(user_input, dict):
                     user_input = user_input.get("text", str(user_input))
 
