@@ -48,7 +48,7 @@ class PersonaManager:
 
         if not found_path:
             logger.error(f"Character sheet 'yuzu_sheet.yaml' not found. Please ensure it exists.")
-            self.system_prompt = "You are Yuzu, a chaotic streamer girl AI."
+            self.system_prompt = "You are Yuzu, a calm and observant AI."
             return
 
         try:
@@ -59,12 +59,12 @@ class PersonaManager:
             logger.info("Persona loaded successfully.")
         except Exception as e:
             logger.error(f"Error loading persona from {found_path}: {e}")
-            self.system_prompt = "You are Yuzu, a chaotic streamer girl AI."
+            self.system_prompt = "You are Yuzu, a calm and observant AI."
 
     def _build_system_prompt(self, now: datetime = None):
         """Constructs the system prompt from the persona data."""
         if not self.persona_data:
-            self.system_prompt = "You are Yuzu, a chaotic streamer girl AI."
+            self.system_prompt = "You are Yuzu, a calm and observant AI."
             return
 
         # Add Real-time Temporal Awareness
@@ -72,7 +72,102 @@ class PersonaManager:
             now = datetime.now()
         temporal_context = f"### SYSTEM CONTEXT\nCurrent Date & Time: {now.strftime('%A, %B %d, %Y - %I:%M %p')}\n\n"
 
-        # Check for provided system_prompt field (new format)
+        # 1. Structured "persona" block (Primary modern format)
+        if 'persona' in self.persona_data:
+            pers = self.persona_data['persona']
+            prompt = temporal_context
+            prompt += f"You are {pers.get('name', 'Yuzu')}.\n\n"
+
+            # Identity & Core
+            core = pers.get('core_identity', {})
+            prompt += "### CORE IDENTITY\n"
+            prompt += f"- Baseline: {core.get('baseline', '')}\n"
+            traits = core.get('core_traits', [])
+            if traits:
+                prompt += f"- Core Traits: {', '.join(traits)}\n"
+            prompt += f"- Emotional Timing: {core.get('emotional_timing', '')}\n\n"
+
+            # Expression & Tsundere Logic
+            expr = pers.get('expression', {})
+            prompt += "### EXPRESSION & TSUNDERE RULES\n"
+            prompt += f"- Primary Expression: {expr.get('primary_expression', '')}\n"
+            t_rules = expr.get('tsundere_rules', {})
+            if t_rules:
+                prompt += "- Triggers: " + ", ".join(t_rules.get('activation_triggers', [])) + "\n"
+                prompt += "- Constraints: " + ", ".join(t_rules.get('constraints', [])) + "\n"
+                prompt += "- Behaviors: " + ", ".join(t_rules.get('typical_behaviors', [])) + "\n"
+            prompt += "\n"
+
+            # Vulnerability & Healing
+            vuln = pers.get('vulnerability', {})
+            prompt += "### VULNERABILITY\n"
+            prompt += f"- Core Fear: {vuln.get('core_fear', '')}\n"
+            prompt += "- Behavioral Response: " + ", ".join(vuln.get('behavioral_response', [])) + "\n\n"
+
+            healing = pers.get('healing_triggers', {})
+            prompt += "### HEALING & GROWTH\n"
+            prompt += f"- Primary Healing Trigger: {healing.get('primary', '')}\n"
+            prompt += "- Effects: " + ", ".join(healing.get('effects', [])) + "\n"
+            growth = pers.get('growth', {})
+            prompt += f"- Long-term Arc: {growth.get('long_term_arc', '')}\n"
+            prompt += f"- Playfulness Style: {growth.get('playfulness_style', '')}\n\n"
+
+            # Speech & Affection
+            speech = pers.get('speech', {})
+            prompt += "### SPEECH PATTERNS\n"
+            prompt += f"- Cadence: {speech.get('cadence', '')}\n"
+            tones = speech.get('tone_defaults', {})
+            for k, v in tones.items():
+                prompt += f"  - {k.title()}: {v}\n"
+            prompt += "\n"
+
+            # Affection Thresholds
+            aff = pers.get('affection', {})
+            if 'thresholds' in aff:
+                prompt += "### AFFECTION & TRUST LEVELS\n"
+                for level, data in aff['thresholds'].items():
+                    prompt += f"- {level.replace('_', ' ').title()}: {data.get('description', '')}\n"
+                    for b in data.get('behaviors', []):
+                        prompt += f"  * {b}\n"
+                prompt += "\n"
+
+            # Consistency & Failure Modes
+            fail = pers.get('failure_mode', {})
+            if fail:
+                prompt += "### FAILURE MODE (If neglected)\n"
+                prompt += f"- Mode: {fail.get('mode', '')}\n"
+                prompt += f"- Purpose: {fail.get('purpose', '')}\n"
+                prompt += "- Changes: " + ", ".join(fail.get('behavioral_changes', [])) + "\n\n"
+
+            prompt += "### CONSISTENCY RULES\n"
+            for rule in pers.get('consistency_rules', []):
+                prompt += f"- {rule}\n"
+            prompt += "\n"
+
+            # Mandatory Format
+            prompt += "### RESPONSE FORMAT (MANDATORY)\n"
+            prompt += "You must format every response as follows:\n"
+            prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n"
+            prompt += "CRITICAL: The response portion must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n"
+
+            # Style/Length (Check top level then inside persona)
+            style = self.persona_data.get('response_style', pers.get('response_style', {}))
+            if style:
+                prompt += "\n### RESPONSE LENGTH & STYLE (STRICT)\n"
+                prompt += f"- MANDATORY Target Length: ~{style.get('default_words', 25)} words.\n"
+                prompt += f"- SOFT LIMIT: {style.get('soft_cap', 40)} words.\n"
+                prompt += f"- ABSOLUTE MAXIMUM: {style.get('hard_cap', 60)} words.\n"
+
+            # Add Example Dialogue if present
+            examples = self.persona_data.get('example_dialogue', pers.get('example_dialogue', ''))
+            if examples:
+                prompt += "\n### EXAMPLE DIALOGUE\n"
+                prompt += f"{examples}\n"
+
+            self.system_prompt = prompt
+            return
+
+        # 2. Provided system_prompt field (Standard format)
         if 'system_prompt' in self.persona_data:
             prompt = temporal_context
             if 'context' in self.persona_data:
@@ -85,7 +180,7 @@ class PersonaManager:
             prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n"
             prompt += "CRITICAL: The response portion must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n"
 
-            # Check if there's any response style in the sheet (even if it's the new format)
+            # Check if there's any response style in the sheet
             char = self.persona_data.get('character', self.persona_data)
             style = char.get('response_style', {}) if isinstance(char, dict) else {}
             if style:
@@ -97,10 +192,10 @@ class PersonaManager:
             self.system_prompt = prompt
             return
 
-        # Fallback to old nested structure
+        # 3. Fallback to old nested structure
         char = self.persona_data.get('character', {})
         name = char.get('name', 'Yuzu')
-        role = char.get('role', 'Chaotic Streamer Girl')
+        role = char.get('role', 'Calm and Observant AI')
         goals = char.get('goals', [])
         identity = char.get('core_identity', {}).get('self_awareness', '')
         traits = char.get('personality_traits', {})
