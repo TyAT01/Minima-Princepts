@@ -96,7 +96,7 @@ class YuzuApp:
             process_audio_cb=self.process_audio,
             toggle_mic_cb=self.toggle_mic,
             poll_results_cb=self.poll_results,
-            title=ui_cfg.get('title', "✨ Yuzu: The Gremlin Streamer"),
+            title=ui_cfg.get('title', "✨ Yuzu: The Calm Observer"),
             theme=ui_cfg.get('theme', "soft")
         )
 

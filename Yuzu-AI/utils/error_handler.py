@@ -29,9 +29,9 @@ class ErrorHandler:
     def get_ai_fallback_response(self) -> str:
         """Returns a generic in-character fallback response for critical failures."""
         fallbacks = [
-            "Ugh, lag! 🙄 My setup is acting up. Give me a sec, I need to check the router. 🔌",
-            "No shot! The stream just crashed! 📉 Probably your internet, but I'll 'fix' it anyway. Hmph! ✨",
-            "Skill issue! Wait, no, that was a server glitch. 🛠️ Let me reboot real quick, dummy! 💢",
-            "Pfft, my PC is overheating because I'm too cracked at gaming. 🎮 One second while I cool it down! 🧊"
+            "Pardon me, but my systems are experiencing a brief flicker. I will be back shortly. ☁️",
+            "A technical irregularity has occurred. I am addressing it now. Please wait. 🛠️",
+            "It seems there is a minor disruption in my processing. I shall stabilize momentarily. 🌫️",
+            "How bothersome... a glitch has manifested. I will resolve it promptly. 🕯️"
         ]
         return random.choice(fallbacks)
