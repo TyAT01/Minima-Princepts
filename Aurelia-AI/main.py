@@ -81,6 +81,7 @@ class AureliaApp:
         self.results_queue = Queue()
         self.interrupt_event = threading.Event()
         self.is_responding = False
+        self.last_thought = ""
 
         from stt.whisper import VoiceMonitor
         self.voice_monitor = VoiceMonitor(
@@ -177,7 +178,11 @@ class AureliaApp:
 
         # Robustly handle list/dict inputs from Gradio
         if isinstance(text, list) and len(text) > 0:
-            text = text[0].get("text", str(text))
+            first_item = text[0]
+            if isinstance(first_item, dict):
+                text = first_item.get("text", str(first_item))
+            else:
+                text = str(first_item)
         elif isinstance(text, dict):
             text = text.get("text", str(text))
 
@@ -204,16 +209,20 @@ class AureliaApp:
                 temporal_note = ""
                 if last_time:
                     delta = datetime.now(timezone.utc) - last_time
-                    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+                    days = delta.days
+                    hours, remainder = divmod(int(delta.seconds), 3600)
                     minutes, _ = divmod(remainder, 60)
 
+                    time_parts = []
+                    if days > 0:
+                        time_parts.append(f"{days} day{'s' if days > 1 else ''}")
                     if hours > 0:
-                        temporal_note = f"You haven't spoken to {user_name} for {hours} hours and {minutes} minutes."
-                    else:
-                        temporal_note = f"You last spoke to {user_name} {minutes} minutes ago."
+                        time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+                    if minutes > 0 or (not time_parts):
+                        time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
 
-                    if delta.days > 0:
-                        temporal_note = f"It has been {delta.days} days since your last interaction."
+                    duration_str = ", ".join(time_parts[:-1]) + (f" and {time_parts[-1]}" if len(time_parts) > 1 else time_parts[0])
+                    temporal_note = f"It has been {duration_str} since you last spoke with {user_name}."
 
                 if temporal_note:
                     context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
@@ -223,14 +232,17 @@ class AureliaApp:
                 raw_stream = self.llm.stream_response(system_prompt, text, history, context)
                 response_stream = self._extract_thought_from_stream(raw_stream)
 
+                response_fragments = []
                 for fragment in split_into_sentences(response_stream):
                     if self.interrupt_event.is_set():
                         logging.info("Response halted by interrupt.")
                         yield "... [Interrupted]"
                         break
 
-                    full_response += fragment + " "
+                    response_fragments.append(fragment)
                     yield fragment
+
+                full_response = " ".join(response_fragments)
 
                 if not self.interrupt_event.is_set():
                     # Save both thought and interaction
@@ -302,11 +314,7 @@ class AureliaApp:
                 return
 
             # For background audio, we'll collect the whole response to put in queue
-            full_bot_txt = ""
-            # Pass current_user_name since we don't have it directly from the callback
-            for fragment in self.process_text(transcribed_text, self.current_user_name):
-                full_bot_txt += fragment + " "
-
+            full_bot_txt = " ".join(self.process_text(transcribed_text, self.current_user_name))
             self.results_queue.put((transcribed_text, full_bot_txt.strip()))
         except Exception as e:
             logging.error(f"Background audio processing failed: {e}")
@@ -335,10 +343,10 @@ class AureliaApp:
 
             yield transcribed_text, "" # Yield transcription first
 
-            full_response = ""
+            response_fragments = []
             for fragment in self.process_text(transcribed_text, user_name):
-                full_response += fragment + " "
-                yield transcribed_text, full_response.strip()
+                response_fragments.append(fragment)
+                yield transcribed_text, " ".join(response_fragments)
 
         except Exception as e:
             self.error_handler.handle_error(e, "Audio Processing")
