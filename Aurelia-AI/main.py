@@ -179,7 +179,7 @@ class AureliaApp:
                 context = self.memory.get_full_context(text, user_id=user_name)
 
                 # Add Temporal Context (Time Awareness)
-                last_time = self.memory.get_last_interaction_time()
+                last_time = self.memory.get_last_interaction_time(user_name)
                 temporal_note = ""
                 if last_time:
                     delta = datetime.now(timezone.utc) - last_time
@@ -224,7 +224,7 @@ class AureliaApp:
 
                 # Periodic reflection (every 10 interactions)
                 if self.memory.count() % 10 == 0:
-                     self.reflect()
+                     self.reflect(user_name)
 
             except Exception as e:
                 self.error_handler.handle_error(e, "Text Processing")
@@ -233,10 +233,10 @@ class AureliaApp:
                 self.is_responding = False
                 self.interrupt_event.clear()
 
-    def reflect(self):
+    def reflect(self, user_id: str):
         """Asks the LLM to analyze recent interactions for profiles, events, and insights."""
         try:
-            logging.info("Aurelia is reflecting on recent experiences...")
+            logging.info(f"Aurelia is reflecting on recent experiences with {user_id}...")
             history = self.memory.get_history()
             if not history: return
 
@@ -261,7 +261,7 @@ class AureliaApp:
                 data = yaml.safe_load(analysis_raw)
                 if isinstance(data, dict):
                     for fact in data.get('user_facts', []):
-                        self.memory.update_user_profile("default_user", fact)
+                        self.memory.update_user_profile(user_id, fact)
                     for event in data.get('events', []):
                         self.memory.store_episodic_memory(event)
                     for insight in data.get('insights', []):

@@ -26,22 +26,38 @@ class MemoryStore:
 
         self.short_term_buffer: List[Dict[str, str]] = []
         self.max_short_term = max_short_term
-        self._last_interaction_time: Optional[datetime] = None
-        self._load_last_interaction_time()
+        self._last_seen: Dict[str, datetime] = {}
+        self._load_last_seen_times()
 
-    def _load_last_interaction_time(self):
-        """Initializes the last interaction time from the database."""
+    def _load_last_seen_times(self):
+        """Initializes the last interaction times for all users from optimized system metadata."""
         try:
-            # We have to fetch metadatas to find the max timestamp since Chroma doesn't support sorting
+            # Try to fetch from system_metadata first (efficient)
+            meta_records = self._collection.get(where={"type": "system_metadata"}, include=["metadatas"])
+            if meta_records and meta_records["metadatas"]:
+                for m in meta_records["metadatas"]:
+                    if not m: continue
+                    uid = m.get("user_id")
+                    ts_str = m.get("timestamp")
+                    if uid and ts_str:
+                        self._last_seen[uid] = datetime.fromisoformat(ts_str)
+                logger.info(f"Loaded last seen times for {len(self._last_seen)} users from metadata.")
+                return
+
+            # Fallback for older databases: Fetch all interaction metadatas (slow but correct once)
+            logger.info("No system metadata found. Rebuilding last seen cache from interactions...")
             all_meta = self._collection.get(where={"type": "interaction"}, include=["metadatas"])
             if all_meta and all_meta["metadatas"]:
-                # Filter out None and find max
-                valid_stamps = [m["timestamp"] for m in all_meta["metadatas"] if m and "timestamp" in m]
-                if valid_stamps:
-                    latest_iso = max(valid_stamps)
-                    self._last_interaction_time = datetime.fromisoformat(latest_iso)
+                for m in all_meta["metadatas"]:
+                    if not m: continue
+                    uid = m.get("user_id", "default_user")
+                    ts_str = m.get("timestamp")
+                    if ts_str:
+                        ts = datetime.fromisoformat(ts_str)
+                        if uid not in self._last_seen or ts > self._last_seen[uid]:
+                            self._last_seen[uid] = ts
         except Exception as e:
-            logger.debug(f"Failed to load last interaction time: {e}")
+            logger.debug(f"Failed to load last seen times: {e}")
 
     def count(self) -> int:
         """Returns the total number of items in the long-term collection."""
@@ -50,7 +66,7 @@ class MemoryStore:
     def add_interaction(self, user_text: str, bot_text: str, user_id: str = "default_user"):
         """Adds a new interaction to both short-term and long-term memory."""
         now = datetime.now(timezone.utc)
-        self._last_interaction_time = now # Update cache
+        self._last_seen[user_id] = now # Update cache
         timestamp_str = now.isoformat()
 
         # 1. Add to Vector DB (Long-term)
@@ -66,6 +82,17 @@ class MemoryStore:
                 "bot_text": bot_text,
                 "timestamp": timestamp_str,
                 "type": "interaction"
+            }]
+        )
+
+        # 2. Update System Metadata (for efficient startup next time)
+        self._collection.upsert(
+            ids=[f"last_seen_{user_id}"],
+            documents=[f"Last interaction with {user_id}"],
+            metadatas=[{
+                "user_id": user_id,
+                "timestamp": timestamp_str,
+                "type": "system_metadata"
             }]
         )
 
@@ -196,6 +223,6 @@ class MemoryStore:
         """Clears the short-term buffer."""
         self.short_term_buffer = []
 
-    def get_last_interaction_time(self) -> Optional[datetime]:
-        """Retrieves the timestamp of the very last interaction stored (using cache)."""
-        return self._last_interaction_time
+    def get_last_interaction_time(self, user_id: str = "default_user") -> Optional[datetime]:
+        """Retrieves the timestamp of the last interaction for a specific user (using cache)."""
+        return self._last_seen.get(user_id)
