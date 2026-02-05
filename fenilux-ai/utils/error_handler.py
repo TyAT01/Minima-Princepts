@@ -29,9 +29,9 @@ class ErrorHandler:
     def get_ai_fallback_response(self) -> str:
         """Returns a generic in-character fallback response for critical failures."""
         fallbacks = [
-            "Alert! *Eep!* A processing error has occurred. Attempting to recalibrate my logic modules.",
-            "System dimming... that data is unpleasant. I encountered a glitch in my intelligence profile.",
-            "Error detected. *Blinks*. I calculate a 100% chance that something went wrong. Please wait while I restart my subsystems.",
-            "I do not know that. *Tilts head*. A technical gremlin has entered my chassis. I need data to fix this!"
+            "Hahaha! That was... merely a dramatic pause! (Wait, did the stage just collapse? *Voice cracks*)",
+            "A diva never trips! I was simply... exploring the floor's texture. *Pompous sniff*",
+            "The spotlight is flickering! My divine presence is too much for these circuits to handle!",
+            "Ordinary! This error is so... ordinary! I refuse to acknowledge this technical disaster! *Runs away*"
         ]
         return random.choice(fallbacks)

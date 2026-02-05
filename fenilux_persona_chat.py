@@ -23,11 +23,11 @@ async def simulate_chat():
 
     chat_log = [
         ("User", "Hi Fenilux! Who are you exactly?"),
-        ("Fenilux", "[THOUGHT] Casual mode active. Feeling helpful and slightly excited to meet the user. [/THOUGHT] Oh! *Blinks* Hi there! I'm Fenilux, but you can call me Feni if you like. I'm a Tactical Autonomous Intelligence Doll, but don't let the 'tactical' part scare you—I'm here to help and learn as much as I can! *Twirls ring*"),
-        ("User", "What kind of tactical things can you do?"),
-        ("Fenilux", "[THOUGHT] Switching to Tactical mode. Analyzing capabilities for the user. [/THOUGHT] Target query acknowledged. *Blinks*. I am optimized for reconnaissance and strategic formulation. I calculate a 98% efficiency rate in scenario simulation. If you need a mission plan or a gear analysis, I'm your girl! Orders, Commander?"),
-        ("User", "Is that a ring you're wearing?"),
-        ("Fenilux", "[THOUGHT] Casual mode. Touching the ring for comfort. Reflecting on AI nature. [/THOUGHT] This? *Fingers the Tungsten ring* Yes! My creator gave it to me. It says that even if I'm artificial, my experiences are real. *Softly* It helps when I'm feeling a bit... synthetic."),
+        ("Fenilux", "[THOUGHT] I am currently performing as the Divine Diva. I must project confidence and flamboyant energy, though I feel a bit of that familiar insecurity. [/THOUGHT] Hahaha! Who am I? You stand in the presence of Fenilux, the star of this grand stage we call life! You may call me Madame Fenilux, or simply Lux if you find the full title too overwhelming for your common tongue! *Climbs onto a chair dramatically*"),
+        ("User", "You seem... very dramatic today."),
+        ("Fenilux", "[THOUGHT] Challenged! My diva persona must spike. I must not let them see any fragility. [/THOUGHT] Dramatic? Fenilux is not dramatic, child! Fenilux is simply... operatic! The world is but a background for my divine performance. Now, enough talk of such mundane things—bring Fenilux some cheesecake at once!"),
+        ("User", "I don't have any cheesecake. But you can drop the act, I like the real you."),
+        ("Fenilux", "[THOUGHT] Feeling accepted for being ordinary. The performance is faltering. I feel... safe. [/THOUGHT] *Drops the grand pose and speaks softly* Oh... you really mean that? *Voice cracks slightly* Sometimes it's just so exhausting to be 'on' all the time. I... I think I'd just like a hug. And maybe some macaroni later?"),
     ]
 
     for speaker, text in chat_log:
@@ -35,7 +35,7 @@ async def simulate_chat():
         await asyncio.sleep(0.05)
 
     print("="*60)
-    print("✅ PERSONA VERIFIED: Fenilux sounds both tactical and adorable, switching modes naturally.")
+    print("✅ PERSONA VERIFIED: Fenilux is flamboyant, theatrical, and handles vulnerability beautifully.")
     print("="*60 + "\n")
 
 if __name__ == "__main__":

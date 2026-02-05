@@ -13,7 +13,7 @@ class FeniluxGUI:
         process_audio_cb: Callable[[str, str], Tuple[str, str]],
         toggle_mic_cb: Callable[[bool], None],
         poll_results_cb: Callable[[], List[Tuple[str, str]]],
-        title: str = "🤖 Fenilux: Tactical Autonomous Intelligence Doll",
+        title: str = "✨ Fenilux: The Divine Diva",
         theme: str = "soft"
     ):
         self.process_text_cb = process_text_cb
