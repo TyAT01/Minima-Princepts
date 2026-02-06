@@ -139,64 +139,80 @@ class YuzuApp:
     def _extract_thought_from_stream(self, stream):
         """Helper to extract [THOUGHT] content and yield the remaining response."""
         buffer = ""
-        thought_extracted = False
+        in_thought = False
+        thought_tag_seen = False
         self.last_thought = ""
 
         for chunk in stream:
-            if not thought_extracted:
-                buffer += chunk
+            buffer += chunk
 
-                # Check for various tag variations
-                if "[/THOUGHT]" in buffer:
-                    parts = buffer.split("[/THOUGHT]", 1)
-                    thought_part = parts[0]
-                    if "[THOUGHT]" in thought_part:
-                        thought_split = thought_part.split("[THOUGHT]", 1)
-                        if thought_split[0].strip():
-                            yield thought_split[0].strip()
-                        self.last_thought = thought_split[1].strip()
-                    else:
-                        # Handle missing opening tag but present closing tag
-                        self.last_thought = thought_part.replace("[THOUGHT]", "").strip().lstrip("[")
-
-                    remaining = parts[1]
-                    thought_extracted = True
-                    if remaining.strip():
-                        yield remaining.lstrip()
-
-                elif len(buffer) > 800: # Slightly larger safety break for higher quality thoughts
-                     thought_extracted = True
-                     if "[THOUGHT]" in buffer:
-                         parts = buffer.split("[THOUGHT]", 1)
-                         if parts[0].strip():
-                             yield parts[0].strip()
-                         self.last_thought = parts[1].strip()
-                     else:
-                         # No tags found at all in first 800 chars, just yield buffer
-                         yield buffer
-                continue
-            else:
-                yield chunk
-
-        if not thought_extracted:
-            # Final fallback after stream ends
-            thought_match = re.search(r'\[THOUGHT\](.*?)\[/THOUGHT\]', buffer, re.DOTALL)
-            if thought_match:
-                self.last_thought = thought_match.group(1).strip()
-                yield buffer.replace(thought_match.group(0), "").strip()
-            elif "[THOUGHT]" in buffer:
-                parts = buffer.split("[THOUGHT]", 1)
-                self.last_thought = parts[1].strip()
-                yield parts[0].strip()
-            else:
-                # Check for any bracketed text at the start as a last resort
-                start_bracket = re.match(r'^\[(.*?)\]', buffer.strip())
-                if start_bracket:
-                    self.last_thought = start_bracket.group(1).strip()
-                    yield buffer.replace(start_bracket.group(0), "").strip()
-                else:
-                    self.last_thought = "" # No thought found
+            # If we haven't seen any tags and the buffer is getting large,
+            # assume the AI is not using tags and just yield it.
+            if not thought_tag_seen and not in_thought and len(buffer) > 800:
+                if "[THOUGHT]" not in buffer:
                     yield buffer
+                    buffer = ""
+                    for remaining_chunk in stream:
+                        yield remaining_chunk
+                    return
+                else:
+                    thought_tag_seen = True
+
+            while True:
+                if not in_thought:
+                    if "[THOUGHT]" in buffer:
+                        thought_tag_seen = True
+                        parts = buffer.split("[THOUGHT]", 1)
+                        if parts[0].strip():
+                            yield parts[0]
+                        buffer = parts[1]
+                        in_thought = True
+                        continue
+                    else:
+                        # If we haven't seen a tag and buffer is still small, keep buffering
+                        if not thought_tag_seen and len(buffer) < 800:
+                            break
+
+                        # Otherwise, yield what we have, but watch for partial tags
+                        idx = buffer.rfind("[")
+                        if idx != -1 and idx > len(buffer) - 10:
+                            if idx > 0:
+                                yield buffer[:idx]
+                                buffer = buffer[idx:]
+                            break
+                        else:
+                            yield buffer
+                            buffer = ""
+                            break
+                else:
+                    if "[/THOUGHT]" in buffer:
+                        parts = buffer.split("[/THOUGHT]", 1)
+                        self.last_thought += parts[0]
+                        buffer = parts[1]
+                        in_thought = False
+                        continue
+                    else:
+                        # Inside thought, wait for closing tag
+                        # Safety cap
+                        if len(self.last_thought) + len(buffer) > 2000:
+                            self.last_thought += buffer
+                            buffer = ""
+                            in_thought = False
+                        break
+
+        # Final cleanup
+        if buffer:
+            if in_thought:
+                self.last_thought += buffer
+            else:
+                # Last resort check for bracketed thought if nothing was extracted
+                if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
+                    match = re.match(r'^\[(.*?)\]', buffer.strip())
+                    if match:
+                        self.last_thought = match.group(1)
+                        yield buffer.strip()[match.end():].strip()
+                        return
+                yield buffer
 
     def process_text(self, text: Any, user_name: str = None):
         """Generator that yields sentence fragments from the LLM with combined thought/response and interrupt checks."""
@@ -320,8 +336,17 @@ class YuzuApp:
                 # Look for YAML block
                 if "```yaml" in analysis_raw:
                     analysis_raw = analysis_raw.split("```yaml")[1].split("```")[0]
+                elif "```yml" in analysis_raw:
+                    analysis_raw = analysis_raw.split("```yml")[1].split("```")[0]
                 elif "```" in analysis_raw:
                     analysis_raw = analysis_raw.split("```")[1].split("```")[0]
+
+                # Clean up leading labels and potential garbage
+                lines = analysis_raw.strip().splitlines()
+                if lines and lines[0].strip().lower() in ["yml", "yaml"]:
+                    analysis_raw = "\n".join(lines[1:])
+
+                analysis_raw = analysis_raw.strip()
 
                 data = yaml.safe_load(analysis_raw)
                 if isinstance(data, dict):
