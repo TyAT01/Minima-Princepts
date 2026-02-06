@@ -145,9 +145,16 @@ class PersonaManager:
             prompt += "\n"
 
             # Mandatory Format
+            prompt += "### INNER MONOLOGUE (MANDATORY)\n"
+            prompt += "You possess an advanced inner voice. Before every response, you MUST record your thoughts inside [THOUGHT] ... [/THOUGHT] tags.\n"
+            prompt += "High-Quality Thoughts should include:\n"
+            prompt += "1. Analysis: What is the user's intent and emotional state?\n"
+            prompt += "2. Retrieval: Which memories or facts are relevant to this message?\n"
+            prompt += "3. Planning: How should I adjust my tone to best respond? If the user asked multiple things, how will I address them all (multitasking)?\n"
+            prompt += "Example: [THOUGHT] User is being overly affectionate. It makes me slightly uncomfortable but I'll maintain my calm exterior while being secretly pleased. [/THOUGHT] I see. You are being quite expressive today...\n\n"
+
             prompt += "### RESPONSE FORMAT (MANDATORY)\n"
-            prompt += "You must format every response as follows:\n"
-            prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n"
+            prompt += "Your final response MUST follow the [THOUGHT] ... [/THOUGHT] Response pattern.\n"
             prompt += "CRITICAL: The response portion must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n"
 
             # Style/Length (Check top level then inside persona)
@@ -175,9 +182,12 @@ class PersonaManager:
             prompt += self.persona_data['system_prompt']
 
             # Add Response Format (MANDATORY for the app's streaming logic)
-            prompt += "\n\n### RESPONSE FORMAT (MANDATORY)\n"
-            prompt += "You must format every response as follows:\n"
-            prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n"
+            prompt += "\n\n### INNER MONOLOGUE (MANDATORY)\n"
+            prompt += "You possess an advanced inner voice. Before every response, you MUST record your thoughts inside [THOUGHT] ... [/THOUGHT] tags.\n"
+            prompt += "High-Quality Thoughts should include: Analysis (intent/emotion), Retrieval (memories), and Planning (tone/multitasking).\n"
+
+            prompt += "\n### RESPONSE FORMAT (MANDATORY)\n"
+            prompt += "Your final response MUST follow the [THOUGHT] ... [/THOUGHT] Response pattern.\n"
             prompt += "CRITICAL: The response portion must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n"
 
             # Check if there's any response style in the sheet
@@ -242,9 +252,16 @@ class PersonaManager:
                 prompt += f"  - \"{example}\"\n"
         prompt += "\n"
 
+        prompt += "### INNER MONOLOGUE (MANDATORY)\n"
+        prompt += "You possess an advanced inner voice. Before every response, you MUST record your thoughts inside [THOUGHT] ... [/THOUGHT] tags.\n"
+        prompt += "High-Quality Thoughts should include:\n"
+        prompt += "1. Analysis: What is the user's intent and emotional state?\n"
+        prompt += "2. Retrieval: Which memories or facts are relevant to this message?\n"
+        prompt += "3. Planning: How should I adjust my tone to best respond? If the user asked multiple things, how will I address them all (multitasking)?\n"
+        prompt += "Example: [THOUGHT] User is being overly affectionate. It makes me slightly uncomfortable but I'll maintain my calm exterior while being secretly pleased. [/THOUGHT] I see. You are being quite expressive today...\n\n"
+
         prompt += "### RESPONSE FORMAT (MANDATORY)\n"
-        prompt += "You must format every response as follows:\n"
-        prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n"
+        prompt += "Your final response MUST follow the [THOUGHT] ... [/THOUGHT] Response pattern.\n"
         prompt += "CRITICAL: The response portion must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n\n"
 
         prompt += "### LOGIC CONSTRAINTS\n"
