@@ -272,7 +272,8 @@ class AureliaApp:
                         break
 
                     # Remove any remaining bracketed text or parentheticals (leaked inner thoughts/actions/metadata)
-                    clean_fragment = re.sub(r'\[.*?\]|\(.*?\)', '', fragment).strip()
+                    # Uses a lookahead/lookbehind to avoid breaking standard Markdown links [text](url)
+                    clean_fragment = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', fragment).strip()
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
                         yield clean_fragment
