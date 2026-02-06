@@ -1,0 +1,26 @@
+# Seed-AI Configuration
+
+llm:
+  api_type: "ollama"  # 'ollama' or 'openai'
+  base_url: "http://localhost:11434/api"
+  model: "llama3.1:8b-instruct-q4_K_M"
+  temperature: 0.7
+  max_tokens: 512
+
+stt:
+  model_size: "base"
+  device: null  # 'cuda' or 'cpu', null for auto-detect
+  compute_type: "float16"
+
+memory:
+  db_path: "./seed_memory"
+  collection_name: "seed_ai_memories"
+  max_short_term: 15
+
+ui:
+  title: "🛠️ Seed: The Tinkering Prodigy"
+  theme: "soft"
+  share: false
+
+persona:
+  sheet_path: "Seed_sheet.yaml"
