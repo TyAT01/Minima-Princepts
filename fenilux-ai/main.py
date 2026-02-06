@@ -140,70 +140,55 @@ class FeniluxApp:
         """Helper to extract [THOUGHT] content and yield the remaining response."""
         buffer = ""
         in_thought = False
-        thought_tag_seen = False
         self.last_thought = ""
+
+        # Patterns for thought-start and thought-end (case-insensitive, handles brackets and parentheses)
+        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)', re.IGNORECASE)
+        end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)', re.IGNORECASE)
 
         for chunk in stream:
             buffer += chunk
-
-            # If we haven't seen any tags and the buffer is getting large,
-            # assume the AI is not using tags and just yield it.
-            if not thought_tag_seen and not in_thought and len(buffer) > 800:
-                if "[THOUGHT]" not in buffer:
-                    yield buffer
-                    buffer = ""
-                    for remaining_chunk in stream:
-                        yield remaining_chunk
-                    return
-                else:
-                    thought_tag_seen = True
-
             while True:
                 if not in_thought:
-                    if "[THOUGHT]" in buffer:
-                        thought_tag_seen = True
-                        parts = buffer.split("[THOUGHT]", 1)
-                        if parts[0].strip():
-                            yield parts[0]
-                        buffer = parts[1]
+                    match = start_pattern.search(buffer)
+                    if match:
+                        # Yield everything BEFORE the tag
+                        pre_tag = buffer[:match.start()]
+                        if pre_tag:
+                            yield pre_tag
+                        buffer = buffer[match.end():]
                         in_thought = True
                         continue
                     else:
-                        # If we haven't seen a tag and buffer is still small, keep buffering
-                        if not thought_tag_seen and len(buffer) < 800:
-                            break
-
-                        # Otherwise, yield what we have, but watch for partial tags
-                        idx = buffer.rfind("[")
-                        if idx != -1 and idx > len(buffer) - 10:
-                            if idx > 0:
-                                yield buffer[:idx]
-                                buffer = buffer[idx:]
-                            break
-                        else:
-                            yield buffer
-                            buffer = ""
-                            break
+                        # No start tag found. Yield safe buffer, keeping enough to catch partial tags.
+                        if len(buffer) > 15:
+                            yield buffer[:-15]
+                            buffer = buffer[-15:]
+                        break
                 else:
-                    if "[/THOUGHT]" in buffer:
-                        parts = buffer.split("[/THOUGHT]", 1)
-                        self.last_thought += parts[0]
-                        buffer = parts[1]
+                    match = end_pattern.search(buffer)
+                    if match:
+                        # Collect the thought content
+                        self.last_thought += " " + buffer[:match.start()].strip()
+                        buffer = buffer[match.end():]
                         in_thought = False
                         continue
                     else:
-                        # Inside thought, wait for closing tag
-                        # Safety cap
-                        if len(self.last_thought) + len(buffer) > 2000:
-                            self.last_thought += buffer
-                            buffer = ""
+                        # Inside thought, wait for closing tag.
+                        # Buffer enough to handle partial tags.
+                        if len(buffer) > 15:
+                            self.last_thought += " " + buffer[:-15].strip()
+                            buffer = buffer[-15:]
+
+                        # Safety cap for thoughts (prevent infinite growth)
+                        if len(self.last_thought) > 4000:
                             in_thought = False
                         break
 
         # Final cleanup
         if buffer:
             if in_thought:
-                self.last_thought += buffer
+                self.last_thought += " " + buffer.strip()
             else:
                 # Last resort check for bracketed thought if nothing was extracted
                 if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
@@ -286,8 +271,8 @@ class FeniluxApp:
                         yield "... [Interrupted]"
                         break
 
-                    # Remove any remaining bracketed text (leaked inner thoughts/actions)
-                    clean_fragment = re.sub(r'\[.*?\]', '', fragment).strip()
+                    # Remove any remaining bracketed text or parentheticals (leaked inner thoughts/actions/metadata)
+                    clean_fragment = re.sub(r'\[.*?\]|\(.*?\)', '', fragment).strip()
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
                         yield clean_fragment
@@ -297,6 +282,7 @@ class FeniluxApp:
                 if not self.interrupt_event.is_set():
                     # Save both thought and interaction
                     if self.last_thought:
+                        self.last_thought = self.last_thought.strip()
                         logging.info(f"Fenilux's Thought: {self.last_thought}")
                         self.memory.store_insight(f"Thought: {self.last_thought}", source="inner_monologue")
 
@@ -331,36 +317,54 @@ class FeniluxApp:
 
             analysis_raw = self.llm.generate_response("You are Fenilux, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
 
-            # Simple parser for the YAML-like response
-            try:
-                # Look for YAML block
-                if "```yaml" in analysis_raw:
-                    analysis_raw = analysis_raw.split("```yaml")[1].split("```")[0]
-                elif "```yml" in analysis_raw:
-                    analysis_raw = analysis_raw.split("```yml")[1].split("```")[0]
-                elif "```" in analysis_raw:
-                    analysis_raw = analysis_raw.split("```")[1].split("```")[0]
+            # Clean up potential markdown and metadata labels
+            def clean_yaml_block(text):
+                if "```yaml" in text:
+                    text = text.split("```yaml")[1].split("```")[0]
+                elif "```yml" in text:
+                    text = text.split("```yml")[1].split("```")[0]
+                elif "```" in text:
+                    text = text.split("```")[1].split("```")[0]
 
-                # Clean up leading labels and potential garbage
-                lines = analysis_raw.strip().splitlines()
+                lines = text.strip().splitlines()
                 if lines and lines[0].strip().lower() in ["yml", "yaml"]:
-                    analysis_raw = "\n".join(lines[1:])
+                    text = "\n".join(lines[1:])
+                return text.strip()
 
-                analysis_raw = analysis_raw.strip()
+            cleaned_raw = clean_yaml_block(analysis_raw)
 
-                data = yaml.safe_load(analysis_raw)
-                if isinstance(data, dict):
-                    for fact in data.get('user_facts', []):
-                        self.memory.update_user_profile(user_id, fact)
-                    for event in data.get('events', []):
-                        self.memory.store_episodic_memory(event)
-                    for insight in data.get('insights', []):
-                        self.memory.store_insight(insight, source="reflection")
-                    logging.info("Deep reflection complete. Memories filed.")
-            except Exception as pe:
-                logging.warning(f"Failed to parse reflection data: {pe}. Raw: {analysis_raw[:100]}")
-                # Fallback to general insight if YAML parsing fails
-                self.memory.store_insight(analysis_raw[:500], source="reflection_fallback")
+            # Simple parser for the YAML-like response
+            data = None
+            try:
+                data = yaml.safe_load(cleaned_raw)
+                if not isinstance(data, dict):
+                    data = None
+            except Exception as e:
+                logging.warning(f"YAML parsing failed, attempting regex fallback: {e}")
+
+            if not data:
+                # Regex-based fallback extraction
+                data = {
+                    'user_facts': re.findall(r'user_facts:\s*(.*?)(?:\n\w+:|$)', cleaned_raw, re.S | re.I),
+                    'events': re.findall(r'events:\s*(.*?)(?:\n\w+:|$)', cleaned_raw, re.S | re.I),
+                    'insights': re.findall(r'insights:\s*(.*?)(?:\n\w+:|$)', cleaned_raw, re.S | re.I)
+                }
+                for key in data:
+                    if data[key]:
+                        # Split by '- ' or '\n-'
+                        items = re.split(r'\n\s*-\s*', "\n" + data[key][0])
+                        data[key] = [i.strip() for i in items if i.strip() and not i.strip().endswith(':')]
+                    else:
+                        data[key] = []
+
+            if isinstance(data, dict):
+                for fact in data.get('user_facts', []):
+                    self.memory.update_user_profile(user_id, fact)
+                for event in data.get('events', []):
+                    self.memory.store_episodic_memory(event)
+                for insight in data.get('insights', []):
+                    self.memory.store_insight(insight, source="reflection")
+                logging.info("Deep reflection complete. Memories filed.")
 
         except Exception as e:
             logging.warning(f"Reflection failed: {e}")
