@@ -151,7 +151,10 @@ class AureliaApp:
                     parts = buffer.split("[/THOUGHT]", 1)
                     thought_part = parts[0]
                     if "[THOUGHT]" in thought_part:
-                        self.last_thought = thought_part.split("[THOUGHT]", 1)[1].strip()
+                        thought_split = thought_part.split("[THOUGHT]", 1)
+                        if thought_split[0].strip():
+                            yield thought_split[0].strip()
+                        self.last_thought = thought_split[1].strip()
                     else:
                         # Handle missing opening tag but present closing tag
                         self.last_thought = thought_part.replace("[THOUGHT]", "").strip().lstrip("[")
@@ -197,6 +200,7 @@ class AureliaApp:
 
     def process_text(self, text: Any, user_name: str = None):
         """Generator that yields sentence fragments from the LLM with combined thought/response and interrupt checks."""
+        self.last_thought = "" # Initialize at the very start to avoid stale state
         if user_name:
             self.current_user_name = user_name
         else:
@@ -259,7 +263,6 @@ class AureliaApp:
                 response_stream = self._extract_thought_from_stream(raw_stream)
 
                 response_fragments = []
-                thought_yielded = False
 
                 for fragment in split_into_sentences(response_stream):
                     if self.interrupt_event.is_set():
@@ -267,20 +270,11 @@ class AureliaApp:
                         yield "... [Interrupted]"
                         break
 
-                    # Yield the thought first if we have it and haven't yielded it yet
-                    if not thought_yielded and self.last_thought:
-                        yield f"<details><summary><b>Inner Thought</b></summary>\n\n{self.last_thought}\n\n</details>\n\n"
-                        thought_yielded = True
-
                     # Remove any remaining bracketed text (leaked inner thoughts/actions)
                     clean_fragment = re.sub(r'\[.*?\]', '', fragment).strip()
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
                         yield clean_fragment
-
-                # Final fallback for thought if no fragments were yielded
-                if not thought_yielded and self.last_thought:
-                    yield f"<details><summary><b>Inner Thought</b></summary>\n\n{self.last_thought}\n\n</details>\n\n"
 
                 full_response = " ".join(response_fragments)
 
