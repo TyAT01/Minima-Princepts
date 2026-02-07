@@ -35,7 +35,7 @@ class LuminaGUI:
         else:
             theme_obj = gr.themes.Default()
 
-        with gr.Blocks() as demo:
+        with gr.Blocks(title=self.title, theme=theme_obj) as demo:
             gr.Markdown(f"# {self.title}")
 
             with gr.Row():
@@ -143,12 +143,6 @@ class LuminaGUI:
 
     def launch(self, share=False):
         if self.interface:
-            # Theme and Title passed here for Gradio 6.0 compatibility
-            theme_obj = gr.themes.Soft() # Fallback or pass from build_ui
-            if self.theme == "monochrome": theme_obj = gr.themes.Monochrome()
-            elif self.theme == "glass": theme_obj = gr.themes.Glass()
-            elif self.theme == "default": theme_obj = gr.themes.Default()
-
-            self.interface.launch(share=share, title=self.title, theme=theme_obj)
+            self.interface.launch(share=share)
         else:
             logger.error("UI not built. Call build_ui() first.")
