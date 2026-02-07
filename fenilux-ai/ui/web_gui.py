@@ -35,12 +35,19 @@ class FeniluxGUI:
         else:
             theme_obj = gr.themes.Default()
 
-        with gr.Blocks(title=self.title, theme=theme_obj) as demo:
+        with gr.Blocks() as demo:
             gr.Markdown(f"# {self.title}")
 
             with gr.Row():
                 with gr.Column(scale=4):
-                    chatbot = gr.Chatbot(label="Chat History", height=500)
+                    # Compatibility for Gradio 4.x (requires type="messages") and Gradio 5.x+ (default)
+                    chatbot_kwargs = {"label": "Chat History", "height": 500}
+                    try:
+                        gr.Chatbot(type="messages", render=False)
+                        chatbot_kwargs["type"] = "messages"
+                    except TypeError:
+                        pass
+                    chatbot = gr.Chatbot(**chatbot_kwargs)
                     msg = gr.Textbox(
                         label="Type your message...",
                         placeholder="Say something to Fenilux...",
@@ -136,6 +143,12 @@ class FeniluxGUI:
 
     def launch(self, share=False):
         if self.interface:
-            self.interface.launch(share=share)
+            # Theme and Title passed here for Gradio 6.0 compatibility
+            theme_obj = gr.themes.Soft() # Fallback or pass from build_ui
+            if self.theme == "monochrome": theme_obj = gr.themes.Monochrome()
+            elif self.theme == "glass": theme_obj = gr.themes.Glass()
+            elif self.theme == "default": theme_obj = gr.themes.Default()
+
+            self.interface.launch(share=share, title=self.title, theme=theme_obj)
         else:
             logger.error("UI not built. Call build_ui() first.")
