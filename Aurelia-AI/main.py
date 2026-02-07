@@ -169,7 +169,7 @@ class AureliaApp:
                     match = end_pattern.search(buffer)
                     if match:
                         # Collect the thought content
-                        self.last_thought += " " + buffer[:match.start()].strip()
+                        self.last_thought += buffer[:match.start()]
                         buffer = buffer[match.end():]
                         in_thought = False
                         continue
@@ -177,7 +177,7 @@ class AureliaApp:
                         # Inside thought, wait for closing tag.
                         # Buffer enough to handle partial tags.
                         if len(buffer) > 15:
-                            self.last_thought += " " + buffer[:-15].strip()
+                            self.last_thought += buffer[:-15]
                             buffer = buffer[-15:]
 
                         # Safety cap for thoughts (prevent infinite growth)
@@ -188,7 +188,12 @@ class AureliaApp:
         # Final cleanup
         if buffer:
             if in_thought:
-                self.last_thought += " " + buffer.strip()
+                self.last_thought += buffer
+                # If the stream ended without a closing tag, treat the content as response
+                # especially if it's long and doesn't have an opening tag anymore.
+                if len(self.last_thought) > 50 and not start_pattern.search(self.last_thought):
+                    yield self.last_thought
+                    self.last_thought = ""
             else:
                 # Last resort check for bracketed thought if nothing was extracted
                 if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
@@ -360,7 +365,12 @@ class AureliaApp:
 
             if isinstance(data, dict):
                 for fact in data.get('user_facts', []):
-                    self.memory.update_user_profile(user_id, fact)
+                    if isinstance(fact, dict):
+                        # Convert dict to a readable string fact
+                        fact_str = ", ".join([f"{k}: {v}" for k, v in fact.items()])
+                        self.memory.update_user_profile(user_id, fact_str)
+                    else:
+                        self.memory.update_user_profile(user_id, str(fact))
                 for event in data.get('events', []):
                     self.memory.store_episodic_memory(event)
                 for insight in data.get('insights', []):
