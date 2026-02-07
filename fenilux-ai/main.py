@@ -78,6 +78,7 @@ class FeniluxApp:
         pers_cfg = self.config.get('persona', {})
         # Note: sheet_path in config might be relative to the version folder
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'fenilux_sheet.yaml'))
+        self.session_start = datetime.now(timezone.utc)
 
         self.results_queue = Queue()
         self.interrupt_event = threading.Event()
@@ -174,14 +175,12 @@ class FeniluxApp:
                         in_thought = False
                         continue
                     else:
-                        # Inside thought, wait for closing tag.
-                        # Buffer enough to handle partial tags.
-                        if len(buffer) > 15:
-                            self.last_thought += buffer[:-15]
-                            buffer = buffer[-15:]
-
+                        # Inside thought, wait for closing tag or stream end.
+                        # We no longer drain the buffer here to avoid fragmenting words in the CMD log.
                         # Safety cap for thoughts (prevent infinite growth)
-                        if len(self.last_thought) > 4000:
+                        if len(buffer) + len(self.last_thought) > 4000:
+                            self.last_thought += buffer
+                            buffer = ""
                             in_thought = False
                         break
 
@@ -241,10 +240,13 @@ class FeniluxApp:
                 context = self.memory.get_full_context(text, user_id=user_name)
 
                 # Add Temporal Context (Time Awareness)
+                now_utc = datetime.now(timezone.utc)
                 last_time = self.memory.get_last_interaction_time(user_name)
-                temporal_note = ""
+
+                # 1. Calculate Time Since Last Interaction
+                duration_str = "some time"
                 if last_time:
-                    delta = datetime.now(timezone.utc) - last_time
+                    delta = now_utc - last_time
                     days = delta.days
                     hours, remainder = divmod(int(delta.seconds), 3600)
                     minutes, _ = divmod(remainder, 60)
@@ -258,10 +260,20 @@ class FeniluxApp:
                         time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
 
                     duration_str = ", ".join(time_parts[:-1]) + (f" and {time_parts[-1]}" if len(time_parts) > 1 else time_parts[0])
-                    temporal_note = f"It has been {duration_str} since you last spoke with {user_name}."
 
-                if temporal_note:
-                    context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
+                # 2. Calculate Session Uptime
+                uptime_delta = now_utc - self.session_start
+                up_hours, up_rem = divmod(int(uptime_delta.seconds), 3600)
+                up_mins, _ = divmod(up_rem, 60)
+                uptime_str = f"{up_hours}h {up_mins}m" if up_hours > 0 else f"{up_mins} minutes"
+
+                temporal_note = (
+                    f"It has been {duration_str} since your last interaction with {user_name}. "
+                    f"You have been 'active' for the last {uptime_str} this session. "
+                    "You are highly aware of this passage of time and should acknowledge it if the gap is significant or if asked."
+                )
+
+                context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
 
                 # Combined Phase (Thought + Response in one stream)
                 full_response = ""
