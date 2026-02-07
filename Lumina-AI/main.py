@@ -5,7 +5,7 @@ import sys
 import re
 import yaml
 import signal
-import threading
+import threading # Required for background reflection threads
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -167,10 +167,12 @@ class LuminaApp:
                             # If we see "[...]" and it's not a known start tag (checked above)
                             # it might be a simple bracketed thought.
                             # We only do this if it's at the very start of the whole response.
+                            start_idx = buffer.find("[")
                             closing_idx = buffer.find("]")
-                            self.last_thought = buffer[buffer.find("[")+1:closing_idx]
-                            buffer = buffer[closing_idx+1:].lstrip()
-                            continue
+                            if start_idx < closing_idx:
+                                self.last_thought = buffer[start_idx+1:closing_idx]
+                                buffer = buffer[closing_idx+1:].lstrip()
+                                continue
 
                         # No start tag found. Yield safe buffer, keeping enough to catch partial tags.
                         if len(buffer) > 25:

@@ -32,21 +32,14 @@ class MockApp:
                     else:
                         # [Refined] Before yielding safe buffer, check for simple bracketed thoughts at the start
                         if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
-                            # print(f"DEBUG: found bracketed start in buffer '{buffer}'")
                             # If we see "[...]" and it's not a known start tag (checked above)
                             # it might be a simple bracketed thought.
                             # We only do this if it's at the very start of the whole response.
                             start_idx = buffer.find("[")
                             closing_idx = buffer.find("]")
                             if start_idx < closing_idx:
-                                # Yield any leading whitespace BEFORE the opening bracket
-                                pre_bracket = buffer[:start_idx]
-                                if pre_bracket:
-                                    yield pre_bracket
-
                                 self.last_thought = buffer[start_idx+1:closing_idx]
                                 buffer = buffer[closing_idx+1:].lstrip()
-                                # print(f"DEBUG: after bracketed start, buffer='{buffer}', last_thought='{self.last_thought}'")
                                 continue
 
                         # No start tag found. Yield safe buffer, keeping enough to catch partial tags.
@@ -150,7 +143,7 @@ if __name__ == "__main__":
     test_extraction(["[Just a simple bracketed thought] The actual message."], "The actual message.", "Just a simple bracketed thought")
 
     # Test 9: Bracketed thought with leading whitespace
-    test_extraction(["   [Thought] Response"], "Response", "Thought")
+    test_extraction(["   [Thinking to myself] Response"], "Response", "Thinking to myself")
 
     print("--- Testing Cleaning ---")
     test_cleaning("Hello [THOUGHT] leaked [/THOUGHT] world", "Hello  world")
