@@ -1,13 +1,13 @@
 @echo off
 cd /d "%~dp0"
-echo [fenilux-ai] Launching Fenilux from %CD%...
+echo [Nym-AI] Launching Nym: The Ultimate Villain from %CD%...
 
 :: 1. Check/Start Ollama
 tasklist /FI "IMAGENAME eq ollama.exe" 2>NUL | find /I /N "ollama.exe">NUL
 if "%ERRORLEVEL%"=="0" (
-    echo [fenilux-ai] Ollama is already running.
+    echo [Nym-AI] Ollama is already running.
 ) else (
-    echo [fenilux-ai] Starting Ollama serve...
+    echo [Nym-AI] Starting Ollama serve...
     start /B ollama serve
     timeout /t 5 >nul
 )
@@ -19,10 +19,10 @@ if not exist ".venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-echo [fenilux-ai] Activating environment...
+echo [Nym-AI] Activating environment...
 call .venv\Scripts\activate
 
-echo [fenilux-ai] Starting Fenilux AI Dashboard...
+echo [Nym-AI] Starting Nym AI Dashboard...
 python main.py
 
 pause

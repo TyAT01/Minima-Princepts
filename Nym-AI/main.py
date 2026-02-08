@@ -42,22 +42,22 @@ from memory.store import MemoryStore
 from stt.whisper import STTSystem
 from utils.text_utils import split_into_sentences
 from persona.manager import PersonaManager
-from ui.web_gui import FeniluxGUI
+from ui.web_gui import NymGUI
 from utils.error_handler import ErrorHandler
 from queue import Queue
 
-class FeniluxApp:
+class NymApp:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
         self.processing_lock = threading.Lock()
-        self.current_user_name = "Tyler" # Default
+        self.current_user_name = "Keeper" # Default for Nym
         self.error_handler = ErrorHandler(ai_comment_callback=self.ai_comment_on_error)
 
         # Initialize components with config
         mem_cfg = self.config.get('memory', {})
         self.memory = MemoryStore(
-            db_path=mem_cfg.get('db_path', './fenilux_memory'),
-            collection_name=mem_cfg.get('collection_name', 'fenilux_ai_memories'),
+            db_path=mem_cfg.get('db_path', './nym_memory'),
+            collection_name=mem_cfg.get('collection_name', 'nym_ai_memories'),
             max_short_term=mem_cfg.get('max_short_term', 15)
         )
 
@@ -77,7 +77,7 @@ class FeniluxApp:
 
         pers_cfg = self.config.get('persona', {})
         # Note: sheet_path in config might be relative to the version folder
-        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'fenilux_sheet.yaml'))
+        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'nym_sheet.yaml'))
         self.session_start = datetime.now(timezone.utc)
 
         self.results_queue = Queue()
@@ -92,12 +92,12 @@ class FeniluxApp:
         )
 
         ui_cfg = self.config.get('ui', {})
-        self.gui = FeniluxGUI(
+        self.gui = NymGUI(
             process_text_cb=self.process_text,
             process_audio_cb=self.process_audio,
             toggle_mic_cb=self.toggle_mic,
             poll_results_cb=self.poll_results,
-            title=ui_cfg.get('title', "✨ Fenilux: The Divine Diva"),
+            title=ui_cfg.get('title', "😈 Nym: The Ultimate Villain"),
             theme=ui_cfg.get('theme', "soft")
         )
 
@@ -105,7 +105,7 @@ class FeniluxApp:
         try:
             if not os.path.exists(path):
                 # Try one level up if not found (e.g. if run from root)
-                alt_path = os.path.join("fenilux-ai", path)
+                alt_path = os.path.join("Nym-AI", path)
                 if os.path.exists(alt_path):
                     path = alt_path
                 else:
@@ -120,7 +120,7 @@ class FeniluxApp:
 
     def initialize(self):
         try:
-            logging.info("Initializing Fenilux AI...")
+            logging.info("Initializing Nym AI...")
 
             # Run LLM Diagnostics first
             diag = self.llm.perform_diagnostics()
@@ -301,7 +301,7 @@ class FeniluxApp:
                     # Save both thought and interaction
                     if self.last_thought:
                         self.last_thought = self.last_thought.strip()
-                        logging.info(f"Fenilux's Thought: {self.last_thought}")
+                        logging.info(f"Nym's Thought: {self.last_thought}")
                         self.memory.store_insight(f"Thought: {self.last_thought}", source="inner_monologue")
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
@@ -321,19 +321,19 @@ class FeniluxApp:
     def reflect(self, user_id: str):
         """Asks the LLM to analyze recent interactions for profiles, events, and insights."""
         try:
-            logging.info(f"Fenilux is reflecting on recent experiences with {user_id}...")
+            logging.info(f"Nym is reflecting on recent experiences with {user_id}...")
             history = self.memory.get_history()
             if not history: return
 
             reflection_prompt = (
-                "You are Fenilux, performing deep reflection. Analyze our recent chat history and extract the following:\n"
+                "You are Nym, performing deep reflection. Analyze our recent chat history and extract the following:\n"
                 "1. User Profile: Any new facts, likes, or dislikes about the person I'm talking to.\n"
                 "2. Notable Events: Any significant moments or 'firsts' that happened.\n"
                 "3. Insights: Lessons learned about myself or the world.\n\n"
                 "Format your response as a valid YAML block with keys: 'user_facts' (list), 'events' (list), 'insights' (list)."
             )
 
-            analysis_raw = self.llm.generate_response("You are Fenilux, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
+            analysis_raw = self.llm.generate_response("You are Nym, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
 
             # Clean up potential markdown and metadata labels
             def clean_yaml_block(text):
@@ -473,9 +473,9 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("fenilux_ai.log")
+            logging.FileHandler("nym_ai.log")
         ]
     )
 
-    app = FeniluxApp()
+    app = NymApp()
     app.run()

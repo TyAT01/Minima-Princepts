@@ -111,10 +111,10 @@ class LlamaClient:
             full_prompt += f"Relevant Context:\n{context}\n\n"
 
         for msg in history:
-            role = "User" if msg["role"] == "user" else "Fenilux"
+            role = "User" if msg["role"] == "user" else "Nym"
             full_prompt += f"{role}: {msg['content']}\n"
 
-        full_prompt += f"User: {user_input}\nFenilux:"
+        full_prompt += f"User: {user_input}\nNym:"
 
         payload = {
             "model": self.model,
