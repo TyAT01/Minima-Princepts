@@ -1,4 +1,4 @@
-# fenilux-ai Configuration
+# Nym-AI Configuration
 
 llm:
   api_type: "ollama"  # 'ollama' or 'openai'
@@ -13,14 +13,14 @@ stt:
   compute_type: "float16"
 
 memory:
-  db_path: "./fenilux_memory"
-  collection_name: "fenilux_ai_memories"
+  db_path: "./nym_memory"
+  collection_name: "nym_ai_memories"
   max_short_term: 15
 
 ui:
-  title: "✨ Fenilux: The Divine Diva"
+  title: "😈 Nym: The Ultimate Villain"
   theme: "soft"
   share: false
 
 persona:
-  sheet_path: "fenilux_sheet.yaml"
+  sheet_path: "nym_sheet.yaml"

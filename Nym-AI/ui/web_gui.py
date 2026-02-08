@@ -4,8 +4,8 @@ from typing import Callable, Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
 
-class FeniluxGUI:
-    """Gradio-based Web GUI for Fenilux AI."""
+class NymGUI:
+    """Gradio-based Web GUI for Nym AI."""
 
     def __init__(
         self,
@@ -13,7 +13,7 @@ class FeniluxGUI:
         process_audio_cb: Callable[[str, str], Tuple[str, str]],
         toggle_mic_cb: Callable[[bool], None],
         poll_results_cb: Callable[[], List[Tuple[str, str]]],
-        title: str = "✨ Fenilux: The Divine Diva",
+        title: str = "😈 Nym: The Ultimate Villain",
         theme: str = "soft"
     ):
         self.process_text_cb = process_text_cb
@@ -50,7 +50,7 @@ class FeniluxGUI:
                     chatbot = gr.Chatbot(**chatbot_kwargs)
                     msg = gr.Textbox(
                         label="Type your message...",
-                        placeholder="Say something to Fenilux...",
+                        placeholder="Submit to Nym's whims...",
                         show_label=False,
                     )
                     with gr.Row():
@@ -59,7 +59,7 @@ class FeniluxGUI:
 
                 with gr.Column(scale=1):
                     gr.Markdown("### 👤 User Profile")
-                    user_name = gr.Textbox(label="Your Name", value="Tyler", placeholder="Enter your name...")
+                    user_name = gr.Textbox(label="Your Name", value="Keeper", placeholder="Enter your name...")
 
                     gr.Markdown("### 🎙️ Hands-Free Mic")
                     mic_toggle = gr.Checkbox(label="Open Mic (Hands-Free)", value=False)
