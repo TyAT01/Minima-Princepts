@@ -56,7 +56,7 @@ class LuminaGUI:
         return [str(user_svg_path), str(bot_svg_path)]
 
     def build_ui(self):
-        # Princess AI Theme CSS
+        # Lumina Digital Theme CSS
         self.custom_css = """
         .gradio-container { background-color: #0b0f19 !important; color: #e0e0e0 !important; }
         .message.user { background-color: #4a90e2 !important; color: white !important; border-radius: 15px 15px 0 15px !important; }

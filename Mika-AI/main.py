@@ -67,7 +67,11 @@ class MikaApp:
         self.llm = LlamaClient(
             base_url=llm_cfg.get('base_url', 'http://localhost:11434/api'),
             model=llm_cfg.get('model', 'llama3.1:8b-instruct-q4_K_M'),
-            api_type=llm_cfg.get('api_type', 'ollama')
+            api_type=llm_cfg.get('api_type', 'ollama'),
+            temperature=llm_cfg.get('temperature', 0.9),
+            top_p=llm_cfg.get('top_p', 0.92),
+            repeat_penalty=llm_cfg.get('repeat_penalty', 1.08),
+            max_tokens=llm_cfg.get('max_tokens', 512)
         )
 
         stt_cfg = self.config.get('stt', {})
