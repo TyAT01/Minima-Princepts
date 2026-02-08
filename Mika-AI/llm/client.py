@@ -9,16 +9,33 @@ logger = logging.getLogger(__name__)
 class LlamaClient:
     """A client for interacting with a local Llama 3.1 8B instance (Ollama or llama.cpp)."""
 
-    def __init__(self, base_url: str = "http://localhost:11434/api", model: str = "llama3.1:8b-instruct-q4_K_M", api_type: str = "ollama"):
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434/api",
+        model: str = "llama3.1:8b-instruct-q4_K_M",
+        api_type: str = "ollama",
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        repeat_penalty: float = 1.1,
+        max_tokens: int = 512
+    ):
         """
         Args:
             base_url: The base URL of the local model server.
             model: The model name to use.
             api_type: 'ollama' or 'openai' (for llama.cpp or other OpenAI compatible servers).
+            temperature: Sampling temperature.
+            top_p: Top-p sampling.
+            repeat_penalty: Penalty for repeating tokens.
+            max_tokens: Maximum tokens to generate.
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_type = api_type.lower()
+        self.temperature = temperature
+        self.top_p = top_p
+        self.repeat_penalty = repeat_penalty
+        self.max_tokens = max_tokens
         self._endpoint_type = "chat" # Default to chat
         logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model}")
 
@@ -87,8 +104,10 @@ class LlamaClient:
             "messages": messages,
             "stream": True,
             "options": {
-                "temperature": 0.7,
-                "num_predict": 512,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "repeat_penalty": self.repeat_penalty,
+                "num_predict": self.max_tokens,
             }
         }
 
@@ -121,8 +140,10 @@ class LlamaClient:
             "prompt": full_prompt,
             "stream": True,
             "options": {
-                "temperature": 0.7,
-                "num_predict": 512,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "repeat_penalty": self.repeat_penalty,
+                "num_predict": self.max_tokens,
             }
         }
 
@@ -150,8 +171,9 @@ class LlamaClient:
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 512,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_tokens,
             "stream": True
         }
 
