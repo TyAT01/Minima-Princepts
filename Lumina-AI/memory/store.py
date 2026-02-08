@@ -27,6 +27,8 @@ class MemoryStore:
         self.short_term_buffer: List[Dict[str, str]] = []
         self.max_short_term = max_short_term
         self._last_seen: Dict[str, datetime] = {}
+        self._last_user: Optional[str] = None
+        self.session_objectives: List[str] = []
         self._load_last_seen_times()
 
     def _load_last_seen_times(self):
@@ -65,6 +67,12 @@ class MemoryStore:
 
     def add_interaction(self, user_text: str, bot_text: str, user_id: str = "default_user"):
         """Adds a new interaction to both short-term and long-term memory."""
+        # Multi-user isolation: clear buffer if user switches
+        if self._last_user and self._last_user != user_id:
+            logger.info(f"User switch detected ({self._last_user} -> {user_id}). Clearing short-term buffer.")
+            self.clear_short_term()
+
+        self._last_user = user_id
         now = datetime.now(timezone.utc)
         self._last_seen[user_id] = now # Update cache
         timestamp_str = now.isoformat()
@@ -193,12 +201,17 @@ class MemoryStore:
         # Increase results for broader context
         memories = self.search_relevant_memories(query, n_results=10, user_id=user_id)
 
+        context_parts = []
+
+        # Add Session Objectives if any
+        if self.session_objectives:
+            context_parts.append("### [CURRENT SESSION OBJECTIVES]\n" + "\n".join([f"- {obj}" for obj in self.session_objectives]))
+
         interactions = [m["content"] for m in memories if m["metadata"].get("type") == "interaction"]
         insights = [m["content"] for m in memories if m["metadata"].get("type") == "insight"]
         profile_facts = [m["content"] for m in memories if m["metadata"].get("type") == "profile_fact"]
         episodic = [m["content"] for m in memories if m["metadata"].get("type") == "episodic"]
 
-        context_parts = []
         if user_id:
             context_parts.append(f"### [USER PROFILE: {user_id}]\n" + (f"Recognized {user_id}. Relevant facts: " + ", ".join(profile_facts) if profile_facts else f"New user or no specific facts stored for {user_id}."))
         elif profile_facts:

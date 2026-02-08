@@ -13,6 +13,8 @@ class AureliaGUI:
         process_audio_cb: Callable[[str, str], Tuple[str, str]],
         toggle_mic_cb: Callable[[bool], None],
         poll_results_cb: Callable[[], List[Tuple[str, str]]],
+        join_chat_cb: Optional[Callable[[str], List[str]]] = None,
+        leave_chat_cb: Optional[Callable[[str], None]] = None,
         title: str = "⚔️ Aurelia Vale: The Hedge-Knight Squire",
         theme: str = "soft"
     ):
@@ -20,11 +22,22 @@ class AureliaGUI:
         self.process_audio_cb = process_audio_cb
         self.toggle_mic_cb = toggle_mic_cb
         self.poll_results_cb = poll_results_cb
+        self.join_chat_cb = join_chat_cb
+        self.leave_chat_cb = leave_chat_cb
         self.title = title
         self.theme = theme
         self.interface = None
 
     def build_ui(self):
+        # Princess AI Theme CSS
+        custom_css = """
+        .gradio-container { background-color: #0b0f19 !important; color: #e0e0e0 !important; }
+        .message.user { background-color: #4a90e2 !important; color: white !important; border-radius: 15px 15px 0 15px !important; }
+        .message.bot { background-color: #222222 !important; color: white !important; border-radius: 15px 15px 15px 0 !important; }
+        #chatbot { border: 1px solid #333 !important; }
+        footer { display: none !important; }
+        """
+
         # Determine theme object
         if self.theme == "soft":
             theme_obj = gr.themes.Soft()
@@ -35,13 +48,22 @@ class AureliaGUI:
         else:
             theme_obj = gr.themes.Default()
 
-        with gr.Blocks(title=self.title, theme=theme_obj) as demo:
+        # SVG Avatars
+        user_avatar = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzRhOTBlMiI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgM2MyLjIxIDAgNCAxLjc5IDQgNHMtMS43OSA0LTQgNC00LTEuNzktNC00IDEuNzktNCA0LTR6bTAgMTMuOGMtMi42NyAwLTUuMjYtMS4zMi02LjUtMy41OC4wMi0yLjE0IDQuMjctMy4yNyA2LjUtMy4yNyBzNi40OCAxLjEzIDYuNSAzLjI3Yy0xLjI0IDIuMjYtMy44MyAzLjU4LTYuNSAzLjU4eiIvPjwvc3ZnPg=="
+        bot_avatar = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZjdkNyI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgNGMuNjYgMCAxLjE4LjUxIDEuMjUgMS4xN2wuMTUgMi41M2MuMDEuMTgtLjEyLjMzLS4zLjMzaC0yLjJjLS4xOCAwLS4zMS0uMTUtLjMtLjMzbC4xNS0yLjUzYy4wNy0uNjYuNTktMS4xNyAxLjI1LTEuMTd6bTAgMTAuNWMtLjg0IDAtMS41LS42Ni0xLjUtMS41cy42Ni0xLjUgMS41LTEuNSAxLjUuNjYgMS41IDEuNS0uNjYgMS41LTEuNSAxLjV6Ii8+PC9zdmc+"
+
+        with gr.Blocks(title=self.title, theme=theme_obj, css=custom_css) as demo:
             gr.Markdown(f"# {self.title}")
 
             with gr.Row():
                 with gr.Column(scale=4):
                     # Compatibility for Gradio 4.x (requires type="messages") and Gradio 5.x+ (default)
-                    chatbot_kwargs = {"label": "Chat History", "height": 500}
+                    chatbot_kwargs = {
+                        "label": "Chat History",
+                        "height": 500,
+                        "elem_id": "chatbot",
+                        "avatar_images": [user_avatar, bot_avatar]
+                    }
                     try:
                         gr.Chatbot(type="messages", render=False)
                         chatbot_kwargs["type"] = "messages"
@@ -61,11 +83,15 @@ class AureliaGUI:
                     gr.Markdown("### 👤 User Profile")
                     user_name = gr.Textbox(label="Your Name", value="Tyler", placeholder="Enter your name...")
 
+                    with gr.Row():
+                        join_btn = gr.Button("Join Chat", variant="secondary", size="sm")
+                        leave_btn = gr.Button("Leave Chat", variant="stop", size="sm")
+
                     gr.Markdown("### 🎙️ Hands-Free Mic")
                     mic_toggle = gr.Checkbox(label="Open Mic (Hands-Free)", value=False)
 
                     gr.Markdown("### 🛠️ Status")
-                    gr.Markdown("System: **Online**")
+                    status_md = gr.Markdown("System: **Online**\nRoom: **Empty**")
                     error_box = gr.Textbox(label="Last System Error", interactive=False)
 
             # Timer for polling background STT results
@@ -89,7 +115,7 @@ class AureliaGUI:
                 return "", history
 
             def bot_response(history, name):
-                if not history: yield [], ""; return
+                if not history: yield [], gr.update(); return
                 user_input = history[-1]["content"]
 
                 if isinstance(user_input, list) and len(user_input) > 0:
@@ -107,11 +133,23 @@ class AureliaGUI:
                     for fragment in self.process_text_cb(user_input, name):
                         full_response += fragment + " "
                         history[-1]["content"] = full_response.strip()
-                        yield history, ""
+                        yield history, gr.update()
                 except Exception as e:
                     err_msg = str(e)
                     history.append({"role": "assistant", "content": f"[System Error]: {err_msg}"})
-                    yield history, err_msg
+                    yield history, gr.update(value=err_msg)
+
+            def on_join(name, history):
+                if history is None: history = []
+                if self.join_chat_cb:
+                    resp_fragments = self.join_chat_cb(name)
+                    history.append({"role": "assistant", "content": " ".join(resp_fragments)})
+                return history, f"System: **Online**\\nRoom: **{name} is here**"
+
+            def on_leave(name, history):
+                if self.leave_chat_cb:
+                    self.leave_chat_cb(name)
+                return history, "System: **Online**\\nRoom: **Empty**"
 
             def on_mic_toggle(value):
                 self.toggle_mic_cb(value)
@@ -133,11 +171,14 @@ class AureliaGUI:
                 bot_response, [chatbot, user_name], [chatbot, error_box]
             )
 
+            join_btn.click(on_join, [user_name, chatbot], [chatbot, status_md])
+            leave_btn.click(on_leave, [user_name, chatbot], [chatbot, status_md])
+
             mic_toggle.change(on_mic_toggle, mic_toggle, None)
 
             timer.tick(poll_results, chatbot, chatbot)
 
-            clear_btn.click(lambda: ([], ""), None, [chatbot, error_box], queue=False)
+            clear_btn.click(lambda: ([], gr.update(value="")), None, [chatbot, error_box], queue=False)
 
         self.interface = demo
 
