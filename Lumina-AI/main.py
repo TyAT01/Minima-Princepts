@@ -22,7 +22,6 @@ if sys.platform == "win32":
     except FileNotFoundError as e:
         if "_rocm" in str(e).lower():
             # Try to create the missing directory to satisfy the buggy import
-            import re
             # Extract path from error message (usually inside quotes)
             match = re.search(r"'(.*?)'", str(e))
             if match:
@@ -222,9 +221,9 @@ class LuminaApp:
                 # If it ends while in thought, it might be an unclosed thought or a leaked response
                 # If there's a lot of content and it looks like sentences, it might be a leaked response
                 if len(buffer) > 100 or "." in buffer:
-                     # Heuristic: if it's long, maybe the model forgot to close the thought and started speaking
-                     self.last_thought += " [Unclosed]"
-                     yield buffer
+                    # Heuristic: if it's long, maybe the model forgot to close the thought and started speaking
+                    self.last_thought += " [Unclosed]"
+                    yield buffer
                 else:
                     self.last_thought += buffer
             else:
