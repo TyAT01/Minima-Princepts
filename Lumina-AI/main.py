@@ -6,6 +6,7 @@ import re
 import yaml
 import signal
 import threading # Required for background reflection threads
+import json
 import time
 import random
 from datetime import datetime, timezone
@@ -113,7 +114,6 @@ class LuminaApp:
         try:
             if os.path.exists(self.objectives_path):
                 with open(self.objectives_path, 'r', encoding='utf-8') as f:
-                    import json
                     return json.load(f)
         except Exception as e:
             logging.warning(f"Error loading objectives: {e}")
@@ -122,7 +122,6 @@ class LuminaApp:
     def _save_objectives(self):
         try:
             with open(self.objectives_path, 'w', encoding='utf-8') as f:
-                import json
                 json.dump(self.session_objectives, f, indent=2)
         except Exception as e:
             logging.warning(f"Error saving objectives: {e}")

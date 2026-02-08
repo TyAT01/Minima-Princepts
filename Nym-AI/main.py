@@ -6,6 +6,7 @@ import re
 import yaml
 import signal
 import threading
+import json
 import time
 import random
 from datetime import datetime, timezone
@@ -113,7 +114,6 @@ class NymApp:
         try:
             if os.path.exists(self.objectives_path):
                 with open(self.objectives_path, 'r', encoding='utf-8') as f:
-                    import json
                     return json.load(f)
         except Exception as e:
             logging.warning(f"Error loading objectives: {e}")
@@ -122,7 +122,6 @@ class NymApp:
     def _save_objectives(self):
         try:
             with open(self.objectives_path, 'w', encoding='utf-8') as f:
-                import json
                 json.dump(self.session_objectives, f, indent=2)
         except Exception as e:
             logging.warning(f"Error saving objectives: {e}")
@@ -170,8 +169,8 @@ class NymApp:
         self.last_thought = ""
 
         # Patterns for thought-start and thought-end (case-insensitive, handles brackets and parentheses)
-        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)', re.IGNORECASE)
-        end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)', re.IGNORECASE)
+        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)|\[INNER MONOLOGUE\]|\[THINKING\]', re.IGNORECASE)
+        end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)|\[/INNER MONOLOGUE\]|\[/THINKING\]', re.IGNORECASE)
 
         for chunk in stream:
             buffer += chunk
