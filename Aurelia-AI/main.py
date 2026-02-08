@@ -84,6 +84,8 @@ class AureliaApp:
         self.interrupt_event = threading.Event()
         self.is_responding = False
         self.last_thought = ""
+        self.active_users = set()
+        self._load_session_objectives()
 
         from stt.whisper import VoiceMonitor
         self.voice_monitor = VoiceMonitor(
@@ -97,6 +99,8 @@ class AureliaApp:
             process_audio_cb=self.process_audio,
             toggle_mic_cb=self.toggle_mic,
             poll_results_cb=self.poll_results,
+            join_chat_cb=self.handle_user_join,
+            leave_chat_cb=self.handle_user_leave,
             title=ui_cfg.get('title', "⚔️ Aurelia Vale: The Hedge-Knight Squire"),
             theme=ui_cfg.get('theme', "soft")
         )
@@ -118,6 +122,18 @@ class AureliaApp:
             print(f"Warning: Error loading config from {path}: {e}")
             return {}
 
+    def _load_session_objectives(self):
+        """Loads session objectives from a local JSON file."""
+        obj_path = Path(__file__).parent / "objectives.json"
+        if obj_path.exists():
+            try:
+                with open(obj_path, 'r', encoding='utf-8') as f:
+                    import yaml
+                    data = yaml.safe_load(f)
+                    self.memory.session_objectives = data.get('objectives', [])
+            except Exception as e:
+                logging.warning(f"Failed to load objectives: {e}")
+
     def initialize(self):
         try:
             logging.info("Initializing Aurelia AI...")
@@ -127,6 +143,10 @@ class AureliaApp:
             print("\n" + diag + "\n")
 
             self.persona.load_persona()
+
+            # Start Autonomous Thought Loop
+            self.start_thought_loop()
+
             logging.info("Initialization complete.")
         except Exception as e:
             self.error_handler.handle_error(e, "Initialization")
@@ -203,13 +223,92 @@ class AureliaApp:
                         return
                 yield buffer
 
+    def start_thought_loop(self):
+        """Starts a background thread for periodic autonomous thinking."""
+        def thought_worker():
+            logging.info("Autonomous thought loop started.")
+            while True:
+                # Think every 5-15 minutes
+                import random
+                time_to_wait = random.randint(300, 900)
+                import time
+                time.sleep(time_to_wait)
+
+                if not self.is_responding and not self.processing_lock.locked():
+                    self.generate_autonomous_thought()
+
+        threading.Thread(target=thought_worker, daemon=True).start()
+
+    def generate_autonomous_thought(self):
+        """Triggers a proactive thought process even when no user is speaking."""
+        try:
+            with self.processing_lock:
+                logging.info("Aurelia is having an autonomous thought...")
+                system_prompt = self.persona.get_system_prompt(now=datetime.now())
+                history = self.memory.get_history()
+
+                # Context includes current objectives and recent status
+                context = self.memory.get_full_context("Recent status and goals", user_id=self.current_user_name)
+
+                thought_prompt = (
+                    "You are alone in your digital realm or observing the quiet chat room. "
+                    "Reflect on your current objectives and recent interactions. "
+                    "Generate a proactive thought about what you should do next or how you feel about your progress. "
+                    "Format: [THOUGHT] ... [/THOUGHT]"
+                )
+
+                raw_thought = self.llm.generate_response(system_prompt, thought_prompt, history, context=context)
+
+                # Extract and store the thought
+                match = re.search(r'\[THOUGHTS?\](.*?)\[/THOUGHTS?\]', raw_thought, re.IGNORECASE | re.DOTALL)
+                if match:
+                    thought_content = match.group(1).strip()
+                    logging.info(f"Autonomous Thought: {thought_content}")
+                    self.memory.store_insight(f"Autonomous Thought: {thought_content}", source="autonomous_reflection")
+        except Exception as e:
+            logging.warning(f"Autonomous thought failed: {e}")
+
+    def handle_user_join(self, user_name: str):
+        """Handles a user joining the chat room."""
+        self.active_users.add(user_name)
+        logging.info(f"User {user_name} joined.")
+
+        # Check if we know this person
+        last_seen = self.memory.get_last_interaction_time(user_name)
+
+        if last_seen:
+             # Identity verification heuristic
+             verify_prompt = f"{user_name} joined. I should verify if it's the {user_name} I know."
+             return list(self.process_text(verify_prompt, user_name))
+        else:
+             return list(self.process_text(f"Hello! I see {user_name} has arrived.", user_name))
+
+    def handle_user_leave(self, user_name: str):
+        """Handles a user leaving the chat room."""
+        if user_name in self.active_users:
+            self.active_users.remove(user_name)
+        logging.info(f"User {user_name} left.")
+
+        if not self.active_users:
+            logging.info("Chat room is now empty.")
+            self.memory.add_interaction("[System]", f"{user_name} left. The room is now empty.", user_id="System")
+
     def process_text(self, text: Any, user_name: str = None):
         """Generator that yields sentence fragments from the LLM with combined thought/response and interrupt checks."""
         self.last_thought = "" # Initialize at the very start to avoid stale state
         if user_name:
-            self.current_user_name = user_name
+            if self.current_user_name != user_name:
+                 logging.info(f"Switching active user to: {user_name}")
+                 self.current_user_name = user_name
         else:
             user_name = self.current_user_name
+
+        # Identity Verification Heuristic
+        if text and not isinstance(text, (list, dict)) and not str(text).startswith("[") and user_name != "System":
+             last_seen = self.memory.get_last_interaction_time(user_name)
+             if last_seen and (datetime.now(timezone.utc) - last_seen).days > 7:
+                  # If we haven't seen them in a week, let's be cautious
+                  text = f"[IDENTITY CHECK REQUIRED] {text}"
 
         # Robustly handle list/dict inputs from Gradio
         if isinstance(text, list) and len(text) > 0:
@@ -308,8 +407,9 @@ class AureliaApp:
                     logging.info(f"Successfully processed message. Response length: {len(full_response)}")
 
                 # Periodic reflection (every 10 interactions)
+                # Run in background to avoid blocking the UI response
                 if self.memory.count() % 10 == 0:
-                     self.reflect(user_name)
+                     threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
 
             except Exception as e:
                 self.error_handler.handle_error(e, "Text Processing")
@@ -377,12 +477,13 @@ class AureliaApp:
 
             if isinstance(data, dict):
                 for fact in data.get('user_facts', []):
+                    # Ensure fact is a string
                     if isinstance(fact, dict):
-                        # Convert dict to a readable string fact
                         fact_str = ", ".join([f"{k}: {v}" for k, v in fact.items()])
-                        self.memory.update_user_profile(user_id, fact_str)
                     else:
-                        self.memory.update_user_profile(user_id, str(fact))
+                        fact_str = str(fact)
+
+                    self.memory.update_user_profile(user_id, fact_str)
                 for event in data.get('events', []):
                     self.memory.store_episodic_memory(event)
                 for insight in data.get('insights', []):
