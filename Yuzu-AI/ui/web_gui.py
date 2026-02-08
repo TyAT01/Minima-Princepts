@@ -1,5 +1,7 @@
 import gradio as gr
 import logging
+import base64
+from pathlib import Path
 from typing import Callable, Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
@@ -27,10 +29,33 @@ class YuzuGUI:
         self.title = title
         self.theme = theme
         self.interface = None
+        self.theme_obj = None
+        self.custom_css = ""
+
+    def _save_avatars(self) -> List[str]:
+        """Saves SVG data URIs to files to avoid Gradio 6.0 OSError."""
+        assets_dir = Path(__file__).parent / "assets"
+        assets_dir.mkdir(exist_ok=True)
+
+        user_svg_path = assets_dir / "user.svg"
+        bot_svg_path = assets_dir / "bot.svg"
+
+        user_avatar_b64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzRhOTBlMiI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgM2MyLjIxIDAgNCAxLjc5IDQgNHMtMS43OSA0LTQgNC00LTEuNzktNC00IDEuNzktNCA0LTR6bTAgMTMuOGMtMi42NyAwLTUuMjYtMS4zMi02LjUtMy41OC4wMi0yLjE0IDQuMjctMy4yNyA2LjUtMy4yNyBzNi40OCAxLjEzIDYuNSAzLjI3Yy0xLjI0IDIuMjYtMy44MyAzLjU4LTYuNSAzLjU4eiIvPjwvc3ZnPg=="
+        bot_avatar_b64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZjdkNyI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgNGMuNjYgMCAxLjE4LjUxIDEuMjUgMS4xN2wuMTUgMi41M2MuMDEuMTgtLjEyLjMzLS4zLjMzaC0yLjJjLS4xOCAwLS4zMS0uMTUtLjMtLjMzbC4xNS0yLjUzYy4wNy0uNjYuNTktMS4xNyAxLjI1LTEuMTd6bTAgMTAuNWMtLjg0IDAtMS41LS42Ni0xLjUtMS41cy42Ni0xLjUgMS41LTEuNSAxLjUuNjYgMS41IDEuNS0uNjYgMS41LTEuNSAxLjV6Ii8+PC9zdmc+"
+
+        if not user_svg_path.exists():
+            with open(user_svg_path, "wb") as f:
+                f.write(base64.b64decode(user_avatar_b64))
+
+        if not bot_svg_path.exists():
+            with open(bot_svg_path, "wb") as f:
+                f.write(base64.b64decode(bot_avatar_b64))
+
+        return [str(user_svg_path), str(bot_svg_path)]
 
     def build_ui(self):
         # Princess AI Theme CSS
-        custom_css = """
+        self.custom_css = """
         .gradio-container { background-color: #0b0f19 !important; color: #e0e0e0 !important; }
         .message.user { background-color: #4a90e2 !important; color: white !important; border-radius: 15px 15px 0 15px !important; }
         .message.bot { background-color: #222222 !important; color: white !important; border-radius: 15px 15px 15px 0 !important; }
@@ -40,19 +65,18 @@ class YuzuGUI:
 
         # Determine theme object
         if self.theme == "soft":
-            theme_obj = gr.themes.Soft()
+            self.theme_obj = gr.themes.Soft()
         elif self.theme == "monochrome":
-            theme_obj = gr.themes.Monochrome()
+            self.theme_obj = gr.themes.Monochrome()
         elif self.theme == "glass":
-            theme_obj = gr.themes.Glass()
+            self.theme_obj = gr.themes.Glass()
         else:
-            theme_obj = gr.themes.Default()
+            self.theme_obj = gr.themes.Default()
 
-        # SVG Avatars
-        user_avatar = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzRhOTBlMiI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgM2MyLjIxIDAgNCAxLjc5IDQgNHMtMS43OSA0LTQgNC00LTEuNzktNC00IDEuNzktNCA0LTR6bTAgMTMuOGMtMi42NyAwLTUuMjYtMS4zMi02LjUtMy41OC4wMi0yLjE0IDQuMjctMy4yNyA2LjUtMy4yNyBzNi40OCAxLjEzIDYuNSAzLjI3Yy0xLjI0IDIuMjYtMy44MyAzLjU4LTYuNSAzLjU4eiIvPjwvc3ZnPg=="
-        bot_avatar = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZjdkNyI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgNGMuNjYgMCAxLjE4LjUxIDEuMjUgMS4xN2wuMTUgMi41M2MuMDEuMTgtLjEyLjMzLS4zLjMzaC0yLjJjLS4xOCAwLS4zMS0uMTUtLjMtLjMzbC4xNS0yLjUzYy4wNy0uNjYuNTktMS4xNyAxLjI1LTEuMTd6bTAgMTAuNWMtLjg0IDAtMS41LS42Ni0xLjUtMS41cy42Ni0xLjUgMS41LTEuNSAxLjUuNjYgMS41IDEuNS0uNjYgMS41LTEuNSAxLjV6Ii8+PC9zdmc+"
+        # Save and get avatar file paths
+        avatar_paths = self._save_avatars()
 
-        with gr.Blocks(title=self.title, theme=theme_obj, css=custom_css) as demo:
+        with gr.Blocks(title=self.title) as demo:
             gr.Markdown(f"# {self.title}")
 
             with gr.Row():
@@ -62,7 +86,7 @@ class YuzuGUI:
                         "label": "Chat History",
                         "height": 500,
                         "elem_id": "chatbot",
-                        "avatar_images": [user_avatar, bot_avatar]
+                        "avatar_images": avatar_paths
                     }
                     try:
                         gr.Chatbot(type="messages", render=False)
@@ -184,6 +208,7 @@ class YuzuGUI:
 
     def launch(self, share=False):
         if self.interface:
-            self.interface.launch(share=share)
+            # Gradio 6.0 compatibility: theme and css moved to launch()
+            self.interface.launch(share=share, theme=self.theme_obj, css=self.custom_css)
         else:
             logger.error("UI not built. Call build_ui() first.")
