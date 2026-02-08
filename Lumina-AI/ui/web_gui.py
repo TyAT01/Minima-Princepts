@@ -141,6 +141,7 @@ class LuminaGUI:
                 return "", history
 
             def bot_response(history, name):
+                if history is None: history = []
                 if not history: yield [], gr.update(); return
                 user_input = history[-1]["content"]
 
@@ -155,6 +156,7 @@ class LuminaGUI:
 
                 try:
                     history.append({"role": "assistant", "content": ""})
+                    yield history, gr.update()
                     full_response = ""
                     for fragment in self.process_text_cb(user_input, name):
                         full_response += fragment + " "
@@ -188,7 +190,7 @@ class LuminaGUI:
                         history.append({"role": "user", "content": u})
                         history.append({"role": "assistant", "content": b})
                     return history
-                return history
+                return gr.update()
 
             msg.submit(user_message, [msg, chatbot], [msg, chatbot], queue=False).then(
                 bot_response, [chatbot, user_name], [chatbot, error_box]

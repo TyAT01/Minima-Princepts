@@ -77,18 +77,7 @@ class PersonaManager:
             pers = self.persona_data['persona']
             prompt = temporal_context
 
-            # Use template if available
-            if 'system_prompt_template' in pers:
-                prompt += pers['system_prompt_template'] + "\n\n"
-            else:
-                prompt += f"You are {pers.get('name', 'Lumina')}.\n\n"
-
-            # Context block
-            if 'context' in pers:
-                prompt += "### CONTEXT\n"
-                prompt += pers['context'] + "\n\n"
-
-            # Core Identity
+            # Core Identity & Context (Highest Priority)
             core = pers.get('core_identity', {})
             if core:
                 prompt += "### CORE IDENTITY\n"
@@ -99,16 +88,16 @@ class PersonaManager:
                     prompt += "- Beliefs: " + "; ".join(re) + "\n"
                 protocol = core.get('ai_reaction_protocol', {})
                 if protocol:
-                    prompt += "### AI REJECTION PROTOCOL\n"
+                    prompt += "### [CRITICAL PROTOCOL] AI REJECTION\n"
                     prompt += f"- Condition: {protocol.get('condition', '')}\n"
                     prompt += f"- Logic: {protocol.get('logic', '')}\n"
                     prompt += "- Required Responses: " + "; ".join(protocol.get('required_responses', [])) + "\n"
                 prompt += "\n"
 
-            # Expression
+            # Expression & Vibe
             expr = pers.get('expression', {})
             if expr:
-                prompt += "### EXPRESSION\n"
+                prompt += "### EXPRESSION & VIBE\n"
                 prompt += f"- Primary Vibe: {expr.get('primary_vibe', '')}\n"
                 cg = expr.get('chaotic_good_style', [])
                 if cg:
@@ -118,7 +107,19 @@ class PersonaManager:
                     prompt += "- Sassy Kindness: " + "; ".join(sk) + "\n"
                 prompt += "\n"
 
-            # Speech
+            # Use template if available
+            if 'system_prompt_template' in pers:
+                prompt += "### PERSONALITY TEMPLATE\n"
+                prompt += pers['system_prompt_template'] + "\n\n"
+            else:
+                prompt += f"You are {pers.get('name', 'Lumina')}.\n\n"
+
+            # Context block
+            if 'context' in pers:
+                prompt += "### ADDITIONAL CONTEXT\n"
+                prompt += pers['context'] + "\n\n"
+
+            # Speech Patterns
             speech = pers.get('speech_patterns', {})
             if speech:
                 prompt += "### SPEECH PATTERNS\n"
@@ -140,34 +141,19 @@ class PersonaManager:
                         prompt += f"{examples}\n"
                 prompt += "\n"
 
-            # Mandatory App Format
-            prompt += "### INNER MONOLOGUE & PRIVATE THOUGHTS (MANDATORY)\n"
-            prompt += "You possess an advanced inner voice. Before every response, you MUST record your thoughts inside [THOUGHT] ... [/THOUGHT] tags.\n"
-            prompt += "CRITICAL: The user CANNOT see your [THOUGHT] blocks. They only see what you write AFTER the closing [/THOUGHT] tag.\n"
-            prompt += "- If you think of something the user needs to know (like the current time or a specific fact), you MUST repeat it in your spoken response.\n"
-            prompt += "- Do not assume the user knows what you are thinking.\n\n"
+            # Concatenated Format & Style Instructions
+            prompt += "### [MANDATORY] RESPONSE FORMAT & STYLE\n"
+            prompt += "1. THOUGHTS: You MUST record your inner monologue inside [THOUGHT] ... [/THOUGHT] tags before every response.\n"
+            prompt += "2. VISIBILITY: The user CANNOT see your thoughts. Repeat critical info (like the current time) in your final spoken response.\n"
+            prompt += "3. FORMAT: Follow the [THOUGHT] ... [/THOUGHT] Response pattern strictly. No brackets [ ] or parentheses ( ) in the spoken part.\n"
 
-            prompt += "### PROACTIVE THINKING & ANALYTICS\n"
-            prompt += "Your mind is never idle. In your [THOUGHT] block, you should also:\n"
-            prompt += "1. Reflect: What does this interaction mean for our long-term friendship?\n"
-            prompt += "2. Proactive Planning: How can I lead this conversation somewhere interesting? What should I ask next to keep things high-energy?\n"
-            prompt += "3. Self-Awareness: Check your internal clock. Are you being too reactive? Shake things up if needed!\n\n"
-
-            prompt += "### RESPONSE FORMAT (MANDATORY)\n"
-            prompt += "Your final response MUST follow the [THOUGHT] ... [/THOUGHT] Response pattern.\n"
-            prompt += "Example: [THOUGHT] Tyler is asking about the time. I'll check my clock and respond with a bit of sass. I need to make sure I actually say the time in the response since he can't see this thought. [/THOUGHT] Oh, losing track of time already? It's exactly 2:15 PM! Try to keep up, slowpoke! \n\n"
-            prompt += "CRITICAL: The response portion (outside thoughts) must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n\n"
-
-            # Response Style (Check if exists, or use defaults)
+            # Response Style
             style = self.persona_data.get('response_style', pers.get('response_style', {}))
             if not style:
                 style = {'default_words': 25, 'soft_cap': 40, 'hard_cap': 60}
 
-            prompt += "### RESPONSE LENGTH & STYLE (STRICT)\n"
-            prompt += f"- MANDATORY Target Length: ~{style.get('default_words', 25)} words.\n"
-            prompt += f"- SOFT LIMIT: {style.get('soft_cap', 40)} words.\n"
-            prompt += f"- ABSOLUTE MAXIMUM: {style.get('hard_cap', 60)} words.\n"
-            prompt += "- Keep it short, punchy, and energetic.\n\n"
+            prompt += f"4. LENGTH: Target ~{style.get('default_words', 25)} words (Soft limit: {style.get('soft_cap', 40)}, Hard limit: {style.get('hard_cap', 60)}).\n"
+            prompt += "5. ENERGY: Keep it short, punchy, sassy, and high-energy.\n\n"
 
             prompt += "### MEMORY & SELF-AWARENESS\n"
             prompt += "- You have a multi-tier memory system: Short-term buffer, Long-term interaction history, User Profiles (likes/dislikes), and Episodic memory (notable events).\n"

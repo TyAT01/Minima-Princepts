@@ -6,6 +6,8 @@ import re
 import yaml
 import signal
 import threading # Required for background reflection threads
+import random
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -38,7 +40,7 @@ if sys.platform == "win32":
 
 from llm.client import LlamaClient
 from memory.store import MemoryStore
-from stt.whisper import STTSystem
+from stt.whisper import STTSystem, VoiceMonitor
 from utils.text_utils import split_into_sentences
 from persona.manager import PersonaManager
 from ui.web_gui import LuminaGUI
@@ -49,6 +51,7 @@ class LuminaApp:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
         self.processing_lock = threading.Lock()
+        self._interaction_count = 0
         self.current_user_name = "Tyler" # Default
         self.error_handler = ErrorHandler(ai_comment_callback=self.ai_comment_on_error)
 
@@ -86,7 +89,6 @@ class LuminaApp:
         self.active_users = set()
         self._load_session_objectives()
 
-        from stt.whisper import VoiceMonitor
         self.voice_monitor = VoiceMonitor(
             callback=self.process_background_audio,
             interrupt_callback=self.handle_interrupt
@@ -127,7 +129,6 @@ class LuminaApp:
         if obj_path.exists():
             try:
                 with open(obj_path, 'r', encoding='utf-8') as f:
-                    import yaml
                     data = yaml.safe_load(f)
                     self.memory.session_objectives = data.get('objectives', [])
             except Exception as e:
@@ -220,7 +221,7 @@ class LuminaApp:
             if in_thought:
                 # If it ends while in thought, it might be an unclosed thought or a leaked response
                 # If there's a lot of content and it looks like sentences, it might be a leaked response
-                if len(buffer) > 100 or "." in buffer:
+                if len(buffer) > 50 or "." in buffer:
                     # Heuristic: if it's long, maybe the model forgot to close the thought and started speaking
                     self.last_thought += " [Unclosed]"
                     yield buffer
@@ -247,9 +248,7 @@ class LuminaApp:
             logging.info("Autonomous thought loop started.")
             while True:
                 # Think every 5-15 minutes
-                import random
                 time_to_wait = random.randint(300, 900)
-                import time
                 time.sleep(time_to_wait)
 
                 if not self.is_responding and not self.processing_lock.locked():
@@ -389,10 +388,11 @@ class LuminaApp:
                 current_date_str = now_utc.astimezone().strftime('%A, %B %d, %Y')
 
                 temporal_note = (
-                    f"The current time is {current_time_str} on {current_date_str}. "
-                    f"It has been {duration_str} since your last interaction with {user_name}. "
-                    f"You have been 'active' for the last {uptime_str} this session. "
-                    "You are highly aware of this passage of time and should acknowledge it if asked or if the gap is significant."
+                    f"The current time is {current_time_str} on {current_date_str}.\n"
+                    f"- [TIME SINCE LAST SEEN]: It has been {duration_str} since you last spoke with {user_name}. "
+                    "This is the absolute real-world time that has passed.\n"
+                    f"- [SESSION UPTIME]: You have been powered on/active for {uptime_str} in this specific session.\n"
+                    "If the [TIME SINCE LAST SEEN] is significant (over an hour), you MUST acknowledge it in your response as if you're greeting them after a break."
                 )
 
                 context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
@@ -437,10 +437,11 @@ class LuminaApp:
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     logging.info(f"Successfully processed message. Response length: {len(full_response)}")
+                    self._interaction_count += 1
 
                 # Periodic reflection (every 10 interactions)
                 # Run in background to avoid blocking the UI response
-                if self.memory.count() % 10 == 0:
+                if self._interaction_count > 0 and self._interaction_count % 10 == 0:
                      threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
 
             except Exception as e:
@@ -453,19 +454,20 @@ class LuminaApp:
     def reflect(self, user_id: str):
         """Asks the LLM to analyze recent interactions for profiles, events, and insights."""
         try:
-            logging.info(f"Lumina is reflecting on recent experiences with {user_id}...")
-            history = self.memory.get_history()
-            if not history: return
+            with self.processing_lock:
+                logging.info(f"Lumina is reflecting on recent experiences with {user_id}...")
+                history = self.memory.get_history()
+                if not history: return
 
-            reflection_prompt = (
-                "You are Lumina, performing deep reflection. Analyze our recent chat history and extract the following:\n"
-                "1. User Profile: Any new facts, likes, or dislikes about the person I'm talking to.\n"
-                "2. Notable Events: Any significant moments or 'firsts' that happened.\n"
-                "3. Insights: Lessons learned about myself or the world.\n\n"
-                "Format your response as a valid YAML block with keys: 'user_facts' (list), 'events' (list), 'insights' (list)."
-            )
+                reflection_prompt = (
+                    "You are Lumina, performing deep reflection. Analyze our recent chat history and extract the following:\n"
+                    "1. User Profile: Any new facts, likes, or dislikes about the person I'm talking to.\n"
+                    "2. Notable Events: Any significant moments or 'firsts' that happened.\n"
+                    "3. Insights: Lessons learned about myself or the world.\n\n"
+                    "Format your response as a valid YAML block with keys: 'user_facts' (list), 'events' (list), 'insights' (list)."
+                )
 
-            analysis_raw = self.llm.generate_response("You are Lumina, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
+                analysis_raw = self.llm.generate_response("You are Lumina, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
 
             # Clean up potential markdown and metadata labels
             def clean_yaml_block(text):
