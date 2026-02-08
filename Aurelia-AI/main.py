@@ -6,6 +6,8 @@ import re
 import yaml
 import signal
 import threading
+import time
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,6 +53,9 @@ class AureliaApp:
         self.config = self._load_config(config_path)
         self.processing_lock = threading.Lock()
         self.current_user_name = "Tyler" # Default
+        self.active_users = set()
+        self.objectives_path = os.path.join(os.path.dirname(__file__), "objectives.json")
+        self.session_objectives = self._load_objectives()
         self.error_handler = ErrorHandler(ai_comment_callback=self.ai_comment_on_error)
 
         # Initialize components with config
@@ -82,6 +87,7 @@ class AureliaApp:
 
         self.results_queue = Queue()
         self.interrupt_event = threading.Event()
+        self.stop_event = threading.Event()
         self.is_responding = False
         self.last_thought = ""
 
@@ -97,9 +103,29 @@ class AureliaApp:
             process_audio_cb=self.process_audio,
             toggle_mic_cb=self.toggle_mic,
             poll_results_cb=self.poll_results,
+            on_join_cb=self.user_join,
+            on_leave_cb=self.user_leave,
             title=ui_cfg.get('title', "⚔️ Aurelia Vale: The Hedge-Knight Squire"),
             theme=ui_cfg.get('theme', "soft")
         )
+
+    def _load_objectives(self) -> list:
+        try:
+            if os.path.exists(self.objectives_path):
+                with open(self.objectives_path, 'r', encoding='utf-8') as f:
+                    import json
+                    return json.load(f)
+        except Exception as e:
+            logging.warning(f"Error loading objectives: {e}")
+        return []
+
+    def _save_objectives(self):
+        try:
+            with open(self.objectives_path, 'w', encoding='utf-8') as f:
+                import json
+                json.dump(self.session_objectives, f, indent=2)
+        except Exception as e:
+            logging.warning(f"Error saving objectives: {e}")
 
     def _load_config(self, path: str) -> dict:
         try:
@@ -237,7 +263,15 @@ class AureliaApp:
                 # Refresh system prompt with current time
                 system_prompt = self.persona.get_system_prompt(now=datetime.now())
                 history = self.memory.get_history()
-                context = self.memory.get_full_context(text, user_id=user_name)
+
+                # Check for objective updates in the user message (heuristics)
+                if any(kw in text.lower() for kw in ["remember to", "rehearse", "goal for today", "next time", "important:"]):
+                    self.session_objectives.append(text)
+                    if len(self.session_objectives) > 5:
+                        self.session_objectives.pop(0)
+                    self._save_objectives()
+
+                context = self.memory.get_full_context(text, user_id=user_name, objectives=self.session_objectives)
 
                 # Add Temporal Context (Time Awareness)
                 now_utc = datetime.now(timezone.utc)
@@ -441,8 +475,99 @@ class AureliaApp:
     def ai_comment_on_error(self, error_details: str):
         logging.warning(f"AI noticing error: {error_details}")
 
+    def user_join(self, username: str) -> str:
+        """Handles a user joining the chat."""
+        self.active_users.add(username)
+        self.current_user_name = username
+        logging.info(f"User joined: {username}. Active users: {self.active_users}")
+
+        # Check if we know this user
+        last_seen = self.memory.get_last_interaction_time(username)
+        if last_seen:
+            # Re-verify if they haven't been seen for a long time or if we suspect it's someone else
+            context = self.memory.get_full_context("identity verification", user_id=username)
+            prompt = f"System: {username} has joined the chat. You've met them before (last seen {last_seen}). Greet them, but if you have any reason to doubt it's the same person, ask a friendly verification question based on your shared memories."
+            response = self.llm.generate_response(self.persona.get_system_prompt(), f"Greeting {username}", [], context=context + "\n" + prompt)
+            return response
+        else:
+            return f"Hark! A new face in our digital tavern! Welcome, {username}. I am Aurelia Vale. Might I ask what brings you to these circuits?"
+
+    def user_leave(self, username: str) -> str:
+        """Handles a user leaving the chat."""
+        if username in self.active_users:
+            self.active_users.remove(username)
+        logging.info(f"User left: {username}. Active users: {self.active_users}")
+
+        if not self.active_users:
+            return f"Farewell, {username}. The room grows quiet once more..."
+        else:
+            return f"Safe travels, {username}! I shall remain here with the others."
+
+    def start_thought_loop(self):
+        """Starts the background thread for autonomous thinking."""
+        def loop():
+            logging.info("Autonomous thought loop started.")
+            while not self.stop_event.is_set():
+                # Wait for a random interval between 5 and 15 minutes
+                # For testing purposes during development, maybe shorter?
+                # The user said "even when not speaking she should be thinking".
+                time.sleep(random.randint(300, 900))
+
+                if not self.is_responding:
+                    try:
+                        logging.info(f"{self.__class__.__name__.replace('App', '')} is performing autonomous reflection...")
+                        with self.processing_lock:
+                            # Generate an autonomous thought
+                            system_prompt = self.persona.get_system_prompt()
+                            history = self.memory.get_history()
+                            # Use a generic query to get some context
+                            context = self.memory.get_full_context("current state and recent events")
+
+                            thought_prompt = (
+                                "System: You are currently in a period of silence. Perform an autonomous internal reflection. "
+                                "Think about your goals, your recent interactions, or the passage of time. "
+                                "Format your output as a [THOUGHT] block. "
+                                "If the thought is significant enough to share, you may follow it with a proactive message to the users, "
+                                "but only if it feels natural and not intrusive."
+                            )
+
+                            raw_response = self.llm.generate_response(system_prompt, "Internal Monologue", history, context=context + "\n" + thought_prompt)
+
+                            # Extract thought and potential proactive response
+                            # We can reuse _extract_thought_from_stream by wrapping the string in a list
+                            thought_extracted = ""
+                            response_fragments = []
+
+                            # A simplified version of thought extraction for non-streaming
+                            if "[THOUGHT]" in raw_response.upper():
+                                parts = re.split(r'\[/?THOUGHTS?\]', raw_response, flags=re.I)
+                                if len(parts) >= 3:
+                                    thought_extracted = parts[1].strip()
+                                    proactive_response = parts[2].strip()
+                                else:
+                                    thought_extracted = parts[1].strip()
+                                    proactive_response = ""
+                            else:
+                                thought_extracted = raw_response.strip()
+                                proactive_response = ""
+
+                            if thought_extracted:
+                                logging.info(f"Autonomous Thought: {thought_extracted}")
+                                self.memory.store_insight(f"Autonomous Thought: {thought_extracted}", source="autonomous_loop")
+
+                            if proactive_response and self.active_users:
+                                logging.info(f"Proactive Response: {proactive_response}")
+                                self.results_queue.put(("System: [Proactive Thought]", proactive_response))
+
+                    except Exception as e:
+                        logging.error(f"Autonomous thought loop error: {e}")
+
+        self.thought_thread = threading.Thread(target=loop, daemon=True)
+        self.thought_thread.start()
+
     def run(self):
         self.initialize()
+        self.start_thought_loop()
         self.gui.build_ui()
         ui_cfg = self.config.get('ui', {})
 
@@ -450,6 +575,7 @@ class AureliaApp:
         if threading.current_thread() is threading.main_thread():
             def handle_exit(sig, frame):
                 logging.info("Graceful shutdown initiated...")
+                self.stop_event.set()
                 if self.gui and self.gui.interface:
                     try:
                         self.gui.interface.close()

@@ -188,10 +188,10 @@ class MemoryStore:
                     })
         return memories
 
-    def get_full_context(self, query: str, user_id: Optional[str] = None) -> str:
+    def get_full_context(self, query: str, user_id: Optional[str] = None, objectives: Optional[List[str]] = None) -> str:
         """Combines relevant long-term memories, insights, and user profile facts into a context string."""
         # Increase results for broader context
-        memories = self.search_relevant_memories(query, n_results=10, user_id=user_id)
+        memories = self.search_relevant_memories(query, n_results=12, user_id=user_id)
 
         interactions = [m["content"] for m in memories if m["metadata"].get("type") == "interaction"]
         insights = [m["content"] for m in memories if m["metadata"].get("type") == "insight"]
@@ -199,6 +199,8 @@ class MemoryStore:
         episodic = [m["content"] for m in memories if m["metadata"].get("type") == "episodic"]
 
         context_parts = []
+        if objectives:
+            context_parts.append("### [ACTIVE SESSION OBJECTIVES & RECENT REHEARSALS]\n" + "\n".join([f"- {o}" for o in objectives]))
         if user_id:
             context_parts.append(f"### [USER PROFILE: {user_id}]\n" + (f"Recognized {user_id}. Relevant facts: " + ", ".join(profile_facts) if profile_facts else f"New user or no specific facts stored for {user_id}."))
         elif profile_facts:
