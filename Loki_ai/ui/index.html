@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Loki ♡ local chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body {margin:0;background:#0d0d0d;font-family:system-ui;-webkit-font-smoothing:antialiased;background:linear-gradient(#111 0%,#000 100%);}
+  #chat {height:calc(100vh - 80px);display:flex;flex-direction:column;padding:20px 15px;box-sizing:border-box;overflow-y:auto;}
+  .msg {max-width:80%;margin:12px 0;display:flex;align-items:flex-end;animation:fade 0.4s;}
+  .msg.user {align-self:flex-end;flex-direction:row-reverse;}
+  .bubble {padding:12px 16px;border-radius:20px;line-height:1.4;font-size:15px;position:relative;}
+  .user .bubble {background:#4a90e2;color:white;border-bottom-right-radius:4px;}
+  .ani .bubble {background:#222;color:#fff;border:1px solid #333;border-bottom-left-radius:4px;}
+  .avatar {width:36px;height:36px;border-radius:50%;margin:0 8px;background:#000;border:2px solid #444;flex-shrink:0;}
+  .ani .avatar {background:#111 url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="%23000"/><path d="M30 45a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm40 0a5 5 0 1 1 0-10 5 5 0 0 1 0 10z" fill="%23fff"/><path d="M25 65c5 10 20 15 50 0" stroke="%23fff" stroke-width="6" fill="none" stroke-linecap="round"/></svg>') center/cover;}
+  .user .avatar {background:#4a90e2;}
+  #inputbar {position:fixed;bottom:0;left:0;right:0;display:flex;gap:10px;padding:10px;background:#111;border-top:1px solid #333;}
+  #input {flex:1;padding:14px 18px;background:#1c1c1c;border:none;border-radius:24px;color:#fff;font-size:15px;outline:none;}
+  #send {width:48px;height:48px;background:#4a90e2;border:none;border-radius:50%;color:white;font-size:20px;cursor:pointer;}
+  @keyframes fade {from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div id="chat">
+  <div class="msg ani">
+    <div class="avatar"></div>
+    <div class="bubble">*hood up, ears flopping* Alright minions, Loki is here. Bow or get wrecked. What's the plan today, idiots?</div>
+  </div>
+</div>
+<div id="inputbar">
+  <input id="input" placeholder="talk to loki, minion..." autocomplete="off">
+  <button id="send">➢</button>
+</div>
+
+<script>
+const API_URL = "http://127.0.0.1:8000";
+
+function addMessage(text, sender = 'user') {
+  const div = document.createElement('div');
+  div.className = `msg ${sender}`;
+  div.innerHTML = `<div class="avatar"></div><div class="bubble">${text.replace(/\n/g, '<br>')}</div>`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendMessage() {
+  const userText = input.value.trim();
+  if (!userText) return;
+  addMessage(userText, 'user');
+  input.value = '';
+
+  const typing = document.createElement('div');
+  typing.className = 'msg ani';
+  typing.innerHTML = '<div class="avatar"></div><div class="bubble"><i>loki is scheming…</i></div>';
+  chat.appendChild(typing);
+
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({message: userText})
+  });
+  const data = await res.json();
+
+  chat.removeChild(typing);
+  addMessage(data.reply, 'ani');
+}
+send.onclick = sendMessage;
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+</script>
+</body>
+</html>
