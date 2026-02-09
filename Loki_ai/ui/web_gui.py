@@ -45,13 +45,11 @@ class LokiGUI:
         user_avatar_b64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzRhOTBlMiI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgM2MyLjIxIDAgNCAxLjc5IDQgNHMtMS43OSA0LTQgNC00LTEuNzktNC00IDEuNzktNCA0LTR6bTAgMTMuOGMtMi42NyAwLTUuMjYtMS4zMi02LjUtMy41OC4wMi0yLjE0IDQuMjctMy4yNyA2LjUtMy4yNyBzNi40OCAxLjEzIDYuNSAzLjI3Yy0xLjI0IDIuMjYtMy44MyAzLjU4LTYuNSAzLjU4eiIvPjwvc3ZnPg=="
         bot_avatar_b64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0NSIgZmlsbD0iIzAwMCIvPjxwYXRoIGQ9Ik0zMCA0NWE1IDUgMCAxIDEgMC0xMCA1IDUgMCAwIDEgMCAxMHptNDAgMGE1IDUgMCAxIDEgMC0xMCA1IDUgMCAwIDEgMCAxMHoiIGZpbGw9IiNmZmYiLz48cGF0aCBkPSJNMjUgNjVjNSAxMCAyMCAxNSA1MCAwIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iNiIgZmlsbD0ibm9uZSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+"
 
-        if not user_svg_path.exists():
-            with open(user_svg_path, "wb") as f:
-                f.write(base64.b64decode(user_avatar_b64))
+        with open(user_svg_path, "wb") as f:
+            f.write(base64.b64decode(user_avatar_b64))
 
-        if not bot_svg_path.exists():
-            with open(bot_svg_path, "wb") as f:
-                f.write(base64.b64decode(bot_avatar_b64))
+        with open(bot_svg_path, "wb") as f:
+            f.write(base64.b64decode(bot_avatar_b64))
 
         return [str(user_svg_path), str(bot_svg_path)]
 

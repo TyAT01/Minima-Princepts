@@ -13,8 +13,6 @@ onnxruntime-gpu
 webrtcvad-wheels
 fastapi
 uvicorn
-redis
-ollama
 torchaudio
 
 # Hardware acceleration (RTX 3070)

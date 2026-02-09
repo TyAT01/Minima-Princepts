@@ -19,12 +19,12 @@ class PersonaManager:
         """Loads the YAML character sheet with aggressive path discovery."""
         search_paths: List[Path] = [
             self.sheet_path,
-            Path("Loki-AI/loki_sheet.yaml"),
-            Path("../Loki-AI/loki_sheet.yaml"),
+            Path("Loki_ai/loki_sheet.yaml"),
+            Path("../Loki_ai/loki_sheet.yaml"),
             Path("loki_sheet.yaml"),
             # Search from script location
             Path(__file__).resolve().parent.parent / "loki_sheet.yaml",
-            Path(__file__).resolve().parent.parent.parent / "Loki-AI" / "loki_sheet.yaml",
+            Path(__file__).resolve().parent.parent.parent / "Loki_ai" / "loki_sheet.yaml",
         ]
 
         # Add even more candidate folders by looking for any folder named *loki*
@@ -166,7 +166,7 @@ class PersonaManager:
         # 2. Fallback to old nested structure (Modified for Loki defaults)
         char = self.persona_data.get('character', {})
         name = char.get('name', 'Loki')
-        role = char.get('role', 'Synthetic Girl')
+        role = char.get('role', 'Tiny Hoodie Tyrant')
 
         prompt = temporal_context
         prompt += f"### IDENTITY\n"
