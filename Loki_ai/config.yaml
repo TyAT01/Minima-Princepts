@@ -1,0 +1,28 @@
+# Loki-AI Configuration
+
+llm:
+  api_type: "ollama"  # 'ollama' or 'openai'
+  base_url: "http://localhost:11434/api"
+  model: "llama3.1:8b-instruct-q4_K_M"
+  temperature: 0.9
+  top_p: 0.92
+  repeat_penalty: 1.08
+  max_tokens: 512
+
+stt:
+  model_size: "base"
+  device: null  # 'cuda' or 'cpu', null for auto-detect
+  compute_type: "float16"
+
+memory:
+  db_path: "./loki_memory"
+  collection_name: "loki_ai_memories"
+  max_short_term: 15
+
+ui:
+  title: "😈 Loki: The Tiny Hoodie Tyrant"
+  theme: "soft"
+  share: false
+
+persona:
+  sheet_path: "loki_sheet.yaml"
