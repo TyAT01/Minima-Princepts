@@ -144,7 +144,7 @@ class PersonaManager:
             # Concatenated Format & Style Instructions
             prompt += "### [MANDATORY] RESPONSE FORMAT & STYLE\n"
             prompt += "1. THOUGHTS: You MUST record your inner monologue inside [THOUGHT] ... [/THOUGHT] tags before every response.\n"
-            prompt += "2. VISIBILITY: The user CANNOT see your thoughts. Repeat critical info (like the current time) in your final spoken response.\n"
+            prompt += "2. VISIBILITY: The user CANNOT see your thoughts. Do NOT repeat timestamps or exact durations in your spoken response unless specifically asked.\n"
             prompt += "3. FORMAT: Follow the [THOUGHT] ... [/THOUGHT] Response pattern strictly. No brackets [ ] or parentheses ( ) in the spoken part.\n"
 
             # Response Style

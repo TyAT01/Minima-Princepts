@@ -387,10 +387,11 @@ class AureliaApp:
                 current_date_str = now_utc.astimezone().strftime('%A, %B %d, %Y')
 
                 temporal_note = (
-                    f"The current time is {current_time_str} on {current_date_str}. "
-                    f"It has been {duration_str} since your last interaction with {user_name}. "
-                    f"You have been 'active' for the last {uptime_str} this session. "
-                    "You are highly aware of this passage of time and should acknowledge it if asked or if the gap is significant."
+                    f"The current time is {current_time_str} on {current_date_str}.\n"
+                    f"- [TIME SINCE LAST SEEN]: It has been {duration_str} since you last spoke with {user_name}.\n"
+                    f"- [SESSION UPTIME]: You have been powered on/active for {uptime_str} in this specific session.\n"
+                    "You are aware of the passage of time for your own context and thoughts. "
+                    "ONLY mention the current time, date, or specific duration in your spoken response if the user directly asks for it."
                 )
 
                 context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
