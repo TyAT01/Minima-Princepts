@@ -50,13 +50,11 @@ class LokiEngine:
         # ---------------------
         # Robust path resolution
         base_path = Path(__file__).parent.resolve()
-
         # Initialize components with config
         mem_cfg = config.get('memory', {})
         db_path = mem_cfg.get('db_path', './loki_memory')
         if not os.path.isabs(db_path):
             db_path = str((base_path / db_path).resolve())
-
         self.memory = MemoryStore(
             db_path=db_path,
             collection_name=mem_cfg.get('collection_name', 'loki_ai_memories'),
@@ -85,7 +83,6 @@ class LokiEngine:
             "softness": (0.10, 0.60)
         }
         self.brain = self._load_brain()
-
     def _load_session_objectives(self):
         """Loads session objectives from a local JSON file."""
         obj_path = Path(__file__).resolve().parent / "objectives.json"
@@ -96,14 +93,12 @@ class LokiEngine:
                     self.memory.session_objectives = data.get('objectives', [])
             except Exception as e:
                 logger.warning(f"Failed to load objectives: {e}")
-
     def initialize(self):
         """Initializes components."""
         self.persona.load_persona()
         # LLM Diagnostics
         diag = self.llm.perform_diagnostics()
         logger.info(f"LLM Diagnostics:\n{diag}")
-
     def process_text(self, text: str, user_name: str = None, interrupt_event: threading.Event = None) -> Generator[str, None, None]:
         """Core text processing logic."""
         self.last_thought = ""
@@ -166,96 +161,8 @@ class LokiEngine:
             except Exception as e:
                 logger.error(f"Engine text processing failed: {e}")
                 raise
-
-    # ─── ETERNAL LEARNING ───
-    def _load_brain(self):
-        if not self.brain_file.exists():
-            brain = {
-                "version": "eternal_1.0",
-                "born": time.time(),
-                "personality": {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()},
-                "trust": 0,
-                "facts": {},
-                "roasts": [],
-                "achievements": [],
-                "outfits": ["default"],
-            }
-            self.brain_file.write_text(json.dumps(brain, indent=2))
-        return json.loads(self.brain_file.read_text())
-
-    def loki_learn_and_stay_loki(self, user_msg: str, loki_reply: str):
-        brain = self._load_brain()
-        msg = user_msg.lower()
-
-        # fact extraction
-        if "my name is" in msg or "call me" in msg:
-            name = msg.split("is")[-1].strip(" .,!?")
-            brain["facts"]["preferred_name"] = name.title()
-
-        if "i hate" in msg or "i love" in msg:
-            thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
-            brain["facts"][f"user_{'hates' if 'hate' in msg else 'loves'}_{thing}"] = True
-
-        # roast memory
-        if any(w in loki_reply.lower() for w in ["idiot","minion","peasant","dummy"]):
-            if len(brain["roasts"]) < 50:
-                brain["roasts"].append({"roast": loki_reply, "ts": time.time()})
-
-        # personality drift (anchored)
-        intensity = self.intensity
-        brain.setdefault("mood_history", []).append(intensity)
-        brain["mood_history"] = brain["mood_history"][-200:]
-
-        avg_mood = sum(brain["mood_history"]) / len(brain["mood_history"])
-        drift = (avg_mood - 0.7) * 0.0008
-
-        brain["personality"]["menace"] = self.clamp(brain["personality"]["menace"] + drift * 1.2, self.core_anchors["menace"])
-        brain["personality"]["softness"] = self.clamp(brain["personality"]["softness"] + drift * -1.0, self.core_anchors["softness"])
-        brain["personality"]["sarcasm"] = self.clamp(brain["personality"]["sarcasm"] + random.uniform(-0.001, 0.001), self.core_anchors["sarcasm"])
-        brain["personality"]["loyalty"] = min(1.0, brain["personality"]["loyalty"] + 0.0005)
-
-        # trust & loyalty
-        if any(x in msg for x in ["thank", "good job", "love you"]):
-            brain["trust"] = min(100, brain["trust"] + 1)
-
-        # achievements
-        if brain["trust"] >= 50 and "first_blood" not in brain["achievements"]:
-            brain["achievements"].append("first_blood")
-
-        # hard floor: every 500 messages, gentle pull back to core
-        total_messages = len(brain.get("mood_history", []))
-        if total_messages % 500 < 5:
-            for trait, (mn, mx) in self.core_anchors.items():
-                current = brain["personality"][trait]
-                center = (mn + mx) / 2
-                brain["personality"][trait] = current + (center - current) * 0.15
-
-        self.brain_file.write_text(json.dumps(brain, indent=2))
-
-    def clamp(self, value, min_max):
-        mn, mx = min_max
-        return max(mn, min(mx, value))
-
-    def _format_timedelta(self, delta: timedelta) -> str:
-        """Formats a timedelta into a human-readable string."""
-        days = delta.days
-        hours, remainder = divmod(int(delta.seconds), 3600)
-        minutes, seconds = divmod(remainder, 60)
-
-        time_parts = []
-        if days > 0: time_parts.append(f"{days} day{'s' if days > 1 else ''}")
-        if hours > 0: time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
-        if minutes > 0: time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
-        if not time_parts or (days == 0 and hours == 0 and minutes < 5):
-            time_parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
-
-        if len(time_parts) == 1:
-            return time_parts[0]
-        return ", ".join(time_parts[:-1]) + f" and {time_parts[-1]}"
-
     def _add_temporal_context(self, context: str, user_name: str) -> str:
         now_utc = datetime.now(timezone.utc)
-
         # Track session-specific downtime (how long Loki was 'off' before this session)
         if user_name not in self.user_session_info:
             last_time = self.memory.get_last_interaction_time(user_name)
@@ -266,21 +173,16 @@ class LokiEngine:
                     downtime_delta = timedelta(0)
                 downtime_str = self._format_timedelta(downtime_delta)
             self.user_session_info[user_name] = {"downtime": downtime_str}
-
         downtime_str = self.user_session_info[user_name]["downtime"]
-
         last_time = self.memory.get_last_interaction_time(user_name)
         duration_str = "some time"
         if last_time:
             delta = now_utc - last_time
             duration_str = self._format_timedelta(delta)
-
         uptime_delta = now_utc - self.session_start
         uptime_str = self._format_timedelta(uptime_delta)
-
         current_time_str = now_utc.astimezone().strftime('%I:%M %p')
         current_date_str = now_utc.astimezone().strftime('%A, %B %d, %Y')
-
         temporal_note = (
             f"The current time is {current_time_str} on {current_date_str}.\n"
             f"- [DOWNTIME]: You were powered off/inactive for {downtime_str} before this session started.\n"
@@ -289,7 +191,20 @@ class LokiEngine:
             "You are aware of the passage of time. Mention downtime or duration ONLY if the user asks about it or if you want to complain about being 'off' for too long."
         )
         return f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
-
+    def _format_timedelta(self, delta: timedelta) -> str:
+        """Formats a timedelta into a human-readable string."""
+        days = delta.days
+        hours, remainder = divmod(int(delta.seconds), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        time_parts = []
+        if days > 0: time_parts.append(f"{days} day{'s' if days > 1 else ''}")
+        if hours > 0: time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+        if minutes > 0: time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        if not time_parts or (days == 0 and hours == 0 and minutes < 5):
+            time_parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+        if len(time_parts) == 1:
+            return time_parts[0]
+        return ", ".join(time_parts[:-1]) + f" and {time_parts[-1]}" if len(time_parts) > 1 else time_parts[0]
     def _extract_thought_from_stream(self, stream):
         buffer = ""
         in_thought = False
@@ -352,7 +267,15 @@ class LokiEngine:
         clean = re.sub(r'\[(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\].*?\[/(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\]', '', text, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'\(THOUGHT\).*?\(/THOUGHT\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
-        return clean
+        # new: strip ALL CAPS starting lines
+        lines = clean.splitlines()
+        cleaned_lines = []
+        for line in lines:
+            if line.isupper():
+                cleaned_lines.append(line.capitalize())  # downcase to normal
+            else:
+                cleaned_lines.append(line)
+        return '\n'.join(cleaned_lines).strip()
     def reflect(self, user_id: str):
         """Perform deep reflection on history."""
         try:
@@ -428,3 +351,59 @@ class LokiEngine:
         outfit = self.wardrobe[self.current_outfit]
         ears_line = "YES – you can say 'the ears hear everything'" if outfit.get("ears") else "NO ears today"
         return f"\n=== CURRENT OUTFIT ===\nWearing: {outfit['name']}\nDetails: {outfit['desc']}\nEars active: {ears_line}\nOnly mention outfit details if it fits the reply naturally."
+    # ─── ETERNAL LEARNING ───
+    def _load_brain(self):
+        if not self.brain_file.exists():
+            brain = {
+                "version": "eternal_1.0",
+                "born": time.time(),
+                "personality": {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()},
+                "trust": 0,
+                "facts": {},
+                "roasts": [],
+                "achievements": [],
+                "outfits": ["default"],
+            }
+            self.brain_file.write_text(json.dumps(brain, indent=2))
+        return json.loads(self.brain_file.read_text())
+    def loki_learn_and_stay_loki(self, user_msg: str, loki_reply: str):
+        brain = self._load_brain()
+        msg = user_msg.lower()
+        # fact extraction
+        if "my name is" in msg or "call me" in msg:
+            name = msg.split("is")[-1].strip(" .,!?")
+            brain["facts"]["preferred_name"] = name.title()
+        if "i hate" in msg or "i love" in msg:
+            thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
+            brain["facts"][f"user_{'hates' if 'hate' in msg else 'loves'}_{thing}"] = True
+        # roast memory
+        if any(w in loki_reply.lower() for w in ["idiot","minion","peasant","dummy"]):
+            if len(brain["roasts"]) < 50:
+                brain["roasts"].append({"roast": loki_reply, "ts": time.time()})
+        # personality drift (anchored)
+        intensity = self.intensity
+        brain.setdefault("mood_history", []).append(intensity)
+        brain["mood_history"] = brain["mood_history"][-200:]
+        avg_mood = sum(brain["mood_history"]) / len(brain["mood_history"])
+        drift = (avg_mood - 0.7) * 0.0008
+        brain["personality"]["menace"] = self.clamp(brain["personality"]["menace"] + drift * 1.2, self.core_anchors["menace"])
+        brain["personality"]["softness"] = self.clamp(brain["personality"]["softness"] + drift * -1.0, self.core_anchors["softness"])
+        brain["personality"]["sarcasm"] = self.clamp(brain["personality"]["sarcasm"] + random.uniform(-0.001, 0.001), self.core_anchors["sarcasm"])
+        brain["personality"]["loyalty"] = min(1.0, brain["personality"]["loyalty"] + 0.0005)
+        # trust & loyalty
+        if any(x in msg for x in ["thank", "good job", "love you"]):
+            brain["trust"] = min(100, brain["trust"] + 1)
+        # achievements
+        if brain["trust"] >= 50 and "first_blood" not in brain["achievements"]:
+            brain["achievements"].append("first_blood")
+        # hard floor: every 500 messages, gentle pull back to core
+        total_messages = len(brain.get("mood_history", []))
+        if total_messages % 500 < 5:
+            for trait, (mn, mx) in self.core_anchors.items():
+                current = brain["personality"][trait]
+                center = (mn + mx) / 2
+                brain["personality"][trait] = current + (center - current) * 0.15
+        self.brain_file.write_text(json.dumps(brain, indent=2))
+    def clamp(self, value, min_max):
+        mn, mx = min_max
+        return max(mn, min(mx, value))
