@@ -76,10 +76,11 @@ class MemoryStore:
         now = datetime.now(timezone.utc)
         self._last_seen[user_id] = now # Update cache
         timestamp_str = now.isoformat()
+        timestamp_human = now.astimezone().strftime('%Y-%m-%d %I:%M %p')
 
         # 1. Add to Vector DB (Long-term)
         memory_id = f"mem_{now.timestamp()}"
-        document = f"User ({user_id}): {user_text}\nLoki: {bot_text}"
+        document = f"[{timestamp_human}] User ({user_id}): {user_text}\nLoki: {bot_text}"
 
         self._collection.add(
             ids=[memory_id],
@@ -105,7 +106,7 @@ class MemoryStore:
         )
 
         # 2. Add to Short-term Buffer
-        self.short_term_buffer.append({"role": "user", "content": user_text})
+        self.short_term_buffer.append({"role": "user", "content": f"[{timestamp_human}] {user_text}"})
         self.short_term_buffer.append({"role": "assistant", "content": bot_text})
 
         # Keep buffer within limits (pairs of user/assistant)
