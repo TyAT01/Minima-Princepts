@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, List, Dict, Optional, Generator
 
 # Add the current directory to sys.path to ensure local modules are found
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).parent))
 
 from llm.client import LlamaClient
 from memory.store import MemoryStore

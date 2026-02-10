@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 # Add the current directory to sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).parent))
 from pydantic import BaseModel
 import uvicorn
 from loki_engine import LokiEngine
