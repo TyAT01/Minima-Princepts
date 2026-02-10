@@ -140,7 +140,12 @@ class LokiApp:
         last_seen = self.engine.memory.get_last_interaction_time(user_name)
 
         if last_seen:
-             # Identity verification heuristic
+             # Check how long it's been
+             delta = datetime.now(timezone.utc) - last_seen
+             if delta.total_seconds() < 7200: # 2 hours
+                  return list(self.process_text(f"{user_name} is back after a short break. Welcome them back appropriately.", user_name))
+
+             # Identity verification heuristic for long absences
              verify_prompt = f"{user_name} joined. I should verify if it's the person I know."
              return list(self.process_text(verify_prompt, user_name))
         else:

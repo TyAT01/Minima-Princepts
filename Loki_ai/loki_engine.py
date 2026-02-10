@@ -48,10 +48,17 @@ class LokiEngine:
         self.current_outfit = "default"
         self.intensity = 0.5
         # ---------------------
+        # Robust path resolution
+        base_path = Path(__file__).parent.resolve()
+
         # Initialize components with config
         mem_cfg = config.get('memory', {})
+        db_path = mem_cfg.get('db_path', './loki_memory')
+        if not os.path.isabs(db_path):
+            db_path = str((base_path / db_path).resolve())
+
         self.memory = MemoryStore(
-            db_path=mem_cfg.get('db_path', './loki_memory'),
+            db_path=db_path,
             collection_name=mem_cfg.get('collection_name', 'loki_ai_memories'),
             max_short_term=mem_cfg.get('max_short_term', 15)
         )
@@ -70,7 +77,7 @@ class LokiEngine:
         self.last_thought = ""
         self._load_session_objectives()
         # Eternal Learning Brain
-        self.brain_file = Path(__file__).parent / "loki_brain.json"
+        self.brain_file = base_path / "loki_brain.json"
         self.core_anchors = {
             "menace": (0.55, 0.95),
             "sarcasm": (0.75, 1.00),
@@ -81,7 +88,7 @@ class LokiEngine:
 
     def _load_session_objectives(self):
         """Loads session objectives from a local JSON file."""
-        obj_path = Path(__file__).parent / "objectives.json"
+        obj_path = Path(__file__).resolve().parent / "objectives.json"
         if obj_path.exists():
             try:
                 with open(obj_path, 'r', encoding='utf-8') as f:
