@@ -143,16 +143,19 @@ class LokiApp:
              # Check how long it's been
              delta = datetime.now(timezone.utc) - last_seen
              if delta.total_seconds() < 7200: # 2 hours (Short absence)
-                  prompt = f"[LOG: {user_name} has returned after a short break. Greet them in your typical sassy/sarcastic Loki style.]"
-                  return list(self.process_text(prompt, user_name))
+                  prompt = f"(LOG: {user_name} has returned after a short break. Loki, greet them now in your typical sassy/sarcastic style.)"
+                  resp = list(self.process_text(prompt, user_name))
+                  return resp if resp else ["Oh, look who decided to crawl back. Welcome back, idiot."]
 
              # Identity verification heuristic for long absences
-             prompt = f"[LOG: {user_name} has joined the room. You haven't seen them in a while. Greet them suspiciously as Loki and verify it's really them.]"
-             return list(self.process_text(prompt, user_name))
+             prompt = f"(LOG: {user_name} has joined the room. You haven't seen them in a while. Loki, greet them suspiciously and verify it's really them.)"
+             resp = list(self.process_text(prompt, user_name))
+             return resp if resp else ["Wait... who is this? identify yourself, minion!"]
         else:
              # First time greeting
-             prompt = f"[LOG: A new person named {user_name} has arrived. Greet them with your typical 'tiny tyrant' energy.]"
-             return list(self.process_text(prompt, user_name))
+             prompt = f"(LOG: A new person named {user_name} has arrived. Loki, greet them now with your typical 'tiny tyrant' energy.)"
+             resp = list(self.process_text(prompt, user_name))
+             return resp if resp else ["New person? Identify yourself before I have my minions wreck you."]
 
     def handle_user_leave(self, user_name: str):
         """Handles a user leaving the chat room."""

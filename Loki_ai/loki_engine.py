@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class LokiEngine:
     """Core logic engine for Loki AI, shared between UI and Server."""
     # Unified keywords for various thought/meta tags to ensure consistency across filtering methods
-    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE"
+    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG"
 
     def __init__(self, config: dict):
         self.config = config
@@ -153,6 +153,7 @@ class LokiEngine:
                 full_response = " ".join(response_fragments)
                 if not (interrupt_event and interrupt_event.is_set()):
                     if self.last_thought:
+                        logger.info(f"Loki's Internal Thought: {self.last_thought.strip()}")
                         self.memory.store_insight(f"Thought: {self.last_thought.strip()}", source="inner_monologue")
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
@@ -283,11 +284,16 @@ class LokiEngine:
                         break
         if buffer:
             if in_thought:
-                # If stream ends while in thought, try one last time to find a speech transition
-                transition_match = re.search(r'\n\s*([A-Z])', buffer)
+                # If stream ends while in thought, try to find where speech might have started
+                # Heuristic: a capitalized letter following punctuation and space, or just a newline
+                transition_match = re.search(r'([\.\!\?]\s+|\n\s*)([A-Z])', buffer)
                 if transition_match:
-                    self.last_thought += buffer[:transition_match.start()]
-                    yield buffer[transition_match.start():]
+                    self.last_thought += buffer[:transition_match.start(2)]
+                    yield buffer[transition_match.start(2):]
+                elif len(buffer.strip()) > 30 and not any(kw in buffer.upper() for kw in self.THOUGHT_KEYWORDS.split('|')):
+                    # If it's long and doesn't look like meta-tags, it's likely speech with a forgotten closing tag
+                    self.last_thought += " [Unclosed]"
+                    yield buffer
                 else:
                     self.last_thought += buffer
             else:
