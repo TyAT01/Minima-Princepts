@@ -70,7 +70,7 @@ class LokiEngine:
         self.last_thought = ""
         self._load_session_objectives()
         # Eternal Learning Brain
-        self.brain_file = Path("./loki_brain.json")
+        self.brain_file = Path(__file__).parent / "loki_brain.json"
         self.core_anchors = {
             "menace": (0.55, 0.95),
             "sarcasm": (0.75, 1.00),
