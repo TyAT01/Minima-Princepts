@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 # Add the current directory to sys.path
-sys.path.append(str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # [FIX] ctranslate2 ROCm path workaround for Windows
 if sys.platform == "win32":
@@ -38,6 +38,9 @@ if sys.platform == "win32":
                 except:
                     pass
 
+from llm.client import LlamaClient
+from memory.store import MemoryStore
+from persona.manager import PersonaManager
 from stt.whisper import STTSystem, VoiceMonitor
 from ui.web_gui import LokiGUI
 from utils.error_handler import ErrorHandler

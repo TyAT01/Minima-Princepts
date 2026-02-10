@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import re
 import yaml
 import threading
@@ -8,6 +9,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Generator
+
+# Add the current directory to sys.path to ensure local modules are found
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from llm.client import LlamaClient
 from memory.store import MemoryStore
