@@ -225,8 +225,23 @@ class LokiEngine:
                     if match:
                         pre_tag = buffer[:match.start()]
                         if pre_tag: yield pre_tag
+                        tag_content = match.group(0)
                         buffer = buffer[match.end():].lstrip()
-                        in_thought = True
+
+                        # Check if it's a block-start (like [THOUGHT]) or a self-contained tag (like [SYSTEM: ...])
+                        # A block-start is typically just the keyword itself inside delimiters.
+                        is_block_start = False
+                        inner_text = re.sub(r'[\[\]\(\)\<\>\*]', '', tag_content).strip()
+
+                        if any(re.fullmatch(k, inner_text, re.IGNORECASE) for k in self.THOUGHT_KEYWORDS.split('|')):
+                            is_block_start = True
+
+                        if is_block_start:
+                            in_thought = True
+                        else:
+                            # Self-contained tags are recorded as thoughts immediately
+                            self.last_thought += tag_content + " "
+
                         continue
                     else:
                         if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
