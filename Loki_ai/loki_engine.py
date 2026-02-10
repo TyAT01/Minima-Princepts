@@ -209,8 +209,8 @@ class LokiEngine:
         buffer = ""
         in_thought = False
         # Extended patterns to catch variants without brackets and common prefixes
-        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)|(?<!\w)THOUGHTS?:|\[INNER MONOLOGUE\]|\[THINKING\]', re.IGNORECASE)
-        end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)|\[/INNER MONOLOGUE\]|\[/THINKING\]', re.IGNORECASE)
+        start_pattern = re.compile(r'\[(?:THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM)[:\s]*\]|\((?:THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM)[:\s]*\)|(?<!\w)THOUGHTS?:|<THOUGHTS?>|\*(?:Loki\s+)?(?:THOUGHTS?|THINKING|SCHEMING|PLOTTING|THINKS?).*?\*', re.IGNORECASE)
+        end_pattern = re.compile(r'\[/(?:THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM)\]|\(/(?:THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM)\)|</THOUGHTS?>|\*(?:/THOUGHTS?|END THINKING|END SCHEMING)\*', re.IGNORECASE)
 
         for chunk in stream:
             buffer += chunk
@@ -282,15 +282,22 @@ class LokiEngine:
                         return
                 yield buffer
     def _clean_response(self, text: str) -> str:
-        # 1. Remove explicit bracketed/parenthesized thought blocks
-        clean = re.sub(r'\[(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\].*?\[/(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\]', '', text, flags=re.IGNORECASE | re.DOTALL)
-        clean = re.sub(r'\(THOUGHT\).*?\(/THOUGHT\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
+        # 1. Remove explicit bracketed/parenthesized/tagged thought blocks
+        # Broad keywords including plurals and colons
+        keywords = "THOUGHTS?|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM|SCHEEM|SCHEME|PLOT"
+        clean = re.sub(rf'\[(?:{keywords})[:\s]*\].*?\[/(?:{keywords})\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        clean = re.sub(rf'\((?:{keywords})[:\s]*\).*?\(/(?:{keywords})\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
+        clean = re.sub(r'<THOUGHTS?>.*?</THOUGHTS?>', '', clean, flags=re.IGNORECASE | re.DOTALL)
 
-        # 2. Remove loose THOUGHT: prefixes that might have leaked (targeted at start of message)
-        # Require brackets or a colon to avoid matching normal sentences starting with "Thought"
-        clean = re.sub(r'(?i)^(?:\[THOUGHTS?\]|\(THOUGHTS?\)|THOUGHTS?:)\s*.*?(?:\.|\!|\?|\n|$)', '', clean, count=1).strip()
+        # 2. Remove loose THOUGHT: prefixes and their content that might have leaked
+        # Targeted at catching things like "Thought: I am a bot. Hello!" -> "Hello!"
+        clean = re.sub(rf'(?i)^(?:\[(?:{keywords})[:\s]*\]|\((?:{keywords})[:\s]*\)|THOUGHTS?:)\s*.*?(?:\.|\!|\?|\n|$)', '', clean, count=1).strip()
 
-        # 3. Remove any remaining bracketed or parenthesized meta-text
+        # 3. Targeted asterisk thought removal (e.g. *thinks to self* I am a bot.)
+        # Only removes if it specifically contains thinking/scheming keywords to avoid removing actions like *winks*
+        clean = re.sub(r'(?i)\*(?:Loki\s+)?(?:thinks?|thinking|schem\w+|plott\w+).*?\*', '', clean).strip()
+
+        # 4. Remove any remaining bracketed or parenthesized meta-text (tags only, content preserved if not caught above)
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
 
         # new: strip ALL CAPS starting lines
