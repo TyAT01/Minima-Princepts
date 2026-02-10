@@ -142,14 +142,17 @@ class LokiApp:
         if last_seen:
              # Check how long it's been
              delta = datetime.now(timezone.utc) - last_seen
-             if delta.total_seconds() < 7200: # 2 hours
-                  return list(self.process_text(f"{user_name} is back after a short break. Welcome them back appropriately.", user_name))
+             if delta.total_seconds() < 7200: # 2 hours (Short absence)
+                  prompt = f"[SYSTEM: {user_name} has returned after a short break. Greet them in your typical sassy/sarcastic Loki style.]"
+                  return list(self.process_text(prompt, user_name))
 
              # Identity verification heuristic for long absences
-             verify_prompt = f"{user_name} joined. I should verify if it's the person I know."
-             return list(self.process_text(verify_prompt, user_name))
+             prompt = f"[SYSTEM: {user_name} has joined the room. You haven't seen them in a while. Greet them suspiciously as Loki and verify it's really them.]"
+             return list(self.process_text(prompt, user_name))
         else:
-             return list(self.process_text(f"Hello! I see {user_name} has arrived.", user_name))
+             # First time greeting
+             prompt = f"[SYSTEM: A new person named {user_name} has arrived. Greet them with your typical 'tiny tyrant' energy.]"
+             return list(self.process_text(prompt, user_name))
 
     def handle_user_leave(self, user_name: str):
         """Handles a user leaving the chat room."""
