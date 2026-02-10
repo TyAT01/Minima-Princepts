@@ -286,8 +286,9 @@ class LokiEngine:
         clean = re.sub(r'\[(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\].*?\[/(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\]', '', text, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'\(THOUGHT\).*?\(/THOUGHT\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
 
-        # 2. Remove loose THOUGHT: prefixes that might have leaked
-        clean = re.sub(r'(?i)(?:\[|\()?THOUGHTS?(?:\]|\))?:?\s*.*?(?:\.|\!|\?|\n|$)', '', clean, count=1).strip()
+        # 2. Remove loose THOUGHT: prefixes that might have leaked (targeted at start of message)
+        # Require brackets or a colon to avoid matching normal sentences starting with "Thought"
+        clean = re.sub(r'(?i)^(?:\[THOUGHTS?\]|\(THOUGHTS?\)|THOUGHTS?:)\s*.*?(?:\.|\!|\?|\n|$)', '', clean, count=1).strip()
 
         # 3. Remove any remaining bracketed or parenthesized meta-text
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
@@ -399,7 +400,7 @@ class LokiEngine:
             # Extract name more carefully
             parts = msg.split("is") if "is" in msg else msg.split("me")
             name = parts[-1].strip(" .,!?")
-            if 1 < len(name) < 20: # Sanity check on name length (allow 2+ chars like 'Ty')
+            if len(name) >= 2 and len(name) < 20: # Sanity check on name length (allow 2+ chars like 'Ty')
                 brain["facts"]["preferred_name"] = name.title()
         if "i hate" in msg or "i love" in msg:
             thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
