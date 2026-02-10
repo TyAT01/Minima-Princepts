@@ -309,7 +309,8 @@ class LokiEngine:
 
         # 2. Remove loose THOUGHT: prefixes and their content that might have leaked
         # Targeted at catching things like "Thought: I am a bot. Hello!" -> "Hello!"
-        clean = re.sub(rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*.*?(?:\.|\!|\?|\n|$)', '', clean, count=1).strip()
+        # [REFINED] Only remove the prefix/tag itself to avoid swallowing the following sentence
+        clean = re.sub(rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*', '', clean, count=1).strip()
 
         # 3. Targeted asterisk thought removal (e.g. *thinks to self* I am a bot.)
         # Only removes if it specifically contains thinking/scheming keywords to avoid removing actions like *winks*
