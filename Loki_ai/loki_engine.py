@@ -125,8 +125,8 @@ class LokiEngine:
     def _imagine_reply(self, query: str) -> str:
         """HyDE: Generates a hypothetical answer to improve RAG retrieval."""
         try:
-            # We use a very short prompt to keep it fast
-            hypothetical_prompt = "Generate a short, hypothetical answer to the following user question. This will be used for vector search, so focus on key terms that would appear in a past conversation."
+            # Optimized for speed and semantic overlap
+            hypothetical_prompt = "Provide a brief, direct answer to this query as it might have appeared in a previous chat log. Use likely keywords."
             # We don't need history or full context for this
             hypothetical_answer = self.llm.generate_response(
                 "You are Loki's Memory Assistant.",
