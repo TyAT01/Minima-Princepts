@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 import re
 import numpy as np
+import asyncio
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, List, Dict, Optional
@@ -142,6 +143,10 @@ class MemoryStore:
             self.short_term_buffer.pop(0)
             self.short_term_buffer.pop(0)
 
+    async def add_interaction_async(self, user_text: str, bot_text: str, user_id: str = "default_user"):
+        """Adds a new interaction asynchronously."""
+        return await asyncio.to_thread(self.add_interaction, user_text, bot_text, user_id)
+
     def store_insight(self, insight: str, user_id: str, source: str = "reflection"):
         """Stores a lesson learned or a significant fact for long-term recall."""
         now = datetime.now(timezone.utc)
@@ -163,6 +168,10 @@ class MemoryStore:
         self._search_cache.clear() # Invalidate cache
         logger.info(f"Stored insight for {user_id}: {insight_id}")
 
+    async def store_insight_async(self, insight: str, user_id: str, source: str = "reflection"):
+        """Stores an insight asynchronously."""
+        return await asyncio.to_thread(self.store_insight, insight, user_id, source)
+
     def store_episodic_memory(self, event_description: str, user_id: str, importance: int = 5):
         """Stores a notable event or personal experience."""
         now = datetime.now(timezone.utc)
@@ -181,6 +190,10 @@ class MemoryStore:
         )
         self._search_cache.clear() # Invalidate cache
         logger.info(f"Stored episodic memory for {user_id}: {event_id}")
+
+    async def store_episodic_memory_async(self, event_description: str, user_id: str, importance: int = 5):
+        """Stores an episodic memory asynchronously."""
+        return await asyncio.to_thread(self.store_episodic_memory, event_description, user_id, importance)
 
     def store_summary(self, user_id: str, summary: str, is_global: bool = False):
         """Stores a concise summary of a conversation segment."""
@@ -307,6 +320,22 @@ class MemoryStore:
         # 4. Update Cache
         self._search_cache[cache_key] = final_results
         return final_results
+
+    async def search_relevant_memories_async(
+        self,
+        query: str,
+        n_results: int = 8,
+        filter_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+        use_mmr: bool = True,
+        mmr_lambda: float = 0.5,
+        hypothetical_answer: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Searches memory asynchronously."""
+        return await asyncio.to_thread(
+            self.search_relevant_memories,
+            query, n_results, filter_type, user_id, use_mmr, mmr_lambda, hypothetical_answer
+        )
 
     def _keyword_search(self, query: str, n_results: int = 5, where: Optional[Dict] = None) -> List[Dict[str, Any]]:
         """Performs a simple keyword-based search using Chroma's where_document filter."""
@@ -511,6 +540,10 @@ class MemoryStore:
         add_to_context("RECENT RELEVANT INTERACTIONS", interaction_texts[:5], prefix="", joiner="\n---\n")
 
         return "".join(context_blocks).strip() if context_blocks else "No specific past context found."
+
+    async def get_full_context_async(self, query: str, user_id: Optional[str] = None, max_chars: int = 3000, hypothetical_answer: Optional[str] = None) -> str:
+        """Retrieves full context asynchronously."""
+        return await asyncio.to_thread(self.get_full_context, query, user_id, max_chars, hypothetical_answer)
 
     def get_history(self) -> List[Dict[str, str]]:
         """Returns the current short-term conversation history."""
