@@ -38,6 +38,9 @@ class MemoryStore:
         # Optimization: In-memory LRU cache for search results
         self._search_cache = TTLCache(maxsize=100, ttl=300) # 5 min TTL
 
+        # Optimization: Cache for message embeddings to avoid re-embedding
+        self._embedding_cache = TTLCache(maxsize=200, ttl=600) # 10 min TTL
+
         # Entity-Centric Memory Graph
         self.graph_path = self.db_path / "entity_graph.json"
         self._entity_graph = self._load_graph()
@@ -79,8 +82,13 @@ class MemoryStore:
         return self._collection.count()
 
     def get_embedding(self, text: str) -> List[float]:
-        """Generates an embedding for the given text."""
-        return self._embedding_function([text])[0]
+        """Generates an embedding for the given text, utilizing a cache."""
+        if text in self._embedding_cache:
+            return self._embedding_cache[text]
+
+        emb = self._embedding_function([text])[0]
+        self._embedding_cache[text] = emb
+        return emb
 
     def add_interaction(self, user_text: str, bot_text: str, user_id: str = "default_user"):
         """Adds a new interaction to both short-term and long-term memory."""
