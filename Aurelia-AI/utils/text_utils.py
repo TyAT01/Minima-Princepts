@@ -60,8 +60,8 @@ def clean_yaml_block(text: str) -> str:
     start_idx = -1
     for i, line in enumerate(lines):
         stripped = line.strip()
-        # Inclusive regex for YAML keys: allows spaces, dashes, underscores
-        if re.match(r'^[ \w\d_-]+:\s*', stripped) or stripped.startswith('- '):
+        # Inclusive regex for YAML keys: allows spaces, dashes, underscores, and quotes
+        if re.match(r'^[ \w\d\-_"\']+:\s*', stripped) or stripped.startswith('- '):
             start_idx = i
             break
 
