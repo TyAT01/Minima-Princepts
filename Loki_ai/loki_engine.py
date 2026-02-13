@@ -7,6 +7,7 @@ import threading
 import random
 import time
 import json
+import numpy as np
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Generator
@@ -166,11 +167,15 @@ class LokiEngine:
                 temp = 0.75 + 0.25 * self.intensity
                 self.llm.temperature = temp
 
+                # Context Drift Detection
+                drift_score = self._detect_context_drift(processed_text)
+
                 # --- THE CONTEXT SANDWICH ---
 
                 # 1. Top Bun: System Instructions & Identity
                 system_prompt = self.persona.get_system_prompt(now=datetime.now())
-                loki_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]\n{self.outfit_block()}"
+                drift_note = f"\n[SYSTEM: Topic Drift Detected ({drift_score:.2f}). Adjusting focus.]" if drift_score > 0.6 else ""
+                loki_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]{drift_note}\n{self.outfit_block()}"
                 top_bun = system_prompt + loki_context
 
                 # 2. Meat: Retrieved Long-Term Memory (RAG)
@@ -418,6 +423,7 @@ class LokiEngine:
                     "  user_facts: { fact_name: fact_value, ... } # Specific persistent facts for profile.json\n"
                     "  events: [List of specific notable actions or events that occurred]\n"
                     "  insights: [List of abstract lessons learned about how to interact with this user]\n"
+                    "  relations: [ { source: \"Entity1\", target: \"Entity2\", relation: \"type\" }, ... ] # relationships between people/places/things\n"
                     "  summary: \"A single paragraph (3-5 sentences) summarizing the narrative flow and emotional tone of this segment.\"\n\n"
                     "Be extremely concise and accurate. Do not invent facts."
                 )
@@ -450,6 +456,10 @@ class LokiEngine:
                         self.memory.store_episodic_memory(event, user_id=user_id, importance=6)
                     for insight in data.get('insights', []):
                         self.memory.store_insight(insight, user_id=user_id, source="reflection")
+
+                    for rel in data.get('relations', []):
+                        if isinstance(rel, dict) and 'source' in rel and 'target' in rel:
+                            self.memory.add_entity_relation(rel['source'], rel['target'], rel.get('relation', 'connected'))
 
                     segment_summary = data.get('summary')
                     if segment_summary:
@@ -511,6 +521,10 @@ class LokiEngine:
 
             # 3. Final save of persistent profiles
             self._save_profiles()
+
+            # 4. Adaptive Pruning
+            self.memory.prune_old_memories()
+
             logger.info("Reflective Shutdown complete.")
         except Exception as e:
             logger.error(f"Shutdown failed: {e}")
@@ -547,6 +561,42 @@ class LokiEngine:
                 self.current_outfit = key
                 return f"*throws on the {data['name']}* fine. now wearing that. happy?"
         return "that outfit doesn’t exist yet, idiot. stick to the default for now."
+    def _detect_context_drift(self, query: str) -> float:
+        """
+        Detects if the current query significantly drifts from the recent conversation.
+        Returns a drift score (0.0 to 1.0, where 1.0 is high drift).
+        """
+        history = self.memory.get_history()
+        if not history or len(history) < 2:
+            return 0.0
+
+        try:
+            # 1. Get embedding of current query
+            query_emb = np.array(self.memory.get_embedding(query))
+
+            # 2. Get embeddings of last few interactions (roles: user/assistant)
+            # To keep it efficient, we only take the last 4 messages
+            # [REFINED] Strip timestamps for more accurate semantic drift detection
+            recent_texts = [re.sub(r'^\[.*?\]\s*', '', m["content"]) for m in history[-4:]]
+            recent_embs = [np.array(self.memory.get_embedding(t)) for t in recent_texts]
+
+            # 3. Calculate average recent embedding
+            avg_recent_emb = np.mean(recent_embs, axis=0)
+
+            # 4. Calculate cosine similarity
+            norm_q = np.linalg.norm(query_emb)
+            norm_r = np.linalg.norm(avg_recent_emb)
+            if norm_q == 0 or norm_r == 0: return 0.0
+
+            similarity = np.dot(query_emb, avg_recent_emb) / (norm_q * norm_r)
+            drift = 1.0 - max(0, similarity)
+
+            logger.info(f"Context Drift Score: {drift:.2f}")
+            return drift
+        except Exception as e:
+            logger.warning(f"Context drift detection failed: {e}")
+            return 0.0
+
     def get_smart_intensity(self, user_msg: str) -> float:
         history_list = self.memory.get_history()
         raw_history_text = " ".join([m["content"] for m in history_list])

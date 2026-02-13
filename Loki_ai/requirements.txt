@@ -9,6 +9,9 @@ torch
 gradio
 sounddevice
 numpy
+cachetools
+networkx
+pytest
 onnxruntime-gpu
 webrtcvad-wheels
 fastapi
