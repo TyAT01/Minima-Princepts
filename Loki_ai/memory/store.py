@@ -152,10 +152,10 @@ class MemoryStore:
         )
         logger.info(f"Stored episodic memory: {event_id}")
 
-    def store_summary(self, user_id: str, summary: str):
+    def store_summary(self, user_id: str, summary: str, is_global: bool = False):
         """Stores a concise summary of a conversation segment."""
         now = datetime.now(timezone.utc)
-        summary_id = f"summary_{now.timestamp()}"
+        summary_id = f"summary_{'global_' if is_global else ''}{now.timestamp()}"
 
         self._collection.add(
             ids=[summary_id],
@@ -164,7 +164,8 @@ class MemoryStore:
                 "user_id": user_id,
                 "summary": summary,
                 "timestamp": now.isoformat(),
-                "type": "summary"
+                "type": "summary",
+                "is_global": is_global
             }]
         )
         logger.info(f"Stored summary for {user_id}: {summary_id}")
@@ -214,50 +215,121 @@ class MemoryStore:
                     })
         return memories
 
-    def get_full_context(self, query: str, user_id: Optional[str] = None) -> str:
-        """Combines relevant long-term memories, insights, and user profile facts into a context string."""
-        # Use optimized query for RAG as requested
+    def get_full_context(self, query: str, user_id: Optional[str] = None, max_chars: int = 3200) -> str:
+        """
+        Commercial-grade context assembly using a tiered priority budget system.
+        Ensures the most critical memories are included first within the token limit.
+        """
+        # 1. Fetch broad range of candidates
         optimized_query = f"relevant past memories for: {query}"
+        raw_results = self._collection.query(
+            query_texts=[optimized_query],
+            n_results=25,
+            where={"user_id": user_id} if user_id else None
+        )
 
-        # Increase results for broader context
-        memories = self.search_relevant_memories(optimized_query, n_results=12, user_id=user_id)
+        memories = []
+        if raw_results and raw_results.get("metadatas") and raw_results["metadatas"][0]:
+            for i, metadata in enumerate(raw_results["metadatas"][0]):
+                if metadata:
+                    memories.append({
+                        "content": raw_results["documents"][0][i],
+                        "metadata": metadata,
+                        "relevance": 1.0 - (raw_results["distances"][0][i] if "distances" in raw_results else 0.5)
+                    })
 
-        context_parts = []
+        # 2. Categorize and Rank by Importance/Relevance
+        categories = {
+            "profile": [],
+            "episodic_high": [],
+            "episodic_normal": [],
+            "summary": [],
+            "insight": [],
+            "interaction": []
+        }
 
-        # Add Session Objectives if any
+        for m in memories:
+            m_type = m["metadata"].get("type")
+            importance = int(m["metadata"].get("importance", 5))
+
+            if m_type == "profile_fact":
+                categories["profile"].append(m)
+            elif m_type == "episodic":
+                if importance >= 7:
+                    categories["episodic_high"].append(m)
+                else:
+                    categories["episodic_normal"].append(m)
+            elif m_type == "summary":
+                categories["summary"].append(m)
+            elif m_type == "insight":
+                categories["insight"].append(m)
+            elif m_type == "interaction":
+                categories["interaction"].append(m)
+
+        # 3. Assemble with Budget (Priority Order)
+        context_blocks = []
+        current_chars = 0
+
+        # Helper to add blocks if budget permits
+        def add_to_context(title: str, items: List[str], prefix: str = "- ", joiner: str = "\n"):
+            nonlocal current_chars
+            if not items: return
+
+            header = f"### [{title}]\n"
+            block_content = joiner.join([f"{prefix}{item}" for item in items])
+            full_block = header + block_content + "\n\n"
+
+            if current_chars + len(full_block) <= max_chars:
+                context_blocks.append(full_block)
+                current_chars += len(full_block)
+            elif current_chars < max_chars:
+                # Partial add if possible (for interactions or lists)
+                remaining = max_chars - current_chars - len(header) - 10
+                if remaining > 100:
+                    truncated_content = block_content[:remaining] + "... [TRUNCATED]"
+                    context_blocks.append(header + truncated_content + "\n\n")
+                    current_chars = max_chars
+
+        # Priority 1: Session Objectives (Always try to include)
         if self.session_objectives:
-            context_parts.append("### [CURRENT SESSION OBJECTIVES]\n" + "\n".join([f"- {obj}" for obj in self.session_objectives]))
+            add_to_context("CURRENT SESSION OBJECTIVES", self.session_objectives)
 
-        interactions = [m["content"] for m in memories if m["metadata"].get("type") == "interaction"]
-        insights = [m["content"] for m in memories if m["metadata"].get("type") == "insight"]
-        profile_facts = [m["content"] for m in memories if m["metadata"].get("type") == "profile_fact"]
-        episodic = [m["content"] for m in memories if m["metadata"].get("type") == "episodic"]
-        summaries = [m["content"] for m in memories if m["metadata"].get("type") == "summary"]
-
+        # Priority 2: User Profile
+        profile_texts = list(set([m["content"] for m in categories["profile"]]))
         if user_id:
-            context_parts.append(f"### [USER PROFILE: {user_id}]\n" + (f"Recognized {user_id}. Relevant facts: " + ", ".join(profile_facts) if profile_facts else f"New user or no specific facts stored for {user_id}."))
-        elif profile_facts:
-            context_parts.append("### [PEOPLE & PROFILES]\n" + "\n".join([f"- {f}" for f in profile_facts]))
+            profile_title = f"USER PROFILE: {user_id}"
+            if not profile_texts:
+                profile_texts = [f"No specific facts stored for {user_id} yet."]
+            add_to_context(profile_title, profile_texts)
+        elif profile_texts:
+            add_to_context("RELEVANT PEOPLE & PROFILES", profile_texts[:5])
 
-        if episodic:
-            context_parts.append("### [NOTABLE EVENTS & EXPERIENCES]\n" + "\n".join([f"- {e}" for e in episodic]))
+        # Priority 3: High Importance Episodic (e.g., Session Start)
+        add_to_context("CRITICAL PAST EVENTS", [m["content"] for m in categories["episodic_high"]])
 
-        if summaries:
-            context_parts.append("### [PAST CONVERSATION SUMMARIES]\n" + "\n".join([f"- {s}" for s in summaries]))
+        # Priority 4: Summaries (The 'believable' long-term narrative)
+        # Prioritize Global Summaries for high-level continuity, then recent segment summaries
+        global_sums = [m["content"] for m in categories["summary"] if m["metadata"].get("is_global")]
+        local_sums = [m["content"] for m in categories["summary"] if not m["metadata"].get("is_global")]
 
-        if insights:
-            context_parts.append("### [CORE INSIGHTS & LESSONS]\n" + "\n".join([f"- {i}" for i in insights]))
+        # Sort local summaries by timestamp (newest first)
+        categories["summary"].sort(key=lambda x: x["metadata"].get("timestamp", ""), reverse=True)
 
-        if interactions:
-            context_parts.append("### [PAST RELEVANT INTERACTIONS]\n" + "\n---\n".join(interactions[:5]))
+        # Take up to 2 global and 3 local for a balanced perspective
+        balanced_summaries = global_sums[:2] + [m["content"] for m in categories["summary"] if not m["metadata"].get("is_global")][:3]
+        add_to_context("CONVERSATION SUMMARIES", balanced_summaries)
 
-        # Combine and truncate to stay within token limits (approx 2500 chars)
-        full_context = "\n\n".join(context_parts) if context_parts else "No specific past context found."
+        # Priority 5: Insights & Lessons
+        add_to_context("CORE INSIGHTS", [m["content"] for m in categories["insight"][:8]])
 
-        if len(full_context) > 2500:
-            return full_context[:2497] + "..."
+        # Priority 6: Normal Episodic
+        add_to_context("NOTABLE EXPERIENCES", [m["content"] for m in categories["episodic_normal"][:5]])
 
-        return full_context
+        # Priority 7: Relevant Interactions (Raw history)
+        interaction_texts = [m["content"] for m in categories["interaction"]]
+        add_to_context("RECENT RELEVANT INTERACTIONS", interaction_texts[:5], prefix="", joiner="\n---\n")
+
+        return "".join(context_blocks).strip() if context_blocks else "No specific past context found."
 
     def get_history(self) -> List[Dict[str, str]]:
         """Returns the current short-term conversation history."""
