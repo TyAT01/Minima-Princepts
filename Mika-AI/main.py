@@ -41,7 +41,7 @@ if sys.platform == "win32":
 from llm.client import LlamaClient
 from memory.store import MemoryStore
 from stt.whisper import STTSystem, VoiceMonitor
-from utils.text_utils import split_into_sentences
+from utils.text_utils import split_into_sentences, clean_yaml_block
 from persona.manager import PersonaManager
 from ui.web_gui import MikaGUI
 from utils.error_handler import ErrorHandler
@@ -472,20 +472,6 @@ class MikaApp:
                 )
 
                 analysis_raw = self.llm.generate_response("You are Mika, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
-
-            # Clean up potential markdown and metadata labels
-            def clean_yaml_block(text):
-                if "```yaml" in text:
-                    text = text.split("```yaml")[1].split("```")[0]
-                elif "```yml" in text:
-                    text = text.split("```yml")[1].split("```")[0]
-                elif "```" in text:
-                    text = text.split("```")[1].split("```")[0]
-
-                lines = text.strip().splitlines()
-                if lines and lines[0].strip().lower() in ["yml", "yaml"]:
-                    text = "\n".join(lines[1:])
-                return text.strip()
 
             cleaned_raw = clean_yaml_block(analysis_raw)
 
