@@ -2,7 +2,9 @@ from __future__ import annotations
 import logging
 import requests
 import json
-from typing import Any, Optional, Dict, List
+import asyncio
+import aiohttp
+from typing import Any, Optional, Dict, List, Generator, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -37,27 +39,60 @@ class LlamaClient:
         self.repeat_penalty = repeat_penalty
         self.max_tokens = max_tokens
         self._endpoint_type = "chat" # Default to chat
+        self._session: Optional[aiohttp.ClientSession] = None
         logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model}")
 
-    def generate_response(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "") -> str:
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Returns the active aiohttp session, creating it if necessary."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        """Closes the aiohttp session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+    def generate_response(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "", tools: Optional[List[Dict]] = None) -> str:
         """Generates a full response using the Llama model."""
-        # For full response, we can just consume the stream
         full_text = ""
-        for chunk in self.stream_response(system_prompt, user_input, history, context):
+        for chunk in self.stream_response(system_prompt, user_input, history, context, tools=tools):
             full_text += chunk
         return full_text.strip()
 
-    def stream_response(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = ""):
+    async def generate_response_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "", tools: Optional[List[Dict]] = None) -> str:
+        """Generates a full response asynchronously."""
+        full_text = ""
+        async for chunk in self.stream_response_async(system_prompt, user_input, history, context, tools=tools):
+            full_text += chunk
+        return full_text.strip()
+
+    def stream_response(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "", tools: Optional[List[Dict]] = None) -> Generator[str, None, None]:
         """Generates a streaming response using the Llama model."""
         logger.info(f"Streaming response for input: {user_input[:50]}...")
 
         if self.api_type == "ollama":
-            yield from self._stream_ollama_with_fallback(system_prompt, user_input, history, context)
+            yield from self._stream_ollama_with_fallback(system_prompt, user_input, history, context, tools=tools)
         else:
-            yield from self._stream_openai(system_prompt, user_input, history, context)
+            yield from self._stream_openai(system_prompt, user_input, history, context, tools=tools)
 
-    def _stream_ollama_with_fallback(self, system_prompt, user_input, history, context):
-        # Candidates for Ollama endpoints
+    async def stream_response_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "", tools: Optional[List[Dict]] = None) -> AsyncGenerator[str, None]:
+        """Generates a streaming response asynchronously."""
+        logger.info(f"Streaming async response for input: {user_input[:50]}...")
+
+        if self.api_type == "ollama":
+            try:
+                async for chunk in self._stream_ollama_chat_async(system_prompt, user_input, history, context, tools=tools):
+                    yield chunk
+            except Exception as e:
+                logger.warning(f"Async Ollama chat failed, falling back: {e}")
+                async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
+                    yield chunk
+        else:
+            async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
+                yield chunk
+
+    def _stream_ollama_with_fallback(self, system_prompt, user_input, history, context, tools=None):
         endpoints = ["chat", "generate", "openai"]
         if self._endpoint_type != "chat":
             if self._endpoint_type in endpoints:
@@ -68,34 +103,28 @@ class LlamaClient:
         for etype in endpoints:
             try:
                 if etype == "chat":
-                    yield from self._stream_ollama_chat(system_prompt, user_input, history, context)
+                    yield from self._stream_ollama_chat(system_prompt, user_input, history, context, tools=tools)
                 elif etype == "generate":
                     yield from self._stream_ollama_generate(system_prompt, user_input, history, context)
                 else:
-                    yield from self._stream_openai(system_prompt, user_input, history, context)
+                    yield from self._stream_openai(system_prompt, user_input, history, context, tools=tools)
 
                 self._endpoint_type = etype
                 return
             except requests.exceptions.HTTPError as e:
                 last_error = e
                 if e.response.status_code == 404:
-                    if "model" in e.response.text.lower() and "not found" in e.response.text.lower():
-                        raise Exception(f"Model '{self.model}' not found in Ollama. Please run: ollama pull {self.model}")
                     continue
                 raise
             except Exception as e:
                 last_error = e
                 continue
+        if last_error: raise last_error
 
-        if last_error:
-             raise last_error
-        raise Exception("All Ollama endpoints failed.")
-
-    def _stream_ollama_chat(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str):
+    def _stream_ollama_chat(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
         messages = [{"role": "system", "content": system_prompt}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
-
         messages.extend(history)
         messages.append({"role": "user", "content": user_input})
 
@@ -110,29 +139,67 @@ class LlamaClient:
                 "num_predict": self.max_tokens,
             }
         }
+        if tools:
+            payload["tools"] = tools
 
-        endpoint = f"{self.base_url}/chat"
-        response = requests.post(endpoint, json=payload, timeout=60, stream=True)
+        response = requests.post(f"{self.base_url}/chat", json=payload, timeout=60, stream=True)
         response.raise_for_status()
 
         for line in response.iter_lines():
             if line:
                 data = json.loads(line)
-                chunk = data.get("message", {}).get("content", "")
+                msg = data.get("message", {})
+                chunk = msg.get("content", "")
                 if chunk:
                     yield chunk
+                if "tool_calls" in msg:
+                    yield f"TOOL_CALLS: {json.dumps(msg['tool_calls'])}"
                 if data.get("done"):
                     break
+
+    async def _stream_ollama_chat_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
+        messages = [{"role": "system", "content": system_prompt}]
+        if context:
+            messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_input})
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "repeat_penalty": self.repeat_penalty,
+                "num_predict": self.max_tokens,
+            }
+        }
+        if tools:
+            payload["tools"] = tools
+
+        session = await self._get_session()
+        async with session.post(f"{self.base_url}/chat", json=payload) as response:
+            response.raise_for_status()
+            async for line in response.content:
+                if line:
+                    data = json.loads(line)
+                    msg = data.get("message", {})
+                    chunk = msg.get("content", "")
+                    if chunk:
+                        yield chunk
+                    if "tool_calls" in msg:
+                        yield f"TOOL_CALLS: {json.dumps(msg['tool_calls'])}"
+                    if data.get("done"):
+                        break
 
     def _stream_ollama_generate(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str):
         full_prompt = f"{system_prompt}\n\n"
         if context:
             full_prompt += f"Relevant Context:\n{context}\n\n"
-
         for msg in history:
             role = "User" if msg["role"] == "user" else "Loki"
             full_prompt += f"{role}: {msg['content']}\n"
-
         full_prompt += f"User: {user_input}\nLoki:"
 
         payload = {
@@ -146,11 +213,8 @@ class LlamaClient:
                 "num_predict": self.max_tokens,
             }
         }
-
-        endpoint = f"{self.base_url}/generate"
-        response = requests.post(endpoint, json=payload, timeout=60, stream=True)
+        response = requests.post(f"{self.base_url}/generate", json=payload, timeout=60, stream=True)
         response.raise_for_status()
-
         for line in response.iter_lines():
             if line:
                 data = json.loads(line)
@@ -160,11 +224,10 @@ class LlamaClient:
                 if data.get("done"):
                     break
 
-    def _stream_openai(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str):
+    def _stream_openai(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
         messages = [{"role": "system", "content": system_prompt}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
-
         messages.extend(history)
         messages.append({"role": "user", "content": user_input})
 
@@ -176,73 +239,90 @@ class LlamaClient:
             "max_tokens": self.max_tokens,
             "stream": True
         }
+        if tools:
+            payload["tools"] = tools
 
         base = self.base_url
         if base.endswith("/api"): base = base[:-4]
-
         endpoints = [f"{base}/v1/chat/completions", f"{self.base_url}/chat/completions"]
 
-        last_err = None
         for ep in endpoints:
             try:
                 response = requests.post(ep, json=payload, timeout=60, stream=True)
                 response.raise_for_status()
-
                 for line in response.iter_lines():
                     if line:
                         line_text = line.decode("utf-8")
                         if line_text.startswith("data: "):
                             data_str = line_text[6:]
-                            if data_str.strip() == "[DONE]":
-                                break
+                            if data_str.strip() == "[DONE]": break
                             data = json.loads(data_str)
-                            chunk = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                            if chunk:
-                                yield chunk
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            chunk = delta.get("content", "")
+                            if chunk: yield chunk
+                            if "tool_calls" in delta:
+                                yield f"TOOL_CALLS: {json.dumps(delta['tool_calls'])}"
                 return
-            except Exception as e:
-                last_err = e
+            except Exception:
                 continue
 
-        if last_err: raise last_err
-        raise Exception(f"Failed to connect to OpenAI-compatible API at {base}")
+    async def _stream_openai_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
+        messages = [{"role": "system", "content": system_prompt}]
+        if context:
+            messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_input})
 
-    def perform_diagnostics(self) -> str:
-        """Tests the connection to Ollama and reports available models."""
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_tokens,
+            "stream": True
+        }
+        if tools:
+            payload["tools"] = tools
+
         base = self.base_url
         if base.endswith("/api"): base = base[:-4]
+        endpoint = f"{base}/v1/chat/completions"
 
+        session = await self._get_session()
+        try:
+            async with session.post(endpoint, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.content:
+                    if line:
+                        line_text = line.decode("utf-8")
+                        if line_text.startswith("data: "):
+                            data_str = line_text[6:]
+                            if data_str.strip() == "[DONE]": break
+                            data = json.loads(data_str)
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            chunk = delta.get("content", "")
+                            if chunk: yield chunk
+                            if "tool_calls" in delta:
+                                yield f"TOOL_CALLS: {json.dumps(delta['tool_calls'])}"
+        except Exception as e:
+            logger.error(f"Async OpenAI stream failed: {e}")
+
+    def perform_diagnostics(self) -> str:
+        base = self.base_url
+        if base.endswith("/api"): base = base[:-4]
         report = f"--- OLLAMA DIAGNOSTIC REPORT ---\nTarget Server: {base}\nTarget Model: {self.model}\n\n"
-
-        # 1. Test basic connectivity
         try:
             r = requests.get(base, timeout=5)
-            report += f"1. Root Server Check: SUCCESS (Status {r.status_code})\n   Body: {r.text[:50]}...\n"
+            report += f"1. Root Server Check: SUCCESS (Status {r.status_code})\n"
         except Exception as e:
             report += f"1. Root Server Check: FAILED ({e})\n"
-
-        # 2. List Models
         try:
             r = requests.get(f"{base}/api/tags", timeout=5)
             if r.status_code == 200:
                 models = [m.get("name") for m in r.json().get("models", [])]
                 report += f"2. Models Found: {models}\n"
-                if self.model in models or (self.model + ":latest") in models:
-                    report += f"   - Target model '{self.model}' is AVAILABLE.\n"
-                else:
-                    report += f"   - WARNING: Target model '{self.model}' IS NOT PULLED.\n"
             else:
-                report += f"2. Models Found: FAILED (Status {r.status_code}: {r.text})\n"
+                report += f"2. Models Found: FAILED\n"
         except Exception as e:
             report += f"2. Models Found: ERROR ({e})\n"
-
-        # 3. Check Version
-        try:
-            r = requests.get(f"{base}/api/version", timeout=5)
-            if r.status_code == 200:
-                report += f"3. Ollama Version: {r.json().get('version')}\n"
-        except:
-             pass
-
-        report += "---------------------------------"
         return report

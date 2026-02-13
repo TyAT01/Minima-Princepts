@@ -7,6 +7,7 @@ import threading
 import random
 import time
 import json
+import asyncio
 import numpy as np
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -33,7 +34,10 @@ class LokiEngine:
         self._interaction_count = 0
         self.current_user_name = "Tyler"
         self.session_start = datetime.now(timezone.utc)
+        self.last_interaction_time = datetime.now(timezone.utc)
         self.user_session_info = {}
+        self.session_tool_count = 0
+
         # --- LOKI SPECIFIC ---
         self.wardrobe = {
             "default": {
@@ -116,6 +120,7 @@ class LokiEngine:
                     self.memory.session_objectives = data.get('objectives', [])
             except Exception as e:
                 logger.warning(f"Failed to load objectives: {e}")
+
     def initialize(self):
         """Initializes components."""
         self.persona.load_persona()
@@ -143,6 +148,7 @@ class LokiEngine:
     def process_text(self, text: str, user_name: str = None, interrupt_event: threading.Event = None) -> Generator[str, None, None]:
         """Core text processing logic."""
         self.last_thought = ""
+        current_time = datetime.now(timezone.utc)
         processed_text = text
         # Handle outfit changes
         if processed_text.lower().startswith("loki change to"):
@@ -154,14 +160,24 @@ class LokiEngine:
                  self.current_user_name = user_name
         else:
             user_name = self.current_user_name
+
         # Identity Verification Heuristic
         if processed_text and not processed_text.startswith("[") and user_name != "System":
              last_seen = self.memory.get_last_interaction_time(user_name)
              if last_seen and (datetime.now(timezone.utc) - last_seen).days > 7:
                   processed_text = f"[IDENTITY CHECK REQUIRED] {processed_text}"
+
         logger.info(f"--- Engine Processing: '{processed_text}' ---")
+
         with self.processing_lock:
             try:
+                # [BUG FIX] Check inactivity against PREVIOUS interaction time BEFORE updating it
+                previous_interaction = self.last_interaction_time
+                self.last_interaction_time = current_time
+
+                # Trigger inactivity check (asynchronously)
+                threading.Thread(target=lambda: asyncio.run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
+
                 # LOKI SPECIFIC: Intensity and Temperature
                 self.intensity = self.get_smart_intensity(processed_text)
                 temp = 0.75 + 0.25 * self.intensity
@@ -176,10 +192,20 @@ class LokiEngine:
                 system_prompt = self.persona.get_system_prompt(now=datetime.now())
                 drift_note = f"\n[SYSTEM: Topic Drift Detected ({drift_score:.2f}). Adjusting focus.]" if drift_score > 0.6 else ""
                 loki_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]{drift_note}\n{self.outfit_block()}"
+
+                # [AUTONOMY] Proactive memory injection
+                autonomous_mem = asyncio.run(self.fetch_relevant_memory_async(f"loki schemes for {user_name}", n_results=2))
+                if autonomous_mem:
+                    loki_context += f"\n[SCHEEMING MEMORY: {autonomous_mem}]"
+
+                # [AUTONOMY] Feedback injection
+                feedback_mems = asyncio.run(self.memory.search_relevant_memories_async("User Tool Feedback", n_results=2, user_id=user_name))
+                if feedback_mems:
+                    loki_context += f"\n[USER FEEDBACK ON PREVIOUS SCHEMES: {[m['content'] for m in feedback_mems]}]"
+
                 top_bun = system_prompt + loki_context
 
                 # 2. Meat: Retrieved Long-Term Memory (RAG)
-                # We use HyDE: Imagine what a good reply might look like to improve search
                 hyp_ans = self._imagine_reply(processed_text)
                 long_term_memory = self.memory.get_full_context(processed_text, user_id=user_name, hypothetical_answer=hyp_ans)
                 # Add Temporal Context
@@ -196,47 +222,178 @@ class LokiEngine:
 
                 # 4. Bottom Bun: Short-Term Buffer (Last N messages)
                 history = self.memory.get_history()
-                # We limit history to the last 10 messages (5 turns)
                 short_term_buffer = history[-10:] if history else []
 
                 # --- ASSEMBLE SANDWICH ---
                 full_context = f"{meat}\n\n{garnish}"
-                raw_stream = self.llm.stream_response(top_bun, processed_text, short_term_buffer, full_context)
+
+                # [AUTONOMY] Tool Calling Support (Capped at 2 per session)
+                tools = None
+                if self.session_tool_count < 2:
+                    tools = [{
+                        "type": "function",
+                        "function": {
+                            "name": "search_pranks",
+                            "description": "Find ideas online for pranks or schemes",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query for pranks"}
+                                },
+                                "required": ["query"]
+                            }
+                        }
+                    }]
+
+                raw_stream = self.llm.stream_response(top_bun, processed_text, short_term_buffer, full_context, tools=tools)
 
                 response_stream = self._extract_thought_from_stream(raw_stream)
                 response_fragments = []
+
                 for fragment in split_into_sentences(response_stream):
                     if interrupt_event and interrupt_event.is_set():
                         logger.info("Response halted by interrupt.")
                         yield "... [Interrupted]"
                         break
+
+                    if "TOOL_CALLS:" in fragment and self.session_tool_count < 2:
+                        # Handle tool call
+                        fragment = asyncio.run(self.handle_tool_calls_async(fragment, processed_text))
+                        self.session_tool_count += 1
+
                     clean_fragment = self._clean_response(fragment)
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
                         yield clean_fragment
+
                 full_response = " ".join(response_fragments)
+
                 if not (interrupt_event and interrupt_event.is_set()):
                     if self.last_thought:
                         logger.info(f"Loki's Internal Thought: {self.last_thought.strip()}")
                         self.memory.store_insight(f"Thought: {self.last_thought.strip()}", user_id=user_name, source="inner_monologue")
 
-                    # [OPTIMIZATION] Store session start as a high-importance episodic memory
                     if self._interaction_count == 0:
                         self.memory.store_episodic_memory(f"SESSION START: First interaction with {user_name} today: '{text}'", user_id=user_name, importance=8)
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
-                    # Periodic reflection (every 10 interactions)
                     if self._interaction_count > 0 and self._interaction_count % 10 == 0:
                          threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
-                    # Eternal Learning
                     self.loki_learn_and_stay_loki(processed_text, full_response)
             except Exception as e:
                 logger.error(f"Engine text processing failed: {e}")
                 raise
+
+    async def fetch_relevant_memory_async(self, query_text: str, n_results: int = 2):
+        """Async fetch of relevant memories."""
+        results = await self.memory.search_relevant_memories_async(query_text, n_results=n_results)
+        return [r['content'] for r in results] if results else []
+
+    async def autonomous_response_async(self, user_msg: str, user_id: str):
+        """Autonomous response logic as requested."""
+        # Fetch memory async
+        relevant_mem = await self.fetch_relevant_memory_async(f"loki schemes for {user_id}", n_results=3)
+
+        system_prompt = self.persona.get_system_prompt()
+        loki_context = f"\n[SYSTEM: Autonomous Mode. Use memory: {relevant_mem}. Scheme autonomously.]\n{self.outfit_block()}"
+
+        # Define tools (Capped at 2/session)
+        tools = None
+        if self.session_tool_count < 2:
+            tools = [{
+                "type": "function",
+                "function": {
+                    "name": "search_pranks",
+                    "description": "Find ideas online for pranks or schemes",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query for pranks"}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }]
+
+        # Generate with tools
+        raw_resp = await self.llm.generate_response_async(
+            system_prompt + loki_context,
+            user_msg,
+            self.memory.get_history()[-10:],
+            tools=tools
+        )
+
+        # Check for tool calls in the response
+        final_resp = raw_resp
+        if "TOOL_CALLS:" in raw_resp and self.session_tool_count < 2:
+            final_resp = await self.handle_tool_calls_async(raw_resp, user_msg)
+            self.session_tool_count += 1
+
+        # Store response back efficiently
+        await self.memory.add_interaction_async(user_msg, final_resp, user_id=user_id)
+        return final_resp
+
+    async def handle_tool_calls_async(self, fragment: str, user_msg: str):
+        """Handles tool calls detected in the stream."""
+        try:
+            tool_calls_json = fragment.split("TOOL_CALLS:")[1].strip()
+            tool_calls = json.loads(tool_calls_json)
+
+            if tool_calls and tool_calls[0]['function']['name'] == 'search_pranks':
+                query = tool_calls[0]['function']['arguments'].get('query', user_msg)
+                from googlesearch import search
+                logger.info(f"Executing tool search_pranks for: {query}")
+                results = list(search(query, num_results=2))
+                re_prompt = f"Using prank ideas: {results}. Finish scheme for: {user_msg}"
+
+                return await self.llm.generate_response_async(
+                    self.persona.get_system_prompt() + f"\n{self.outfit_block()}",
+                    re_prompt,
+                    self.memory.get_history()[-10:]
+                )
+        except Exception as e:
+            logger.error(f"Tool execution failed: {e}")
+            return " [Tool failed—scheming manually!] "
+        return fragment
+
+    async def check_and_think_async(self, user_id: str, last_interaction: datetime):
+        """Checks for inactivity and triggers autonomous thought with daily caps."""
+        if datetime.now(timezone.utc) - last_interaction > timedelta(minutes=10):
+            # Check daily cap
+            brain = self._load_brain()
+            today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            thought_data = brain.get("autonomous_thoughts", {})
+
+            if thought_data.get("date") != today:
+                thought_data = {"date": today, "count": 0}
+
+            if thought_data["count"] >= 5:
+                logger.info("Autonomous thought daily cap reached.")
+                return
+
+            logger.info(f"Triggering inactivity thought for {user_id} ({thought_data['count']+1}/5)")
+            thought_prompt = "Reflect on current schemes and inactivity. Update plots."
+            context = await self.memory.get_full_context_async("Autonomous reflection", user_id=user_id)
+            thought = await self.llm.generate_response_async(
+                self.persona.get_system_prompt() + f"\n{self.outfit_block()}",
+                thought_prompt,
+                self.memory.get_history()[-8:],
+                context=context
+            )
+            await self.memory.store_insight_async(f"Autonomous Thought: {thought}", user_id=user_id, source="autonomous_thought")
+
+            # Update cap
+            thought_data["count"] += 1
+            brain["autonomous_thoughts"] = thought_data
+            self.brain_file.write_text(json.dumps(brain, indent=2))
+
+    def add_feedback(self, feedback: str, user_id: str):
+        """Stores user feedback for pranks/schemes."""
+        self.memory.store_episodic_memory(f"User Tool Feedback: {feedback}", user_id=user_id, importance=7)
+
     def _add_temporal_context(self, context: str, user_name: str) -> str:
         now_utc = datetime.now(timezone.utc)
-        # Track session-specific downtime (how long Loki was 'off' before this session)
         if user_name not in self.user_session_info:
             last_time = self.memory.get_last_interaction_time(user_name)
             downtime_str = "first time meeting"
@@ -264,6 +421,7 @@ class LokiEngine:
             "You are aware of the passage of time. Mention downtime or duration ONLY if the user asks about it or if you want to complain about being 'off' for too long."
         )
         return f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
+
     def _format_timedelta(self, delta: timedelta) -> str:
         """Formats a timedelta into a human-readable string."""
         days = delta.days
@@ -278,13 +436,11 @@ class LokiEngine:
         if len(time_parts) == 1:
             return time_parts[0]
         return ", ".join(time_parts[:-1]) + f" and {time_parts[-1]}" if len(time_parts) > 1 else time_parts[0]
+
     def _extract_thought_from_stream(self, stream):
         buffer = ""
         in_thought = False
-
-        # Patterns to catch various start/end tag formats
         start_pattern = re.compile(rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|(?<!\w)THOUGHTS?:|<THOUGHTS?>|\*(?:Loki\s+)?(?:THOUGHTS?|THINKING|SCHEMING|PLOTTING|THINKS?).*?\*', re.IGNORECASE)
-        # Improved end_pattern to catch more varied termination markers for asterisk thoughts
         end_pattern = re.compile(rf'\[/(?:{self.THOUGHT_KEYWORDS})\]|\(/(?:{self.THOUGHT_KEYWORDS})\)|</THOUGHTS?>|\*(?:/THOUGHTS?|END THINKING|END SCHEMING|END|/|THOUGHTS?)\*', re.IGNORECASE)
 
         for chunk in stream:
@@ -297,21 +453,14 @@ class LokiEngine:
                         if pre_tag: yield pre_tag
                         tag_content = match.group(0)
                         buffer = buffer[match.end():].lstrip()
-
-                        # Check if it's a block-start (like [THOUGHT]) or a self-contained tag (like [SYSTEM: ...])
-                        # A block-start is typically just the keyword itself inside delimiters.
                         is_block_start = False
                         inner_text = re.sub(r'[\[\]\(\)\<\>\*]', '', tag_content).strip()
-
                         if any(re.fullmatch(k, inner_text, re.IGNORECASE) for k in self.THOUGHT_KEYWORDS.split('|')):
                             is_block_start = True
-
                         if is_block_start:
                             in_thought = True
                         else:
-                            # Self-contained tags are recorded as thoughts immediately
                             self.last_thought += tag_content + " "
-
                         continue
                     else:
                         if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
@@ -323,7 +472,6 @@ class LokiEngine:
                                     self.last_thought = potential_thought
                                     buffer = buffer[closing_idx+1:].lstrip()
                                     continue
-
                         if len(buffer) > 40:
                             yield buffer[:-40]
                             buffer = buffer[-40:]
@@ -336,8 +484,6 @@ class LokiEngine:
                         in_thought = False
                         continue
                     else:
-                        # Heuristic: if we're in_thought and see a newline followed by direct speech
-                        # like "Loki:" or just a capitalized sentence, it might be an unclosed thought.
                         if "\n" in buffer:
                             parts = buffer.split("\n", 1)
                             if len(parts[1]) > 5 and parts[1].strip() and parts[1].strip()[0].isupper():
@@ -345,7 +491,6 @@ class LokiEngine:
                                 buffer = parts[1]
                                 in_thought = False
                                 continue
-
                         if len(buffer) + len(self.last_thought) > 4000:
                             self.last_thought += buffer
                             buffer = ""
@@ -353,14 +498,11 @@ class LokiEngine:
                         break
         if buffer:
             if in_thought:
-                # If stream ends while in thought, try to find where speech might have started
-                # Heuristic: a capitalized letter following punctuation and space, or just a newline
                 transition_match = re.search(r'([\.\!\?]\s+|\n\s*)([A-Z])', buffer)
                 if transition_match:
                     self.last_thought += buffer[:transition_match.start(2)]
                     yield buffer[transition_match.start(2):]
                 elif len(buffer.strip()) > 30 and not any(kw in buffer.upper() for kw in self.THOUGHT_KEYWORDS.split('|')):
-                    # If it's long and doesn't look like meta-tags, it's likely speech with a forgotten closing tag
                     self.last_thought += " [Unclosed]"
                     yield buffer
                 else:
@@ -376,46 +518,29 @@ class LokiEngine:
                         yield buffer[closing_idx+1:].strip()
                         return
                 yield buffer
+
     def _clean_response(self, text: str) -> str:
-        # 1. Remove explicit bracketed/parenthesized/tagged thought blocks
         clean = re.sub(rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?\[/(?:{self.THOUGHT_KEYWORDS})\]', '', text, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(rf'\((?:{self.THOUGHT_KEYWORDS})[^\)]*\).*?\(/(?:{self.THOUGHT_KEYWORDS})\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'<THOUGHTS?>.*?</THOUGHTS?>', '', clean, flags=re.IGNORECASE | re.DOTALL)
-
-        # 2. Remove loose THOUGHT: prefixes and their content that might have leaked
-        # Targeted at catching things like "Thought: I am a bot. Hello!" -> "Hello!"
-        # [REFINED] Only remove the prefix/tag itself to avoid swallowing the following sentence
         clean = re.sub(rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*', '', clean, count=1).strip()
-
-        # 3. Targeted asterisk thought removal (e.g. *thinks to self* I am a bot.)
-        # Only removes if it specifically contains thinking/scheming keywords to avoid removing actions like *winks*
         clean = re.sub(r'(?i)\*(?:Loki\s+)?(?:thinks?|thinking|schem\w+|plott\w+).*?\*', '', clean).strip()
-
-        # 4. Remove any remaining bracketed or parenthesized meta-text (tags only, content preserved if not caught above)
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
-
-        # new: strip ALL CAPS starting lines
         lines = clean.splitlines()
         cleaned_lines = []
         for line in lines:
             if line.isupper():
-                cleaned_lines.append(line.capitalize())  # downcase to normal
+                cleaned_lines.append(line.capitalize())
             else:
                 cleaned_lines.append(line)
         return '\n'.join(cleaned_lines).strip()
 
     def reflect(self, user_id: str):
-        """
-        Perform deep commercial-grade reflection.
-        Includes hierarchical summarization to handle extremely long sessions.
-        """
         try:
             with self.processing_lock:
                 logger.info(f"Loki is reflecting on {user_id}...")
                 history = self.memory.get_history()
                 if not history: return
-
-                # 1. Extract Segment Insights & Summary
                 reflection_prompt = (
                     "### INSTRUCTION\n"
                     "Analyze the recent conversation history below. Extract critical information to maintain perfect long-term memory.\n"
@@ -433,16 +558,13 @@ class LokiEngine:
                     [],
                     context=reflection_prompt
                 )
-
                 cleaned_raw = clean_yaml_block(analysis_raw)
                 data = None
                 try:
                     data = yaml.safe_load(cleaned_raw)
                 except Exception as e:
                     logger.warning(f"YAML Parse failed in reflection: {e}")
-
                 if data and isinstance(data, dict):
-                    # Update profile.json (Garnish layer)
                     facts = data.get('user_facts', {})
                     if facts and isinstance(facts, dict):
                         if user_id not in self.user_profiles:
@@ -451,25 +573,18 @@ class LokiEngine:
                         self._save_profiles()
                         for k, v in facts.items():
                              self.memory.update_user_profile(user_id, f"{k}: {v}")
-
                     for event in data.get('events', []):
                         self.memory.store_episodic_memory(event, user_id=user_id, importance=6)
                     for insight in data.get('insights', []):
                         self.memory.store_insight(insight, user_id=user_id, source="reflection")
-
                     for rel in data.get('relations', []):
                         if isinstance(rel, dict) and 'source' in rel and 'target' in rel:
                             self.memory.add_entity_relation(rel['source'], rel['target'], rel.get('relation', 'connected'))
-
                     segment_summary = data.get('summary')
                     if segment_summary:
                         self.memory.store_summary(user_id, str(segment_summary))
-
-                    # 2. Hierarchical (Recursive) Summarization
-                    # Check if we have enough local summaries to condense into a 'Global Summary'
                     summaries = self.memory.search_relevant_memories("general conversation", filter_type="summary", user_id=user_id, n_results=15)
                     local_summaries = [s["content"] for s in summaries if not s["metadata"].get("is_global")]
-
                     if len(local_summaries) >= 6:
                         logger.info(f"Condensing {len(local_summaries)} summaries into a Global Summary for {user_id}...")
                         global_prompt = (
@@ -485,10 +600,7 @@ class LokiEngine:
                             context=global_prompt
                         )
                         if global_summary and len(global_summary) > 50:
-                            # Store as global
                             self.memory.store_summary(user_id, global_summary.strip(), is_global=True)
-                            logger.info("Global Summary stored successfully.")
-
                 logger.info("Reflection complete.")
         except Exception as e:
             logger.warning(f"Reflection failed: {e}")
@@ -497,11 +609,7 @@ class LokiEngine:
         """Performs reflective shutdown and session consolidation."""
         logger.info("Engine initiating Reflective Shutdown...")
         try:
-            # 1. Final reflection for each active user
-            # In this simple implementation, we just reflect on the current user
             self.reflect(self.current_user_name)
-
-            # 2. Identify 'Open Loops'
             loop_prompt = (
                 "Identify any 'Open Loops' from the recent conversation. \n"
                 "An Open Loop is a project started but not finished, a question asked but not answered, or a promise made.\n"
@@ -515,20 +623,17 @@ class LokiEngine:
                     [],
                     context=loop_prompt
                 )
-                # Store open loops as high importance episodic memories
                 if open_loops_raw and len(open_loops_raw) > 10:
                     self.memory.store_episodic_memory(f"OPEN LOOPS at session end: {open_loops_raw}", user_id=self.current_user_name, importance=7)
-
-            # 3. Final save of persistent profiles
             self._save_profiles()
-
-            # 4. Adaptive Pruning
             self.memory.prune_old_memories()
+
+            # Close LLM Session
+            asyncio.run(self.llm.close())
 
             logger.info("Reflective Shutdown complete.")
         except Exception as e:
             logger.error(f"Shutdown failed: {e}")
-
 
     def generate_autonomous_thought(self):
         """Generates a proactive thought."""
@@ -547,6 +652,7 @@ class LokiEngine:
         except Exception as e:
             logger.warning(f"Autonomous thought failed: {e}")
         return None
+
     def change_outfit(self, requested: str) -> str:
         req = requested.lower().strip()
         for key, data in self.wardrobe.items():
@@ -554,36 +660,20 @@ class LokiEngine:
                 self.current_outfit = key
                 return f"*throws on the {data['name']}* fine. now wearing that. happy?"
         return "that outfit doesn’t exist yet, idiot. stick to the default for now."
+
     def _detect_context_drift(self, query: str) -> float:
-        """
-        Detects if the current query significantly drifts from the recent conversation.
-        Returns a drift score (0.0 to 1.0, where 1.0 is high drift).
-        """
         history = self.memory.get_history()
-        if not history or len(history) < 2:
-            return 0.0
-
+        if not history or len(history) < 2: return 0.0
         try:
-            # 1. Get embedding of current query
             query_emb = np.array(self.memory.get_embedding(query))
-
-            # 2. Get embeddings of last few interactions (roles: user/assistant)
-            # To keep it efficient, we only take the last 4 messages
-            # [REFINED] Strip timestamps for more accurate semantic drift detection
             recent_texts = [re.sub(r'^\[.*?\]\s*', '', m["content"]) for m in history[-4:]]
             recent_embs = [np.array(self.memory.get_embedding(t)) for t in recent_texts]
-
-            # 3. Calculate average recent embedding
             avg_recent_emb = np.mean(recent_embs, axis=0)
-
-            # 4. Calculate cosine similarity
             norm_q = np.linalg.norm(query_emb)
             norm_r = np.linalg.norm(avg_recent_emb)
             if norm_q == 0 or norm_r == 0: return 0.0
-
             similarity = np.dot(query_emb, avg_recent_emb) / (norm_q * norm_r)
             drift = 1.0 - max(0, similarity)
-
             logger.info(f"Context Drift Score: {drift:.2f}")
             return drift
         except Exception as e:
@@ -601,11 +691,12 @@ class LokiEngine:
         base = 0.5 + 0.15*hype - 0.18*chill + 0.20*caps
         if recent_chill >= 6 and "raid" in user_msg.lower(): base = min(base, 0.65)
         return max(0.25, min(1.0, base))
+
     def outfit_block(self) -> str:
         outfit = self.wardrobe[self.current_outfit]
         ears_line = "YES – you can say 'the ears hear everything'" if outfit.get("ears") else "NO ears today"
         return f"\n=== CURRENT OUTFIT ===\nWearing: {outfit['name']}\nDetails: {outfit['desc']}\nEars active: {ears_line}\nOnly mention outfit details if it fits the reply naturally."
-    # ─── ETERNAL LEARNING ───
+
     def _load_brain(self):
         if not self.brain_file.exists():
             brain = {
@@ -620,24 +711,21 @@ class LokiEngine:
             }
             self.brain_file.write_text(json.dumps(brain, indent=2))
         return json.loads(self.brain_file.read_text())
+
     def loki_learn_and_stay_loki(self, user_msg: str, loki_reply: str):
         brain = self._load_brain()
         msg = user_msg.lower()
-        # fact extraction: improve robustness to avoid misinterpreting complaints or questions
         if ("my name is" in msg or "call me" in msg) and "username" not in msg and "?" not in msg:
-            # Extract name more carefully
             parts = msg.split("is") if "is" in msg else msg.split("me")
             name = parts[-1].strip(" .,!?")
-            if len(name) >= 2 and len(name) < 20: # Sanity check on name length (allow 2+ chars like 'Ty')
+            if len(name) >= 2 and len(name) < 20:
                 brain["facts"]["preferred_name"] = name.title()
         if "i hate" in msg or "i love" in msg:
             thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
             brain["facts"][f"user_{'hates' if 'hate' in msg else 'loves'}_{thing}"] = True
-        # roast memory
         if any(w in loki_reply.lower() for w in ["idiot","minion","peasant","dummy"]):
             if len(brain["roasts"]) < 50:
                 brain["roasts"].append({"roast": loki_reply, "ts": time.time()})
-        # personality drift (anchored)
         intensity = self.intensity
         brain.setdefault("mood_history", []).append(intensity)
         brain["mood_history"] = brain["mood_history"][-200:]
@@ -647,13 +735,10 @@ class LokiEngine:
         brain["personality"]["softness"] = self.clamp(brain["personality"]["softness"] + drift * -1.0, self.core_anchors["softness"])
         brain["personality"]["sarcasm"] = self.clamp(brain["personality"]["sarcasm"] + random.uniform(-0.001, 0.001), self.core_anchors["sarcasm"])
         brain["personality"]["loyalty"] = min(1.0, brain["personality"]["loyalty"] + 0.0005)
-        # trust & loyalty
         if any(x in msg for x in ["thank", "good job", "love you"]):
             brain["trust"] = min(100, brain["trust"] + 1)
-        # achievements
         if brain["trust"] >= 50 and "first_blood" not in brain["achievements"]:
             brain["achievements"].append("first_blood")
-        # hard floor: every 500 messages, gentle pull back to core
         total_messages = len(brain.get("mood_history", []))
         if total_messages % 500 < 5:
             for trait, (mn, mx) in self.core_anchors.items():
@@ -661,6 +746,7 @@ class LokiEngine:
                 center = (mn + mx) / 2
                 brain["personality"][trait] = current + (center - current) * 0.15
         self.brain_file.write_text(json.dumps(brain, indent=2))
+
     def clamp(self, value, min_max):
         mn, mx = min_max
         return max(mn, min(mx, value))

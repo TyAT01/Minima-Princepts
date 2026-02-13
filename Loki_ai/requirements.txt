@@ -21,3 +21,5 @@ torchaudio
 # Hardware acceleration (RTX 3070)
 # bitsandbytes
 # llama-cpp-python
+aiohttp
+googlesearch-python
