@@ -155,6 +155,11 @@ class LokiEngine:
                     if self.last_thought:
                         logger.info(f"Loki's Internal Thought: {self.last_thought.strip()}")
                         self.memory.store_insight(f"Thought: {self.last_thought.strip()}", source="inner_monologue")
+
+                    # [OPTIMIZATION] Store session start as a high-importance episodic memory
+                    if self._interaction_count == 0:
+                        self.memory.store_episodic_memory(f"SESSION START: First interaction with {user_name} today: '{text}'", importance=8)
+
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
                     # Periodic reflection (every 10 interactions)
@@ -343,8 +348,9 @@ class LokiEngine:
                 if not history: return
                 reflection_prompt = (
                     "Analyze our recent chat history and extract: "
-                    "1. User Profile (facts/likes/dislikes), 2. Notable Events, 3. Insights. "
-                    "Format as YAML with keys: user_facts, events, insights."
+                    "1. User Profile (facts/likes/dislikes), 2. Notable Events, 3. Insights, "
+                    "4. A concise summary of this conversation segment. "
+                    "Format as YAML with keys: user_facts, events, insights, summary."
                 )
                 analysis_raw = self.llm.generate_response("You are Loki, analyzing memories.", f"History: {history}", [], context=reflection_prompt)
             cleaned_raw = self._clean_yaml_block(analysis_raw)
@@ -360,6 +366,12 @@ class LokiEngine:
                     self.memory.store_episodic_memory(event)
                 for insight in data.get('insights', []):
                     self.memory.store_insight(insight, source="reflection")
+
+                # Store summary for RAG optimization
+                summary = data.get('summary')
+                if summary:
+                    self.memory.store_summary(user_id, str(summary))
+
                 logger.info("Reflection complete.")
         except Exception as e:
             logger.warning(f"Reflection failed: {e}")

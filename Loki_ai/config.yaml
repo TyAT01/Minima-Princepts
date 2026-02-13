@@ -17,7 +17,7 @@ stt:
 memory:
   db_path: "./loki_memory"
   collection_name: "loki_ai_memories"
-  max_short_term: 15
+  max_short_term: 8
 
 ui:
   title: "😈 Loki: The Tiny Hoodie Tyrant"

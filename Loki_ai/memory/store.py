@@ -152,6 +152,23 @@ class MemoryStore:
         )
         logger.info(f"Stored episodic memory: {event_id}")
 
+    def store_summary(self, user_id: str, summary: str):
+        """Stores a concise summary of a conversation segment."""
+        now = datetime.now(timezone.utc)
+        summary_id = f"summary_{now.timestamp()}"
+
+        self._collection.add(
+            ids=[summary_id],
+            documents=[summary],
+            metadatas=[{
+                "user_id": user_id,
+                "summary": summary,
+                "timestamp": now.isoformat(),
+                "type": "summary"
+            }]
+        )
+        logger.info(f"Stored summary for {user_id}: {summary_id}")
+
     def update_user_profile(self, user_id: str, fact: str):
         """Adds a specific fact about a person to their profile."""
         now = datetime.now(timezone.utc)
@@ -199,8 +216,11 @@ class MemoryStore:
 
     def get_full_context(self, query: str, user_id: Optional[str] = None) -> str:
         """Combines relevant long-term memories, insights, and user profile facts into a context string."""
+        # Use optimized query for RAG as requested
+        optimized_query = f"relevant past memories for: {query}"
+
         # Increase results for broader context
-        memories = self.search_relevant_memories(query, n_results=10, user_id=user_id)
+        memories = self.search_relevant_memories(optimized_query, n_results=12, user_id=user_id)
 
         context_parts = []
 
@@ -212,6 +232,7 @@ class MemoryStore:
         insights = [m["content"] for m in memories if m["metadata"].get("type") == "insight"]
         profile_facts = [m["content"] for m in memories if m["metadata"].get("type") == "profile_fact"]
         episodic = [m["content"] for m in memories if m["metadata"].get("type") == "episodic"]
+        summaries = [m["content"] for m in memories if m["metadata"].get("type") == "summary"]
 
         if user_id:
             context_parts.append(f"### [USER PROFILE: {user_id}]\n" + (f"Recognized {user_id}. Relevant facts: " + ", ".join(profile_facts) if profile_facts else f"New user or no specific facts stored for {user_id}."))
@@ -221,13 +242,22 @@ class MemoryStore:
         if episodic:
             context_parts.append("### [NOTABLE EVENTS & EXPERIENCES]\n" + "\n".join([f"- {e}" for e in episodic]))
 
+        if summaries:
+            context_parts.append("### [PAST CONVERSATION SUMMARIES]\n" + "\n".join([f"- {s}" for s in summaries]))
+
         if insights:
             context_parts.append("### [CORE INSIGHTS & LESSONS]\n" + "\n".join([f"- {i}" for i in insights]))
 
         if interactions:
             context_parts.append("### [PAST RELEVANT INTERACTIONS]\n" + "\n---\n".join(interactions[:5]))
 
-        return "\n\n".join(context_parts) if context_parts else "No specific past context found."
+        # Combine and truncate to stay within token limits (approx 2500 chars)
+        full_context = "\n\n".join(context_parts) if context_parts else "No specific past context found."
+
+        if len(full_context) > 2500:
+            return full_context[:2497] + "..."
+
+        return full_context
 
     def get_history(self) -> List[Dict[str, str]]:
         """Returns the current short-term conversation history."""
