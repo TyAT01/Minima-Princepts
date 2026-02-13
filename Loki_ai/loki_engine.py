@@ -66,7 +66,7 @@ class LokiEngine:
         llm_cfg = config.get('llm', {})
         self.llm = LlamaClient(
             base_url=llm_cfg.get('base_url', 'http://localhost:11434/api'),
-            model=llm_cfg.get('model', 'llama3.1:8b-instruct-q4_K_M'),
+            model=llm_cfg.get('model', 'loki:latest'),
             api_type=llm_cfg.get('api_type', 'ollama'),
             temperature=llm_cfg.get('temperature', 0.9),
             top_p=llm_cfg.get('top_p', 0.92),

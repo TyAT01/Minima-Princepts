@@ -12,7 +12,7 @@ class LlamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434/api",
-        model: str = "llama3.1:8b-instruct-q4_K_M",
+        model: str = "loki:latest",
         api_type: str = "ollama",
         temperature: float = 0.7,
         top_p: float = 0.9,
