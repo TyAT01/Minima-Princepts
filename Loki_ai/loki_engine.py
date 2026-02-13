@@ -86,6 +86,25 @@ class LokiEngine:
             "softness": (0.10, 0.60)
         }
         self.brain = self._load_brain()
+        self.profile_file = base_path / "profile.json"
+        self.user_profiles = self._load_profiles()
+
+    def _load_profiles(self):
+        """Loads persistent user profiles (Garnish layer)."""
+        if self.profile_file.exists():
+            try:
+                return json.loads(self.profile_file.read_text())
+            except Exception as e:
+                logger.warning(f"Failed to load profiles: {e}")
+        return {}
+
+    def _save_profiles(self):
+        """Saves persistent user profiles."""
+        try:
+            self.profile_file.write_text(json.dumps(self.user_profiles, indent=2))
+        except Exception as e:
+            logger.error(f"Failed to save profiles: {e}")
+
     def _load_session_objectives(self):
         """Loads session objectives from a local JSON file."""
         obj_path = Path(__file__).resolve().parent / "objectives.json"
@@ -102,6 +121,24 @@ class LokiEngine:
         # LLM Diagnostics
         diag = self.llm.perform_diagnostics()
         logger.info(f"LLM Diagnostics:\n{diag}")
+
+    def _imagine_reply(self, query: str) -> str:
+        """HyDE: Generates a hypothetical answer to improve RAG retrieval."""
+        try:
+            # We use a very short prompt to keep it fast
+            hypothetical_prompt = "Generate a short, hypothetical answer to the following user question. This will be used for vector search, so focus on key terms that would appear in a past conversation."
+            # We don't need history or full context for this
+            hypothetical_answer = self.llm.generate_response(
+                "You are Loki's Memory Assistant.",
+                f"USER QUERY: {query}",
+                [],
+                context=hypothetical_prompt
+            )
+            return hypothetical_answer
+        except Exception as e:
+            logger.warning(f"HyDE imagine_reply failed: {e}")
+            return query # Fallback to original query
+
     def process_text(self, text: str, user_name: str = None, interrupt_event: threading.Event = None) -> Generator[str, None, None]:
         """Core text processing logic."""
         self.last_thought = ""
@@ -128,17 +165,39 @@ class LokiEngine:
                 self.intensity = self.get_smart_intensity(processed_text)
                 temp = 0.75 + 0.25 * self.intensity
                 self.llm.temperature = temp
-                # Refresh system prompt with current time
+
+                # --- THE CONTEXT SANDWICH ---
+
+                # 1. Top Bun: System Instructions & Identity
                 system_prompt = self.persona.get_system_prompt(now=datetime.now())
-                # Add Loki context
                 loki_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]\n{self.outfit_block()}"
-                system_prompt += loki_context
-                history = self.memory.get_history()
-                context = self.memory.get_full_context(processed_text, user_id=user_name)
+                top_bun = system_prompt + loki_context
+
+                # 2. Meat: Retrieved Long-Term Memory (RAG)
+                # We use HyDE: Imagine what a good reply might look like to improve search
+                hyp_ans = self._imagine_reply(processed_text)
+                long_term_memory = self.memory.get_full_context(processed_text, user_id=user_name, hypothetical_answer=hyp_ans)
                 # Add Temporal Context
-                context = self._add_temporal_context(context, user_name)
-                # Combined Phase
-                raw_stream = self.llm.stream_response(system_prompt, processed_text, history, context)
+                meat = self._add_temporal_context(long_term_memory, user_name)
+
+                # 3. Garnish: Working Memory / Persistent Facts (profile.json)
+                user_profile = self.user_profiles.get(user_name, {})
+                garnish = f"### [USER PROFILE: {user_name}]\n"
+                if user_profile:
+                    for k, v in user_profile.items():
+                        garnish += f"- {k}: {v}\n"
+                else:
+                    garnish += "- No specific persistent facts known yet.\n"
+
+                # 4. Bottom Bun: Short-Term Buffer (Last N messages)
+                history = self.memory.get_history()
+                # We limit history to the last 10 messages (5 turns)
+                short_term_buffer = history[-10:] if history else []
+
+                # --- ASSEMBLE SANDWICH ---
+                full_context = f"{meat}\n\n{garnish}"
+                raw_stream = self.llm.stream_response(top_bun, processed_text, short_term_buffer, full_context)
+
                 response_stream = self._extract_thought_from_stream(raw_stream)
                 response_fragments = []
                 for fragment in split_into_sentences(response_stream):
@@ -154,11 +213,11 @@ class LokiEngine:
                 if not (interrupt_event and interrupt_event.is_set()):
                     if self.last_thought:
                         logger.info(f"Loki's Internal Thought: {self.last_thought.strip()}")
-                        self.memory.store_insight(f"Thought: {self.last_thought.strip()}", source="inner_monologue")
+                        self.memory.store_insight(f"Thought: {self.last_thought.strip()}", user_id=user_name, source="inner_monologue")
 
                     # [OPTIMIZATION] Store session start as a high-importance episodic memory
                     if self._interaction_count == 0:
-                        self.memory.store_episodic_memory(f"SESSION START: First interaction with {user_name} today: '{text}'", importance=8)
+                        self.memory.store_episodic_memory(f"SESSION START: First interaction with {user_name} today: '{text}'", user_id=user_name, importance=8)
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
@@ -339,6 +398,7 @@ class LokiEngine:
             else:
                 cleaned_lines.append(line)
         return '\n'.join(cleaned_lines).strip()
+
     def reflect(self, user_id: str):
         """
         Perform deep commercial-grade reflection.
@@ -355,7 +415,7 @@ class LokiEngine:
                     "### INSTRUCTION\n"
                     "Analyze the recent conversation history below. Extract critical information to maintain perfect long-term memory.\n"
                     "RETURN ONLY VALID YAML with these keys:\n"
-                    "  user_facts: [List of new facts about the user's life, preferences, or identity]\n"
+                    "  user_facts: { fact_name: fact_value, ... } # Specific persistent facts for profile.json\n"
                     "  events: [List of specific notable actions or events that occurred]\n"
                     "  insights: [List of abstract lessons learned about how to interact with this user]\n"
                     "  summary: \"A single paragraph (3-5 sentences) summarizing the narrative flow and emotional tone of this segment.\"\n\n"
@@ -376,12 +436,20 @@ class LokiEngine:
                     logger.warning(f"YAML Parse failed in reflection: {e}")
 
                 if data and isinstance(data, dict):
-                    for fact in data.get('user_facts', []):
-                        self.memory.update_user_profile(user_id, str(fact))
+                    # Update profile.json (Garnish layer)
+                    facts = data.get('user_facts', {})
+                    if facts and isinstance(facts, dict):
+                        if user_id not in self.user_profiles:
+                            self.user_profiles[user_id] = {}
+                        self.user_profiles[user_id].update(facts)
+                        self._save_profiles()
+                        for k, v in facts.items():
+                             self.memory.update_user_profile(user_id, f"{k}: {v}")
+
                     for event in data.get('events', []):
-                        self.memory.store_episodic_memory(event, importance=6)
+                        self.memory.store_episodic_memory(event, user_id=user_id, importance=6)
                     for insight in data.get('insights', []):
-                        self.memory.store_insight(insight, source="reflection")
+                        self.memory.store_insight(insight, user_id=user_id, source="reflection")
 
                     segment_summary = data.get('summary')
                     if segment_summary:
@@ -389,7 +457,6 @@ class LokiEngine:
 
                     # 2. Hierarchical (Recursive) Summarization
                     # Check if we have enough local summaries to condense into a 'Global Summary'
-                    # This prevents the RAG context from being cluttered with redundant segment summaries.
                     summaries = self.memory.search_relevant_memories("general conversation", filter_type="summary", user_id=user_id, n_results=15)
                     local_summaries = [s["content"] for s in summaries if not s["metadata"].get("is_global")]
 
@@ -415,6 +482,39 @@ class LokiEngine:
                 logger.info("Reflection complete.")
         except Exception as e:
             logger.warning(f"Reflection failed: {e}")
+
+    def shutdown(self):
+        """Performs reflective shutdown and session consolidation."""
+        logger.info("Engine initiating Reflective Shutdown...")
+        try:
+            # 1. Final reflection for each active user
+            # In this simple implementation, we just reflect on the current user
+            self.reflect(self.current_user_name)
+
+            # 2. Identify 'Open Loops'
+            loop_prompt = (
+                "Identify any 'Open Loops' from the recent conversation. \n"
+                "An Open Loop is a project started but not finished, a question asked but not answered, or a promise made.\n"
+                "Return a concise list of strings."
+            )
+            history = self.memory.get_history()
+            if history:
+                open_loops_raw = self.llm.generate_response(
+                    "You are Loki's internal strategist.",
+                    f"RECENT HISTORY:\n{history}",
+                    [],
+                    context=loop_prompt
+                )
+                # Store open loops as high importance episodic memories
+                if open_loops_raw and len(open_loops_raw) > 10:
+                    self.memory.store_episodic_memory(f"OPEN LOOPS at session end: {open_loops_raw}", user_id=self.current_user_name, importance=7)
+
+            # 3. Final save of persistent profiles
+            self._save_profiles()
+            logger.info("Reflective Shutdown complete.")
+        except Exception as e:
+            logger.error(f"Shutdown failed: {e}")
+
     def _clean_yaml_block(self, text: str) -> str:
         if "```yaml" in text: text = text.split("```yaml")[1].split("```")[0]
         elif "```yml" in text: text = text.split("```yml")[1].split("```")[0]
@@ -422,6 +522,7 @@ class LokiEngine:
         lines = text.strip().splitlines()
         if lines and lines[0].strip().lower() in ["yml", "yaml"]: text = "\n".join(lines[1:])
         return text.strip()
+
     def generate_autonomous_thought(self):
         """Generates a proactive thought."""
         try:
@@ -434,7 +535,7 @@ class LokiEngine:
                 match = re.search(r'\[THOUGHTS?\](.*?)\[/THOUGHTS?\]', raw_thought, re.IGNORECASE | re.DOTALL)
                 if match:
                     content = match.group(1).strip()
-                    self.memory.store_insight(f"Autonomous Thought: {content}", source="autonomous_reflection")
+                    self.memory.store_insight(f"Autonomous Thought: {content}", user_id=self.current_user_name, source="autonomous_reflection")
                     return content
         except Exception as e:
             logger.warning(f"Autonomous thought failed: {e}")
