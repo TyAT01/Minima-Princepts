@@ -9,7 +9,7 @@ import time
 import json
 import asyncio
 import numpy as np
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Generator
 
@@ -106,7 +106,13 @@ class LokiEngine:
     def _save_profiles(self):
         """Saves persistent user profiles."""
         try:
-            self.profile_file.write_text(json.dumps(self.user_profiles, indent=2))
+            # Handle non-serializable objects like datetime.date
+            def json_serial(obj):
+                if isinstance(obj, (datetime, date)):
+                    return obj.isoformat()
+                raise TypeError(f"Type {type(obj)} not serializable")
+
+            self.profile_file.write_text(json.dumps(self.user_profiles, indent=2, default=json_serial))
         except Exception as e:
             logger.error(f"Failed to save profiles: {e}")
 
