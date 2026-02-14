@@ -180,7 +180,7 @@ class LokiEngine:
 
                 # LOKI SPECIFIC: Intensity and Temperature
                 self.intensity = self.get_smart_intensity(processed_text)
-                temp = 0.75 + 0.25 * self.intensity
+                temp = 0.5 + 0.2 * self.intensity
                 self.llm.temperature = temp
 
                 # Context Drift Detection
