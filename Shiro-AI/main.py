@@ -101,9 +101,6 @@ class ShiroApp:
             logging.info("Initializing Shiro AI...")
             self.engine.initialize()
 
-            # Start Autonomous Thought Loop
-            self.start_thought_loop()
-
             logging.info("Initialization complete.")
         except Exception as e:
             self.error_handler.handle_error(e, "Initialization")
@@ -113,36 +110,6 @@ class ShiroApp:
         if self.is_responding:
             logging.info("!!! Interrupt received !!!")
             self.interrupt_event.set()
-
-    def start_thought_loop(self):
-        """Starts a background thread for periodic autonomous thinking."""
-        def thought_worker():
-            logging.info("Autonomous v3 thought loop started.")
-            last_deep_thought = time.time()
-
-            while True:
-                # Poll frequently; autonomy_v3 handles its own internal timing for thoughts
-                time.sleep(random.randint(20, 60))
-
-                if not self.is_responding and not self.engine.processing_lock.locked():
-                    # 1. Update autonomy state (natural energy drain)
-                    self.engine.autonomy.update_state()
-
-                    # 2. Check for autonomous speech (Quick Thoughts)
-                    speech = self.engine.autonomy.think_and_speak()
-                    if speech:
-                        logging.info(f"Autonomy V3 Speech: {speech}")
-                        self.results_queue.put(("[Thinking to herself...]", speech))
-
-                    # 3. Occasional Deep Thought via LLM (every 10-20 mins)
-                    if time.time() - last_deep_thought > random.randint(600, 1200):
-                        logging.info("Shiro is having a deep autonomous thought...")
-                        thought = self.engine.generate_autonomous_thought()
-                        if thought:
-                            logging.info(f"Deep Thought: {thought}")
-                        last_deep_thought = time.time()
-
-        threading.Thread(target=thought_worker, daemon=True).start()
 
     def handle_user_join(self, user_name: str):
         """Handles a user joining the chat room."""
