@@ -145,6 +145,19 @@ class LokiEngine:
             logger.warning(f"HyDE imagine_reply failed: {e}")
             return query # Fallback to original query
 
+    def _safe_async_run(self, coro):
+        """Safely runs an async coroutine from a synchronous context."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're already in an event loop, create a task
+                return asyncio.run_coroutine_threadsafe(coro, loop).result()
+            else:
+                return loop.run_until_complete(coro)
+        except RuntimeError:
+            # No event loop in this thread, use asyncio.run
+            return asyncio.run(coro)
+
     def process_text(self, text: str, user_name: str = None, interrupt_event: threading.Event = None) -> Generator[str, None, None]:
         """Core text processing logic."""
         self.last_thought = ""
@@ -176,7 +189,7 @@ class LokiEngine:
                 self.last_interaction_time = current_time
 
                 # Trigger inactivity check (asynchronously)
-                threading.Thread(target=lambda: asyncio.run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
+                threading.Thread(target=lambda: self._safe_async_run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
 
                 # LOKI SPECIFIC: Intensity and Temperature
                 self.intensity = self.get_smart_intensity(processed_text)
@@ -194,12 +207,12 @@ class LokiEngine:
                 loki_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]{drift_note}\n{self.outfit_block()}"
 
                 # [AUTONOMY] Proactive memory injection
-                autonomous_mem = asyncio.run(self.fetch_relevant_memory_async(f"loki schemes for {user_name}", n_results=2))
+                autonomous_mem = self._safe_async_run(self.fetch_relevant_memory_async(f"loki schemes for {user_name}", n_results=2))
                 if autonomous_mem:
                     loki_context += f"\n[SCHEEMING MEMORY: {autonomous_mem}]"
 
                 # [AUTONOMY] Feedback injection
-                feedback_mems = asyncio.run(self.memory.search_relevant_memories_async("User Tool Feedback", n_results=2, user_id=user_name))
+                feedback_mems = self._safe_async_run(self.memory.search_relevant_memories_async("User Tool Feedback", n_results=2, user_id=user_name))
                 if feedback_mems:
                     loki_context += f"\n[USER FEEDBACK ON PREVIOUS SCHEMES: {[m['content'] for m in feedback_mems]}]"
 
@@ -258,7 +271,8 @@ class LokiEngine:
 
                     if "TOOL_CALLS:" in fragment and self.session_tool_count < 2:
                         # Handle tool call
-                        fragment = asyncio.run(self.handle_tool_calls_async(fragment, processed_text))
+                        logger.info(f"Tool call detected in stream: {fragment[:100]}...")
+                        fragment = self._safe_async_run(self.handle_tool_calls_async(fragment, processed_text))
                         self.session_tool_count += 1
 
                     clean_fragment = self._clean_response(fragment)
@@ -629,7 +643,7 @@ class LokiEngine:
             self.memory.prune_old_memories()
 
             # Close LLM Session
-            asyncio.run(self.llm.close())
+            self._safe_async_run(self.llm.close())
 
             logger.info("Reflective Shutdown complete.")
         except Exception as e:
