@@ -1,0 +1,21 @@
+{
+  "personality": {
+    "slyness": 0.71113576,
+    "sass": 0.7995452777013813,
+    "greed": 0.685425,
+    "kindness": 0.5375
+  },
+  "mood_history": [
+    0.5,
+    0.6200000000000001
+  ],
+  "facts": {},
+  "favors": [],
+  "trust": 0,
+  "achievements": [],
+  "autonomy_state": {
+    "mood": "hyper",
+    "energy": 60.0019845062,
+    "last_update_ts": "2026-02-14T06:16:34.394695+00:00"
+  }
+}

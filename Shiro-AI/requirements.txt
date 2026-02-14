@@ -1,0 +1,25 @@
+# Core
+requests
+PyYAML
+chromadb
+sentence-transformers
+faster-whisper>=1.0.3
+ctranslate2>=4.4.0
+torch
+gradio
+sounddevice
+numpy
+cachetools
+networkx
+pytest
+onnxruntime-gpu
+webrtcvad-wheels
+fastapi
+uvicorn
+torchaudio
+
+# Hardware acceleration (RTX 3070)
+# bitsandbytes
+# llama-cpp-python
+aiohttp
+googlesearch-python
