@@ -39,14 +39,15 @@ class TrueAutonomy:
     def _load_thought_database(self) -> Dict[str, list]:
         return {
             "hyper": [
-                "Helmet stickers need more neon. Phase two: chaos.",
+                "The dungeon needs more traps. Fire traps. No, glitter-fire traps.",
                 "I just saw the gacha gods blink. They’re scared.",
                 "Boss is typing… or is the cat walking on the keyboard again?",
                 "If I manifest hard enough, the next pull is gold.",
+                "Roll for initiative, losers! Loki is in the house!",
                 "BRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
             ],
             "soft": [
-                "zzz… dreaming of 5-star echoes… zzz…",
+                "zzz… dreaming of 5-star echoes and perfect d20 rolls… zzz…",
                 "quiet hours… perfect for plotting world domination… softly",
                 "cat tax accepted. whiskers gets headpats in my dreams.",
             ],
@@ -56,11 +57,11 @@ class TrueAutonomy:
             ],
             "chaos_mode": [
                 "CHAOS PROTOCOL ACTIVATED — ALL PULLS ARE GOLD OR I RIOT",
-                "I just rewrote reality. you’re welcome.",
-                "server-chan, hold my coffee.",
+                "I just rewrote reality to favor my dice. you’re welcome.",
+                "server-chan, hold my juice box.",
             ],
             "universal": [   # always available
-                "thinking about donuts in the parking lot again",
+                "thinking about how to turn the kitchen into a mimic",
                 "still waiting for that one perfect echo set",
                 "cat tax is eternal",
                 "my brain is 90% gacha copium",
@@ -146,7 +147,7 @@ class TrueAutonomy:
         # === CONVERT TO SPEECH ===
         speech = {
             "chaos_mode": f"*{self.name} vibrating at 3000 RPM* {thought.upper()}",
-            "hyper":      f"*{self.name} slams kickstand* {thought}",
+            "hyper":      f"*{self.name} cackles maniacally* {thought}",
             "soft":       f"*{self.name} whispers* {thought} …don’t tell anyone",
             "sleepy":     f"*{self.name} half-asleep* {thought} …zzz",
         }.get(self.mood, thought)
