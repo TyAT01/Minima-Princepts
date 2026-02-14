@@ -40,6 +40,7 @@ class LlamaClient:
         self.max_tokens = max_tokens
         self._endpoint_type = "chat" # Default to chat
         self._session: Optional[aiohttp.ClientSession] = None
+        self._supports_tools: Optional[bool] = None # Cache for tool support
         logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model}")
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -83,12 +84,22 @@ class LlamaClient:
         if self.api_type == "ollama":
             try:
                 try:
-                    async for chunk in self._stream_ollama_chat_async(system_prompt, user_input, history, context, tools=tools):
+                    # Use cached tool support
+                    effective_tools = tools if self._supports_tools is not False else None
+                    actual_system_prompt = system_prompt
+                    if tools and self._supports_tools is False:
+                         actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+
+                    async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=effective_tools):
                         yield chunk
+                    if tools and self._supports_tools is None:
+                        self._supports_tools = True
                 except aiohttp.ClientResponseError as e:
                     if e.status == 400 and tools:
-                        logger.warning("Async Ollama chat 400 error with tools. Retrying without tools...")
-                        async for chunk in self._stream_ollama_chat_async(system_prompt, user_input, history, context, tools=None):
+                        logger.warning(f"Async Ollama model {self.model} does not support native tools. Switching to prompt-based tools.")
+                        self._supports_tools = False
+                        actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+                        async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=None):
                             yield chunk
                     else:
                         raise
@@ -112,11 +123,21 @@ class LlamaClient:
             try:
                 if etype == "chat":
                     try:
-                        yield from self._stream_ollama_chat(system_prompt, user_input, history, context, tools=tools)
+                        # Use cached tool support
+                        effective_tools = tools if self._supports_tools is not False else None
+                        actual_system_prompt = system_prompt
+                        if tools and self._supports_tools is False:
+                             actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+
+                        yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=effective_tools)
+                        if tools and self._supports_tools is None:
+                            self._supports_tools = True
                     except requests.exceptions.HTTPError as e:
                         if e.response.status_code == 400 and tools:
-                            logger.warning("Ollama chat 400 error with tools. Retrying without tools...")
-                            yield from self._stream_ollama_chat(system_prompt, user_input, history, context, tools=None)
+                            logger.warning(f"Ollama model {self.model} does not support native tools. Switching to prompt-based tools.")
+                            self._supports_tools = False
+                            actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+                            yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=None)
                         else:
                             raise
                 elif etype == "generate":
@@ -326,6 +347,26 @@ class LlamaClient:
                                 yield f"TOOL_CALLS: {json.dumps(delta['tool_calls'])}"
         except Exception as e:
             logger.error(f"Async OpenAI stream failed: {e}")
+
+    def _inject_tool_instructions(self, system_prompt: str, tools: List[Dict]) -> str:
+        """Injects tool definitions and calling instructions into the system prompt."""
+        tool_desc = ""
+        for tool in tools:
+            fn = tool.get('function', {})
+            name = fn.get('name')
+            desc = fn.get('description')
+            params = fn.get('parameters', {}).get('properties', {})
+            tool_desc += f"- {name}: {desc} (Parameters: {list(params.keys())})\n"
+
+        instruction = (
+            "\n\n### [SYSTEM] TOOL USE\n"
+            "The following tools are available to you if needed:\n"
+            f"{tool_desc}\n"
+            "To use a tool, you MUST output the following exact format on a new line:\n"
+            "TOOL_CALLS: [{\"function\": {\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}}]\n"
+            "Follow the exact JSON format. The engine will catch this and provide the result in the next turn.\n"
+        )
+        return system_prompt + instruction
 
     def perform_diagnostics(self) -> str:
         base = self.base_url
