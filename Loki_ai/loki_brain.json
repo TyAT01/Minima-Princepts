@@ -15,5 +15,10 @@
     "count": 0
   },
   "trust": 0,
-  "achievements": []
+  "achievements": [],
+  "autonomy_state": {
+    "mood": "hyper",
+    "energy": 60.00197408537,
+    "last_save_ts": "2026-02-14T03:53:08.102846"
+  }
 }
