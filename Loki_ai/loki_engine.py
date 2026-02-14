@@ -708,8 +708,13 @@ class LokiEngine:
 
     def outfit_block(self) -> str:
         outfit = self.wardrobe[self.current_outfit]
-        ears_line = "YES – you can say 'the ears hear everything'" if outfit.get("ears") else "NO ears today"
-        return f"\n=== CURRENT OUTFIT ===\nWearing: {outfit['name']}\nDetails: {outfit['desc']}\nEars active: {ears_line}\nOnly mention outfit details if it fits the reply naturally."
+        block = f"\n=== CURRENT OUTFIT ===\nWearing: {outfit['name']}\nDetails: {outfit['desc']}\n"
+        if outfit.get("ears"):
+            block += "Ears active: YES – you can say 'the ears hear everything'\n"
+        else:
+            block += "Ears active: NO (Do NOT mention ears or a hoodie)\n"
+        block += "Only mention outfit details if it fits the reply naturally."
+        return block
 
     def _load_brain(self):
         if not self.brain_file.exists():
