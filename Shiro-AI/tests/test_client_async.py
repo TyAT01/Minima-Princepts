@@ -3,9 +3,7 @@ import aiohttp
 from llm.client import LlamaClient
 from unittest.mock import patch, MagicMock, AsyncMock
 import json
-import pytest
 
-@pytest.mark.asyncio
 async def test_client_async():
     client = LlamaClient(base_url="http://mock:11434/api", model="shiro")
 
