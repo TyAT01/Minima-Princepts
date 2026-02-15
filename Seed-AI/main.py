@@ -42,11 +42,11 @@ from memory.store import MemoryStore
 from stt.whisper import STTSystem
 from utils.text_utils import split_into_sentences
 from persona.manager import PersonaManager
-from ui.web_gui import AureliaGUI
+from ui.web_gui import SeedGUI
 from utils.error_handler import ErrorHandler
 from queue import Queue
 
-class AureliaApp:
+class SeedApp:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
         self.processing_lock = threading.Lock()
@@ -56,8 +56,8 @@ class AureliaApp:
         # Initialize components with config
         mem_cfg = self.config.get('memory', {})
         self.memory = MemoryStore(
-            db_path=mem_cfg.get('db_path', './aurelia_memory'),
-            collection_name=mem_cfg.get('collection_name', 'aurelia_ai_memories'),
+            db_path=mem_cfg.get('db_path', './seed_memory'),
+            collection_name=mem_cfg.get('collection_name', 'seed_ai_memories'),
             max_short_term=mem_cfg.get('max_short_term', 15)
         )
 
@@ -77,7 +77,7 @@ class AureliaApp:
 
         pers_cfg = self.config.get('persona', {})
         # Note: sheet_path in config might be relative to the version folder
-        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'aurelia_sheet.yaml'))
+        self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'Seed_sheet.yaml'))
 
         self.results_queue = Queue()
         self.interrupt_event = threading.Event()
@@ -91,12 +91,12 @@ class AureliaApp:
         )
 
         ui_cfg = self.config.get('ui', {})
-        self.gui = AureliaGUI(
+        self.gui = SeedGUI(
             process_text_cb=self.process_text,
             process_audio_cb=self.process_audio,
             toggle_mic_cb=self.toggle_mic,
             poll_results_cb=self.poll_results,
-            title=ui_cfg.get('title', "⚔️ Aurelia Vale: The Hedge-Knight Squire"),
+            title=ui_cfg.get('title', "🛠️ Seed: The Tinkering Prodigy"),
             theme=ui_cfg.get('theme', "soft")
         )
 
@@ -104,7 +104,7 @@ class AureliaApp:
         try:
             if not os.path.exists(path):
                 # Try one level up if not found (e.g. if run from root)
-                alt_path = os.path.join("Aurelia-AI", path)
+                alt_path = os.path.join("Seed-AI", path)
                 if os.path.exists(alt_path):
                     path = alt_path
                 else:
@@ -119,7 +119,7 @@ class AureliaApp:
 
     def initialize(self):
         try:
-            logging.info("Initializing Aurelia AI...")
+            logging.info("Initializing Seed AI...")
 
             # Run LLM Diagnostics first
             diag = self.llm.perform_diagnostics()
@@ -289,7 +289,7 @@ class AureliaApp:
                     # Save both thought and interaction
                     if self.last_thought:
                         self.last_thought = self.last_thought.strip()
-                        logging.info(f"Aurelia's Thought: {self.last_thought}")
+                        logging.info(f"Seed's Thought: {self.last_thought}")
                         self.memory.store_insight(f"Thought: {self.last_thought}", source="inner_monologue")
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
@@ -309,19 +309,19 @@ class AureliaApp:
     def reflect(self, user_id: str):
         """Asks the LLM to analyze recent interactions for profiles, events, and insights."""
         try:
-            logging.info(f"Aurelia is reflecting on recent experiences with {user_id}...")
+            logging.info(f"Seed is reflecting on recent experiences with {user_id}...")
             history = self.memory.get_history()
             if not history: return
 
             reflection_prompt = (
-                "You are Aurelia Vale, performing deep reflection. Analyze our recent chat history and extract the following:\n"
+                "You are Seed, performing deep reflection. Analyze our recent chat history and extract the following:\n"
                 "1. User Profile: Any new facts, likes, or dislikes about the person I'm talking to.\n"
                 "2. Notable Events: Any significant moments or 'firsts' that happened.\n"
                 "3. Insights: Lessons learned about myself or the world.\n\n"
                 "Format your response as a valid YAML block with keys: 'user_facts' (list), 'events' (list), 'insights' (list)."
             )
 
-            analysis_raw = self.llm.generate_response("You are Aurelia Vale, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
+            analysis_raw = self.llm.generate_response("You are Seed, analyzing your memories.", f"Recent History: {history}", [], context=reflection_prompt)
 
             # Clean up potential markdown and metadata labels
             def clean_yaml_block(text):
@@ -461,9 +461,9 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("aurelia_ai.log")
+            logging.FileHandler("seed_ai.log")
         ]
     )
 
-    app = AureliaApp()
+    app = SeedApp()
     app.run()
