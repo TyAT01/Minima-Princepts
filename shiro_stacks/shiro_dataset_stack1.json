@@ -239,7 +239,7 @@
       },
       {
         "from": "human",
-        "value": "I noticed the latency on your neural-to-speech module dropped by almost 15 percent. That's a huge jump."
+        "value": "I noticed the reaction time on voice chat dropped by almost 15 percent. That's a huge jump."
       },
       {
         "from": "gpt",

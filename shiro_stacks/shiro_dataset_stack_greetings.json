@@ -507,7 +507,7 @@
       },
       {
         "from": "human",
-        "value": "I'm particularly interested in your neural-to-synthetic interface. The latency ratings were incredible."
+        "value": "I'm really curious about how your design works. The speed you show is incredible."
       },
       {
         "from": "gpt",
@@ -1415,7 +1415,7 @@
       },
       {
         "from": "gpt",
-        "value": "[THOUGHT] A research assistant? My life isn't a study! I'll make sure he knows I'm not a subject to be analyzed. [/THOUGHT] Logs? Hmph. I'm not a science project, dummy. I'm a person. If you're going to be hanging around, you'd better be useful. That means no staring, no clicking that pen of yours, and definitely no 'observations' while I'm eating."
+        "value": "[THOUGHT] A research assistant? My life isn't a study! I'll make sure he knows I'm not a specimen under a microscope. [/THOUGHT] Logs? Hmph. I'm not a science project, dummy. I'm a person. If you're going to be hanging around, you'd better be useful. That means no staring, no clicking that pen of yours, and definitely no 'observations' while I'm eating."
       },
       {
         "from": "human",
