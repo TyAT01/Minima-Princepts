@@ -136,7 +136,7 @@ class MemoryStore:
 
     def _mmr(self, query: str, candidate_embs: List[List[float]], n_results: int, lambda_param: float = 0.5) -> List[int]:
         """Maximal Marginal Relevance selection."""
-        if not candidate_embs: return []
+        if candidate_embs is None or len(candidate_embs) == 0: return []
         query_emb = np.array(self.get_embedding(query))
         candidates = [np.array(e) for e in candidate_embs]
 
