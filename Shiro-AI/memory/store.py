@@ -89,11 +89,17 @@ class MemoryStore:
         if cache_key in self._search_cache:
              return self._search_cache[cache_key]
 
-        where_clause = {}
+        filters = []
         if filter_type:
-            where_clause["type"] = filter_type
+            filters.append({"type": filter_type})
         if user_id:
-            where_clause["user_id"] = user_id
+            filters.append({"user_id": user_id})
+
+        where_clause = None
+        if len(filters) > 1:
+            where_clause = {"$and": filters}
+        elif len(filters) == 1:
+            where_clause = filters[0]
 
         # Use MMR for diverse results (Hybrid Search)
         results = self.collection.query(
@@ -297,7 +303,7 @@ class MemoryStore:
             results = self.collection.query(
                 query_texts=[""],
                 n_results=1,
-                where={"user_id": user_id, "type": "interaction"},
+                where={"$and": [{"user_id": user_id}, {"type": "interaction"}]},
                 include=["metadatas"]
             )
 

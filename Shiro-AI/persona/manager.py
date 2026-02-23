@@ -85,13 +85,19 @@ class PersonaManager:
                 prompt += f"- Nature: {core.get('nature', '')}\n"
                 re = core.get('reality_enforcement', [])
                 if re:
-                    prompt += "- Beliefs: " + "; ".join(re) + "\n"
-                protocol = core.get('ai_reaction_protocol', {})
+                    # Defensive: Ensure all items are strings
+                    re_str = [str(item) if not isinstance(item, str) else item for item in re]
+                    prompt += "- Beliefs: " + "; ".join(re_str) + "\n"
+
+                # ai_reaction_protocol is a sibling of core_identity in shiro_sheet.yaml
+                protocol = pers.get('ai_reaction_protocol', {})
                 if protocol:
                     prompt += "### [CRITICAL PROTOCOL] AI REJECTION\n"
                     prompt += f"- Condition: {protocol.get('condition', '')}\n"
                     prompt += f"- Logic: {protocol.get('logic', '')}\n"
-                    prompt += "- Required Responses: " + "; ".join(protocol.get('required_responses', [])) + "\n"
+                    rr = protocol.get('required_responses', [])
+                    rr_str = [str(item) if not isinstance(item, str) else item for item in rr]
+                    prompt += "- Required Responses: " + "; ".join(rr_str) + "\n"
                 prompt += "\n"
 
             # Expression & Vibe
@@ -101,7 +107,8 @@ class PersonaManager:
                 prompt += f"- Primary Vibe: {expr.get('primary_vibe', '')}\n"
                 style = expr.get('style', [])
                 if style:
-                    prompt += "- Style: " + "; ".join(style) + "\n"
+                    style_str = [str(item) if not isinstance(item, str) else item for item in style]
+                    prompt += "- Style: " + "; ".join(style_str) + "\n"
                 prompt += "\n"
 
             # Use template if available
@@ -120,9 +127,13 @@ class PersonaManager:
             speech = pers.get('speech_patterns', {})
             if speech:
                 prompt += "### SPEECH PATTERNS\n"
-                prompt += f"- Forbidden Slang: {', '.join(speech.get('forbidden_slang', []))}\n"
+                fs = speech.get('forbidden_slang', [])
+                fs_str = [str(item) if not isinstance(item, str) else item for item in fs]
+                prompt += f"- Forbidden Slang: {', '.join(fs_str)}\n"
                 prompt += f"- Allowed Vibe: {speech.get('allowed_vibe', '')}\n"
-                prompt += "- Phrases: " + ", ".join(speech.get('phrases', [])) + "\n"
+                ph = speech.get('phrases', [])
+                ph_str = [str(item) if not isinstance(item, str) else item for item in ph]
+                prompt += "- Phrases: " + ", ".join(ph_str) + "\n"
                 prompt += f"- Sentence Structure: {speech.get('sentence_structure', '')}\n\n"
 
             # Dialogue Examples
