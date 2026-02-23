@@ -3,7 +3,8 @@
 llm:
   api_type: "ollama"  # 'ollama' or 'openai'
   base_url: "http://localhost:11434/api"
-  model: "llama3.1:8b-instruct-q4_K_M"
+  model: "shiro:latest"
+  fallback_model: "llama3.1:8b-instruct-q4_K_M"
   temperature: 0.6
   top_p: 0.9
   repeat_penalty: 1.2

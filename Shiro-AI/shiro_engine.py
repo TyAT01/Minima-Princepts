@@ -67,6 +67,7 @@ class ShiroEngine:
         self.llm = LlamaClient(
             base_url=llm_cfg.get('base_url', 'http://localhost:11434/api'),
             model=llm_cfg.get('model', 'llama3.1:8b-instruct-q4_K_M'),
+            fallback_model=llm_cfg.get('fallback_model'),
             api_type=llm_cfg.get('api_type', 'ollama'),
             temperature=llm_cfg.get('temperature', 0.6),
             top_p=llm_cfg.get('top_p', 0.9),
