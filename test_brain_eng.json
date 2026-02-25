@@ -1,0 +1,21 @@
+{
+  "personality": {
+    "menace": 0.70738576,
+    "sarcasm": 0.8112381380058331,
+    "loyalty": 0.715425,
+    "softness": 0.3075952
+  },
+  "mood_history": [
+    0.5,
+    0.6200000000000001
+  ],
+  "facts": {},
+  "roasts": [],
+  "trust": 0,
+  "achievements": [],
+  "autonomy_state": {
+    "mood": "hyper",
+    "energy": 60.00198365654,
+    "last_update_ts": "2026-02-14T05:36:02.922029+00:00"
+  }
+}

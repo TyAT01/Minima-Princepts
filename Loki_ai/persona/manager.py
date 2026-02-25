@@ -136,7 +136,12 @@ class PersonaManager:
                     prompt += f"#### {key.replace('_', ' ').title()}\n"
                     if isinstance(examples, list):
                         for ex in examples:
-                            prompt += f"- {ex}\n"
+                            if isinstance(ex, dict):
+                                # Handle {role: content} or {User: msg, Loki: resp}
+                                for role, content in ex.items():
+                                    prompt += f"- {role}: \"{content}\"\n"
+                            else:
+                                prompt += f"- {ex}\n"
                     else:
                         prompt += f"{examples}\n"
                 prompt += "\n"

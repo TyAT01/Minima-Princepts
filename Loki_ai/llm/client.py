@@ -173,6 +173,7 @@ class LlamaClient:
                 "top_p": self.top_p,
                 "repeat_penalty": self.repeat_penalty,
                 "num_predict": self.max_tokens,
+                "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
             }
         }
         if tools:
@@ -211,6 +212,7 @@ class LlamaClient:
                 "top_p": self.top_p,
                 "repeat_penalty": self.repeat_penalty,
                 "num_predict": self.max_tokens,
+                "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
             }
         }
         if tools:
@@ -252,6 +254,7 @@ class LlamaClient:
                 "top_p": self.top_p,
                 "repeat_penalty": self.repeat_penalty,
                 "num_predict": self.max_tokens,
+                "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
             }
         }
         response = requests.post(f"{self.base_url}/generate", json=payload, timeout=60, stream=True)
@@ -278,7 +281,8 @@ class LlamaClient:
             "temperature": self.temperature,
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
-            "stream": True
+            "stream": True,
+            "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
         }
         if tools:
             payload["tools"] = tools
@@ -320,7 +324,8 @@ class LlamaClient:
             "temperature": self.temperature,
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
-            "stream": True
+            "stream": True,
+            "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
         }
         if tools:
             payload["tools"] = tools

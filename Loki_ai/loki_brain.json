@@ -1,25 +1,19 @@
 {
   "personality": {
-    "menace": 0.58,
-    "sarcasm": 0.77,
-    "loyalty": 0.55,
-    "softness": 0.48
+    "menace": 0.5800000000000001,
+    "sarcasm": 0.76875,
+    "loyalty": 0.5454249999999999,
+    "softness": 0.47755439999999993
   },
   "facts": {},
   "roasts": [],
   "mood_history": [
-    0.5
+    0.6200000000000001
   ],
   "autonomous_thoughts": {
-    "date": "2026-02-14",
+    "date": "2024-01-01",
     "count": 0
   },
   "trust": 0,
-  "achievements": [],
-  "autonomy_state": {
-    "mood": "hyper",
-    "energy": 95.0,
-    "last_update_ts": "2026-02-14T00:00:00"
-  },
-  "thought_log": []
+  "achievements": []
 }
