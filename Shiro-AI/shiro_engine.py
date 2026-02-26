@@ -72,7 +72,9 @@ class ShiroEngine:
             temperature=llm_cfg.get('temperature', 0.6),
             top_p=llm_cfg.get('top_p', 0.9),
             repeat_penalty=llm_cfg.get('repeat_penalty', 1.2),
-            max_tokens=llm_cfg.get('max_tokens', 512)
+            max_tokens=llm_cfg.get('max_tokens', 512),
+            use_native_tools=llm_cfg.get('use_native_tools', True),
+            num_gpu=llm_cfg.get('num_gpu')
         )
         pers_cfg = config.get('persona', {})
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'shiro_sheet.yaml'))
@@ -188,9 +190,6 @@ class ShiroEngine:
                 previous_interaction = self.last_interaction_time
                 self.last_interaction_time = current_time
 
-                # Trigger inactivity check (asynchronously)
-                threading.Thread(target=lambda: self._safe_async_run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
-
                 # SHIRO SPECIFIC: Intensity and Temperature
                 self.intensity = self.get_smart_intensity(processed_text)
                 temp = 0.5 + 0.2 * self.intensity
@@ -292,6 +291,8 @@ class ShiroEngine:
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
+                    # Trigger background tasks AFTER response is generated to avoid concurrent VRAM usage
+                    threading.Thread(target=lambda: self._safe_async_run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
                     if self._interaction_count > 0 and self._interaction_count % 10 == 0:
                          threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
                     self.shiro_learn_and_stay_shiro(processed_text, full_response)
@@ -473,6 +474,7 @@ class ShiroEngine:
                             is_block_start = True
                         if is_block_start:
                             in_thought = True
+                            yield "[THOUGHT] "
                         else:
                             self.last_thought += tag_content + " "
                         continue
@@ -493,7 +495,9 @@ class ShiroEngine:
                 else:
                     match = end_pattern.search(buffer)
                     if match:
-                        self.last_thought += buffer[:match.start()]
+                        thought_chunk = buffer[:match.start()]
+                        self.last_thought += thought_chunk
+                        yield thought_chunk + " [/THOUGHT]"
                         buffer = buffer[match.end():].lstrip()
                         in_thought = False
                         continue
@@ -502,6 +506,7 @@ class ShiroEngine:
                             parts = buffer.split("\n", 1)
                             if len(parts[1]) > 5 and parts[1].strip() and parts[1].strip()[0].isupper():
                                 self.last_thought += parts[0]
+                                yield parts[0] + " [/THOUGHT]"
                                 buffer = parts[1]
                                 in_thought = False
                                 continue
@@ -534,6 +539,10 @@ class ShiroEngine:
                 yield buffer
 
     def _clean_response(self, text: str) -> str:
+        # Prevent stripping our newly added thought markers
+        if "[THOUGHT]" in text or "[/THOUGHT]" in text:
+             return text
+
         clean = re.sub(rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?\[/(?:{self.THOUGHT_KEYWORDS})\]', '', text, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(rf'\((?:{self.THOUGHT_KEYWORDS})[^\)]*\).*?\(/(?:{self.THOUGHT_KEYWORDS})\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'<THOUGHTS?>.*?</THOUGHTS?>', '', clean, flags=re.IGNORECASE | re.DOTALL)

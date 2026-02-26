@@ -1,0 +1,17 @@
+{
+  "version": "eternal_1.0",
+  "born": 1772148848.5371988,
+  "personality": {
+    "slyness": 0.7749999999999999,
+    "sass": 0.8,
+    "greed": 0.6000000000000001,
+    "kindness": 0.75
+  },
+  "trust": 0,
+  "facts": {},
+  "favors": [],
+  "achievements": [],
+  "outfits": [
+    "default"
+  ]
+}

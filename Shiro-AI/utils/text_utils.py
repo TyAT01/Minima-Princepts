@@ -3,26 +3,41 @@ import re
 def split_into_sentences(text_stream):
     """
     Yields sentence fragments from a stream of text chunks.
-    Delimiters are . ! ? and \n
+    Delimiters are . ! ? \n and , or after a certain word count for "instant" feel.
     """
     buffer = ""
-    # Punctuation that usually ends a sentence
-    sentence_endings = re.compile(r'([.!?\n])')
+    # Punctuation that usually ends a sentence or indicates a pause
+    delimiters = re.compile(r'([.!?\n,])')
 
     for chunk in text_stream:
         buffer += chunk
 
-        # Check if we have any sentence endings in the buffer
+        # Check if we have any delimiters in the buffer
         while True:
-            match = sentence_endings.search(buffer)
-            if not match:
-                break
+            match = delimiters.search(buffer)
+            if match:
+                pos = match.end()
+                sentence = buffer[:pos].strip()
+                if sentence:
+                    yield sentence
+                buffer = buffer[pos:]
+                continue
 
-            pos = match.end()
-            sentence = buffer[:pos].strip()
-            if sentence:
-                yield sentence
-            buffer = buffer[pos:]
+            # If no delimiter, but buffer is getting long, yield by word count for "instant" feel
+            words = buffer.split()
+            if len(words) >= 8:
+                # Find the last space to yield full words
+                last_space = buffer.rfind(" ")
+                if last_space != -1:
+                    fragment = buffer[:last_space].strip()
+                    if fragment:
+                        yield fragment
+                    buffer = buffer[last_space:].lstrip()
+                else:
+                    # Fallback if no space (unlikely with 8 words)
+                    yield buffer.strip()
+                    buffer = ""
+            break
 
     # Yield remaining buffer if any
     remaining = buffer.strip()
