@@ -1590,8 +1590,6 @@ class ShiroInnerMind:
     def load_state(self, filepath: str) -> bool:
         with self._lock:
             try:
-                if not os.path.exists(filepath):
-                    return False
                 with open(filepath, "r", encoding="utf-8") as f:
                     wrapper = json.load(f)
 
