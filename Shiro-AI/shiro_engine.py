@@ -155,10 +155,10 @@ def _robust_clean_yaml(raw: str) -> str:
 
 
 # Hmph variants to throttle (case-insensitive)
-_HMPH_PATTERN = re.compile(
-    r'\bhmph\.?!?|\bhmph,|\bHmph\.?!?',
-    re.IGNORECASE
-)
+# Hmph pattern — matches the word plus any trailing punctuation and whitespace.
+# Consuming the trailing punct+space prevents "Whatever., text" artifacts when
+# replacing "Hmph, text" → "Whatever. text" instead of "Whatever., text".
+_HMPH_PATTERN = re.compile(r'\bhmph[.,!]?\s*', re.IGNORECASE)
 # Replacements to rotate through when we suppress hmph
 _HMPH_ALTERNATIVES = [
     "...",
@@ -451,9 +451,17 @@ class ShiroEngine:
                     clean_fragment = self._clean_response(fragment)
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
-                        yield clean_fragment
 
+                # ── Hmph throttle runs on the FULL assembled response (not per fragment) ──
                 full_response = " ".join(response_fragments)
+                full_response = self._throttle_hmph(full_response)
+
+                # Re-split into fragments for streaming yield so the GUI still gets
+                # incremental updates. Simple word-chunk split to avoid re-splitting logic.
+                if full_response:
+                    # Yield the throttled response as a single clean string.
+                    # The GUI buffers anyway (BUFFER_THRESHOLD=6) so this is fine.
+                    yield full_response
 
                 if not (interrupt_event and interrupt_event.is_set()):
                     if self.last_thought:
@@ -724,7 +732,7 @@ class ShiroEngine:
                 yield buffer
 
     def _clean_response(self, text: str) -> str:
-        # Preserve thought markers
+        # Preserve thought markers — the stream extractor handles these separately
         if "[THOUGHT]" in text or "[/THOUGHT]" in text:
             return text
 
@@ -744,43 +752,13 @@ class ShiroEngine:
         clean = re.sub(r'(?i)\*(?:Shiro\s+)?(?:thinks?|thinking|schem\w+|plott\w+).*?\*', '', clean).strip()
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
 
-        # ── Hmph throttle ───────────────────────────────────────────────────────
-        # Allow at most 1 "hmph" per response, and only if 3+ responses have
-        # passed since the last one was allowed through.
-        hmph_matches = list(_HMPH_PATTERN.finditer(clean))
-        if hmph_matches:
-            COOLDOWN = 3  # responses between allowed hmphs
-
-            if self._hmph_counter < COOLDOWN:
-                # Suppress ALL hmph occurrences this response
-                alt_idx = self._hmph_session_count % len(_HMPH_ALTERNATIVES)
-                replacement = _HMPH_ALTERNATIVES[alt_idx]
-                clean = _HMPH_PATTERN.sub(replacement, clean)
-                # Don't reset counter — still cooling down
-            else:
-                # Allow the FIRST hmph only, suppress any extras
-                first_match = hmph_matches[0]
-                if len(hmph_matches) > 1:
-                    # Keep first occurrence, replace the rest
-                    parts = []
-                    last_end = 0
-                    for i, m in enumerate(hmph_matches):
-                        parts.append(clean[last_end:m.start()])
-                        if i == 0:
-                            parts.append(m.group(0))  # keep original
-                        else:
-                            parts.append("")           # suppress extras
-                        last_end = m.end()
-                    parts.append(clean[last_end:])
-                    clean = "".join(parts)
-                self._hmph_counter = 0   # reset cooldown
-                self._hmph_session_count += 1
-
-            self._hmph_counter += 1
-        else:
-            # No hmph this response — advance cooldown counter
-            self._hmph_counter = min(self._hmph_counter + 1, 10)
-        # ── End hmph throttle ───────────────────────────────────────────────────
+        # ── Speaker tag stripping ────────────────────────────────────────────────
+        # Model sometimes prefixes its spoken response with "Shiro:" — strip it.
+        # Handles: "Shiro: text", "Shiro : text", "shiro: text"
+        clean = re.sub(r'(?i)^\s*shiro\s*:\s*', '', clean).strip()
+        # Also strip generic "Name:" patterns at line start that the model may echo
+        # (e.g. if the prompt had speaker-tagged examples)
+        # ── End speaker tag stripping ────────────────────────────────────────────
 
         lines = clean.splitlines()
         cleaned_lines = []
@@ -790,6 +768,53 @@ class ShiroEngine:
             else:
                 cleaned_lines.append(line)
         return '\n'.join(cleaned_lines).strip()
+
+    def _throttle_hmph(self, full_response: str) -> str:
+        """
+        Hmph throttle — operates on the COMPLETE assembled response, not fragments.
+        Allows at most 1 'hmph' per response, and only once every COOLDOWN responses.
+
+        This MUST be called at the full-response level (after all fragments are joined)
+        because _clean_response runs per sentence fragment. If the throttle ran per
+        fragment, the COOLDOWN counter would tick multiple times per LLM response,
+        allowing hmph through every 3 fragments (~every 1-2 responses) instead of
+        every 3 full responses.
+        """
+        COOLDOWN = 4  # full responses between allowed hmphs (raised from 3 → 4)
+
+        hmph_matches = list(_HMPH_PATTERN.finditer(full_response))
+        if not hmph_matches:
+            # No hmph — advance cooldown counter toward next allowed slot
+            self._hmph_counter = min(self._hmph_counter + 1, COOLDOWN + 5)
+            return full_response
+
+        if self._hmph_counter < COOLDOWN:
+            # Still in cooldown — suppress ALL hmphs this response
+            alt_idx = self._hmph_session_count % len(_HMPH_ALTERNATIVES)
+            replacement = _HMPH_ALTERNATIVES[alt_idx]
+            result = _HMPH_PATTERN.sub(replacement, full_response)
+            self._hmph_session_count += 1
+            # Counter keeps ticking (don't reset — we're still cooling down)
+            self._hmph_counter += 1
+        else:
+            # Cooldown complete — allow exactly ONE hmph, suppress any extras
+            if len(hmph_matches) > 1:
+                parts = []
+                last_end = 0
+                for i, m in enumerate(hmph_matches):
+                    parts.append(full_response[last_end:m.start()])
+                    parts.append(m.group(0) if i == 0 else "")
+                    last_end = m.end()
+                parts.append(full_response[last_end:])
+                result = "".join(parts)
+            else:
+                result = full_response  # single hmph, keep it
+
+            # Reset cooldown counter after allowing one through
+            self._hmph_counter = 0
+            self._hmph_session_count += 1
+
+        return result
 
     def reflect(self, user_id: str):
         try:
