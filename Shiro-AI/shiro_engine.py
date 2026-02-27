@@ -160,7 +160,7 @@ class ShiroEngine:
         """HyDE: Generates a hypothetical answer to improve RAG retrieval."""
         try:
             # Optimized for speed and semantic overlap
-            hypothetical_prompt = "Provide a brief, direct answer to this query as it might have appeared in a previous chat log. Use likely keywords."
+            hypothetical_prompt = "Provide a neutral, factual answer to this query as it might appear in a prior conversation log. Use specific nouns and keywords only. No personality."
             # We don't need history or full context for this
             hypothetical_answer = self.llm.generate_response(
                 "You are Shiro's Memory Assistant.",
@@ -223,6 +223,14 @@ class ShiroEngine:
                 # Context Drift Detection
                 drift_score = self._detect_context_drift(processed_text)
 
+                # Aggression Reduction: dynamic length hint
+                length_hint = ""
+                user_msg_len = len(processed_text)
+                if user_msg_len < 40:
+                    length_hint = "\n[SYSTEM: Short user message detected. Respond in 1-2 sentences max. Match their energy.]"
+                elif user_msg_len < 100:
+                    length_hint = "\n[SYSTEM: Keep response focused. 2-3 sentences.]"
+
                 # [INNER MIND] Process input to get thoughts and strategy
                 inner_mind_data = self.mind.process_input(processed_text, user_id=user_name)
                 inner_context = inner_mind_data.get("inner_context", "")
@@ -232,7 +240,7 @@ class ShiroEngine:
                 # 1. Top Bun: System Instructions & Identity
                 system_prompt = self.persona.get_system_prompt(now=datetime.now())
                 drift_note = f"\n[SYSTEM: Topic Drift Detected ({drift_score:.2f}). Adjusting focus.]" if drift_score > 0.6 else ""
-                shiro_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]{drift_note}\n{self.outfit_block()}"
+                shiro_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]{drift_note}{length_hint}\n{self.outfit_block()}"
 
                 # [AUTONOMY] Proactive memory injection
                 autonomous_mem = self._safe_async_run(self.fetch_relevant_memory_async(f"shiro tricks for {user_name}", n_results=2))

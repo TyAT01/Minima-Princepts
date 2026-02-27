@@ -133,7 +133,7 @@ class ShiroApp:
              return resp if resp else ["Wait... who are you? Identifty yourself before I lose my patience, stranger."]
         else:
              # First time greeting
-             prompt = f"(LOG: A new person named {user_name} has arrived. Shiro, greet them now with your typical 'coy kitsune' energy.)"
+             prompt = f"(LOG: {user_name} has arrived. Shiro, acknowledge them briefly — curious but guarded, not aggressive. Keep it short.)"
              resp = list(self.process_text(prompt, user_name))
              return resp if resp else ["A new face? *tail swishes* I'm Shiro. What do you want, stranger?"]
 
