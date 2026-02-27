@@ -249,8 +249,15 @@ class ShiroEngine:
 
                 # [AUTONOMY] Feedback injection
                 feedback_mems = self._safe_async_run(self.memory.search_relevant_memories_async("User Favor Feedback", n_results=2, user_id=user_name))
-                if feedback_mems:
-                    shiro_context += f"\n[USER FEEDBACK ON PREVIOUS FAVORS: {[m['content'] for m in feedback_mems]}]"
+                if feedback_mems and isinstance(feedback_mems, list):
+                    # Ensure we handle list of dicts or list of strings
+                    feedback_contents = []
+                    for m in feedback_mems:
+                        if isinstance(m, dict) and 'content' in m:
+                            feedback_contents.append(m['content'])
+                        else:
+                            feedback_contents.append(str(m))
+                    shiro_context += f"\n[USER FEEDBACK ON PREVIOUS FAVORS: {feedback_contents}]"
 
                 top_bun = system_prompt + shiro_context
 
@@ -852,7 +859,15 @@ class ShiroEngine:
 
     def shiro_learn_and_stay_shiro(self, user_msg: str, shiro_reply: str):
         brain = self._load_brain()
+        if not brain: return
+
         msg = user_msg.lower()
+        # Defensive initialization
+        brain.setdefault("facts", {})
+        brain.setdefault("favors", [])
+        brain.setdefault("personality", {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()})
+        brain.setdefault("achievements", [])
+
         if ("my name is" in msg or "call me" in msg) and "username" not in msg and "?" not in msg:
             parts = msg.split("is") if "is" in msg else msg.split("me")
             name = parts[-1].strip(" .,!?")
@@ -869,10 +884,20 @@ class ShiroEngine:
         brain["mood_history"] = brain["mood_history"][-200:]
         avg_mood = sum(brain["mood_history"]) / len(brain["mood_history"])
         drift = (avg_mood - 0.7) * 0.0008
+
+        # Safe personality updates
+        for trait in ["slyness", "kindness", "sass"]:
+            if trait not in brain["personality"]:
+                mn, mx = self.core_anchors.get(trait, (0.5, 0.5))
+                brain["personality"][trait] = (mn + mx) / 2
+
         brain["personality"]["slyness"] = self.clamp(brain["personality"]["slyness"] + drift * 1.2, self.core_anchors["slyness"])
         brain["personality"]["kindness"] = self.clamp(brain["personality"]["kindness"] + drift * -1.0, self.core_anchors["kindness"])
         brain["personality"]["sass"] = self.clamp(brain["personality"]["sass"] + random.uniform(-0.001, 0.001), self.core_anchors["sass"])
-        brain["personality"]["greed"] = min(1.0, brain["personality"]["greed"] + 0.0005)
+        brain["personality"]["greed"] = min(1.0, brain["personality"].get("greed", 0.5) + 0.0005)
+
+        # Safe trust updates
+        brain.setdefault("trust", 0)
         if any(x in msg for x in ["thank", "good job", "love you", "treat"]):
             brain["trust"] = min(100, brain["trust"] + 1)
         if brain["trust"] >= 50 and "tail_pat_permission" not in brain["achievements"]:

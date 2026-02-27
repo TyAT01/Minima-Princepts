@@ -708,7 +708,7 @@ class SentimentTrend:
 
 class ShiroInnerMind:
     """
-    Shiro's inner consciousness engine v3.0.
+    Shiro's inner consciousness engine v3.1.
     Persona-aware, relationship-tracking, tone-calibrating.
 
     Usage:
@@ -766,7 +766,7 @@ class ShiroInnerMind:
 
         self.current_strategy: ResponseStrategy = ResponseStrategy.WARM
 
-        logger.info(f"[{self.name}] Inner mind v3.0 initialized. Ready to think. 🦊")
+        logger.info(f"[{self.name}] Inner mind v3.1 initialized. Ready to think. 🦊")
 
     @property
     def user_profile(self) -> UserProfile:
