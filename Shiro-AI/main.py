@@ -268,13 +268,20 @@ class ShiroApp:
                 logging.error(f"Error during engine shutdown: {e}")
 
 if __name__ == "__main__":
+    # Handle Windows console encoding for emojis
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except (AttributeError, IOError):
+            pass
+
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("shiro_ai.log")
+            logging.FileHandler("shiro_ai.log", encoding="utf-8")
         ]
     )
 

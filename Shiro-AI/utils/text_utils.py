@@ -81,6 +81,22 @@ def clean_yaml_block(text: str) -> str:
             break
 
     if start_idx != -1:
-        text = "\n".join(lines[start_idx:])
+        # Keep only lines that appear to be part of the YAML block
+        yaml_lines = []
+        for line in lines[start_idx:]:
+            # If we encounter a line that is NOT indented AND not a YAML key/list,
+            # it might be the start of trailing natural language chatter.
+            stripped = line.strip()
+            if not stripped:
+                yaml_lines.append(line)
+                continue
+
+            # If it's zero-indented but doesn't look like YAML, we stop.
+            # (Allows for lines starting with space/tab, or starting with '-' or key:)
+            if not line.startswith((' ', '\t', '-', '"', "'")) and ':' not in line.split('#')[0]:
+                 # Potential start of non-YAML text
+                 break
+            yaml_lines.append(line)
+        text = "\n".join(yaml_lines)
 
     return text.strip()
