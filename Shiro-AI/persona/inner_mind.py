@@ -660,6 +660,7 @@ _COMMON_FILLER = frozenset({
     "going","doing","fine","good","okay","here","tired","sorry","not","just","trying",
     "happy","sad","sure","ready","new","back","home","busy","free","excited","glad",
     "nervous","lost","stuck","confused","done","up","down","really","very","also",
+    "does","actually","indeed","it","is","that","this","was",
 })
 
 def _extract_name(message: str) -> Optional[str]:

@@ -492,7 +492,7 @@ class ShiroEngine:
                             is_block_start = True
                         if is_block_start:
                             in_thought = True
-                            yield "[THOUGHT] "
+                            # Hide [THOUGHT] from UI
                         else:
                             self.last_thought += tag_content + " "
                         continue
@@ -515,7 +515,7 @@ class ShiroEngine:
                     if match:
                         thought_chunk = buffer[:match.start()]
                         self.last_thought += thought_chunk
-                        yield thought_chunk + " [/THOUGHT]"
+                        # Hide [/THOUGHT] from UI
                         buffer = buffer[match.end():].lstrip()
                         in_thought = False
                         continue
@@ -524,7 +524,7 @@ class ShiroEngine:
                             parts = buffer.split("\n", 1)
                             if len(parts[1]) > 5 and parts[1].strip() and parts[1].strip()[0].isupper():
                                 self.last_thought += parts[0]
-                                yield parts[0] + " [/THOUGHT]"
+                                # Hide newline termination [/THOUGHT] from UI
                                 buffer = parts[1]
                                 in_thought = False
                                 continue
@@ -538,9 +538,13 @@ class ShiroEngine:
                 transition_match = re.search(r'([\.\!\?]\s+|\n\s*)([A-Z])', buffer)
                 if transition_match:
                     self.last_thought += buffer[:transition_match.start(2)]
+                    # Only yield the part AFTER the thought transition
                     yield buffer[transition_match.start(2):]
                 elif len(buffer.strip()) > 30 and not any(kw in buffer.upper() for kw in self.THOUGHT_KEYWORDS.split('|')):
                     self.last_thought += " [Unclosed]"
+                    # If it looks like a response leaked into an unclosed thought, we might still want to see it
+                    # but for now we follow the rule of hiding thoughts.
+                    # Actually if it's > 30 chars and doesn't look like a keyword, it's probably real text.
                     yield buffer
                 else:
                     self.last_thought += buffer
@@ -557,10 +561,6 @@ class ShiroEngine:
                 yield buffer
 
     def _clean_response(self, text: str) -> str:
-        # Prevent stripping our newly added thought markers
-        if "[THOUGHT]" in text or "[/THOUGHT]" in text:
-             return text
-
         clean = re.sub(rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?\[/(?:{self.THOUGHT_KEYWORDS})\]', '', text, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(rf'\((?:{self.THOUGHT_KEYWORDS})[^\)]*\).*?\(/(?:{self.THOUGHT_KEYWORDS})\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'<THOUGHTS?>.*?</THOUGHTS?>', '', clean, flags=re.IGNORECASE | re.DOTALL)
