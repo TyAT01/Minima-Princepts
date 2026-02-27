@@ -24,6 +24,72 @@ from utils.text_utils import split_into_sentences, clean_yaml_block
 
 logger = logging.getLogger(__name__)
 
+# ── Dynamic greeting pool ──────────────────────────────────────────────────
+# Each entry is a short LOG prompt that produces a different first impression.
+# The engine picks one at random per session so Shiro never sounds identical.
+# Tone: curious / guarded / playful — NOT hostile. Hostility is earned, not default.
+_GREETING_PROMPTS = [
+    "(LOG: {name} just arrived. Shiro, acknowledge them with your usual coy energy — curious, slightly guarded. Keep it to 1-2 sentences.)",
+    "(LOG: {name} has appeared. Shiro, greet them — a little surprised, a little amused. Short and sharp.)",
+    "(LOG: {name} is here. Shiro, notice them. Be cool about it. One eyebrow raise, one line.)",
+    "(LOG: {name} walked in. Shiro, give them a look. Something between 'finally' and 'who are you again'. Brief.)",
+    "(LOG: {name} showed up. Shiro, acknowledge — not enthusiastically, but not rudely either. You're curious. Show it in one sentence.)",
+    "(LOG: {name} has arrived. Shiro, you noticed. Say something — short, dry, with a hint that you might actually be interested.)",
+    "(LOG: {name} appeared. Shiro — one witty opener. No lectures, no complaints. Just a hook.)",
+    "(LOG: {name} is here. Shiro, tilt your head. One guarded, curious greeting.)",
+]
+
+def _pick_greeting(user_name: str) -> str:
+    """Returns a randomized greeting LOG prompt for the given user."""
+    template = random.choice(_GREETING_PROMPTS)
+    return template.format(name=user_name)
+
+
+# ── Robust YAML cleaner (handles LLM formatting quirks) ───────────────────
+def _robust_clean_yaml(raw: str) -> str:
+    """
+    Cleans LLM-generated YAML that may contain:
+    - Markdown code fences (```yaml ... ```)
+    - Markdown bullet points (* item) instead of YAML list items (- item)
+    - Inline bracketed sentences as list values: - [sentence here]
+    """
+    # Strip markdown code fences
+    raw = re.sub(r'^\s*```ya?ml\s*\n?', '', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'\s*```\s*$', '', raw, flags=re.IGNORECASE)
+    raw = raw.strip()
+
+    lines = raw.splitlines()
+    cleaned = []
+    for line in lines:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+
+        # Convert markdown bullet '* text' -> '- text'
+        if re.match(r'^\*\s+\S', stripped):
+            cleaned.append(' ' * indent + '- ' + stripped[2:])
+            continue
+
+        # Convert inline bracketed sentence list items: '- [some long text]' -> '- "some long text"'
+        # Only when the bracket content looks like a sentence (has spaces), not a YAML ref
+        inline_bracket = re.match(r'^(-\s+)\[(.+)\]\s*$', stripped)
+        if inline_bracket and ' ' in inline_bracket.group(2):
+            inner = inline_bracket.group(2).replace('"', "'")
+            cleaned.append(' ' * indent + '- "' + inner + '"')
+            continue
+
+        # Convert bare key-level bracketed sentence: 'key: [sentence]' -> 'key: "sentence"'
+        bare_key_bracket = re.match(r'^(\w[\w\s]*?:\s*)(\[.+\])\s*$', stripped)
+        if bare_key_bracket and ' ' in bare_key_bracket.group(2)[1:-1]:
+            key_part = bare_key_bracket.group(1)
+            val_inner = bare_key_bracket.group(2)[1:-1].replace('"', "'")
+            cleaned.append(' ' * indent + key_part + '"' + val_inner + '"')
+            continue
+
+        cleaned.append(line)
+
+    return '\n'.join(cleaned)
+
+
 # Hmph variants to throttle (case-insensitive)
 _HMPH_PATTERN = re.compile(
     r'\bhmph\.?!?|\bhmph,|\bHmph\.?!?',
@@ -674,13 +740,18 @@ class ShiroEngine:
             reflection_prompt = (
                 "### INSTRUCTION\n"
                 "Analyze the recent conversation history below. Extract critical information to maintain perfect long-term memory.\n"
-                "RETURN ONLY VALID YAML with these keys:\n"
-                "  user_facts: { fact_name: fact_value, ... } # Specific persistent facts for profile.json\n"
-                "  events: [List of specific notable actions or events that occurred]\n"
-                "  insights: [List of abstract lessons learned about how to interact with this user]\n"
-                "  relations: [ { source: \"Entity1\", target: \"Entity2\", relation: \"type\" }, ... ] # relationships between people/places/things\n"
-                "  summary: \"A single paragraph (3-5 sentences) summarizing the narrative flow and emotional tone of this segment.\"\n\n"
-                "Be extremely concise and accurate. Do not invent facts. DO NOT use markdown or * bullet points in the YAML."
+                "RETURN ONLY VALID YAML. No markdown, no ``` fences, no * bullet points — use YAML list syntax (- item) only.\n"
+                "Required keys:\n"
+                "  user_facts: { fact_name: fact_value }   # persistent facts, or {} if none\n"
+                "  events: [- list of notable events]       # use YAML list format\n"
+                "  insights: [- lessons about this user]    # use YAML list format\n"
+                "  relations: []                            # {source, target, relation} or []\n"
+                "  summary: \"Single quoted paragraph summary of this conversation.\"\n\n"
+                "STRICT YAML RULES:\n"
+                "- Use '- item' for lists, NOT '* item'\n"
+                "- String values with colons must be quoted: summary: \"text: with colon\"\n"
+                "- Do not use square brackets for sentences: use proper YAML list items\n"
+                "- Be concise and accurate. Do not invent facts.\n"
             )
             analysis_raw = self.llm.generate_response(
                 "You are Shiro's Memory Processor. You are precise and observant.",
@@ -688,7 +759,10 @@ class ShiroEngine:
                 [],
                 context=reflection_prompt
             )
-            cleaned_raw = clean_yaml_block(analysis_raw)
+            # Use robust cleaner: handles markdown bullets (*), inline [sentences], code fences
+            cleaned_raw = _robust_clean_yaml(analysis_raw)
+            # Fallback: also apply the existing clean_yaml_block for any remaining quirks
+            cleaned_raw = clean_yaml_block(cleaned_raw)
 
             with self.processing_lock:
                 data = None
@@ -696,6 +770,10 @@ class ShiroEngine:
                     data = yaml.safe_load(cleaned_raw)
                 except Exception as e:
                     logger.warning(f"YAML Parse failed in reflection: {e}")
+                    # Last-resort: try to extract just the summary as a plain string
+                    summary_match = re.search(r'summary[:\s]+["\']?(.+?)["\']?\s*$', analysis_raw, re.IGNORECASE | re.MULTILINE)
+                    if summary_match:
+                        data = {"summary": summary_match.group(1).strip(), "events": [], "insights": [], "user_facts": {}, "relations": []}
                 if data and isinstance(data, dict):
                     facts = data.get('user_facts', {})
                     if facts and isinstance(facts, dict):
@@ -913,3 +991,11 @@ class ShiroEngine:
     def clamp(self, value, min_max):
         mn, mx = min_max
         return max(mn, min(mx, value))
+
+    def get_greeting_prompt(self, user_name: str) -> str:
+        """
+        Returns a randomized, low-aggression greeting LOG prompt.
+        Call this from the UI's on_join handler instead of a hardcoded LOG string.
+        Each call picks a fresh opener from the pool so Shiro never sounds identical.
+        """
+        return _pick_greeting(user_name)
