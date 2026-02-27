@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from llm.client import LlamaClient
 from memory.store import MemoryStore
 from persona.manager import PersonaManager
+from persona.inner_mind import ShiroInnerMind
 from utils.text_utils import split_into_sentences, clean_yaml_block
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ class ShiroEngine:
         )
         pers_cfg = config.get('persona', {})
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'shiro_sheet.yaml'))
+        self.mind = ShiroInnerMind(name="Shiro", verbose=True)
         self.last_thought = ""
         self._load_session_objectives()
         # Eternal Learning Brain
@@ -128,6 +130,11 @@ class ShiroEngine:
     def initialize(self):
         """Initializes components."""
         self.persona.load_persona()
+        # Load Inner Mind state
+        state_path = Path(__file__).parent.resolve() / "shiro_state.json"
+        if state_path.exists():
+            self.mind.load_state(str(state_path))
+
         # LLM Diagnostics
         diag = self.llm.perform_diagnostics()
         logger.info(f"LLM Diagnostics:\n{diag}")
@@ -198,6 +205,10 @@ class ShiroEngine:
                 # Context Drift Detection
                 drift_score = self._detect_context_drift(processed_text)
 
+                # [INNER MIND] Process input to get thoughts and strategy
+                inner_mind_data = self.mind.process_input(processed_text)
+                inner_context = inner_mind_data.get("inner_context", "")
+
                 # --- THE CONTEXT SANDWICH ---
 
                 # 1. Top Bun: System Instructions & Identity
@@ -237,7 +248,7 @@ class ShiroEngine:
                 short_term_buffer = history[-10:] if history else []
 
                 # --- ASSEMBLE SANDWICH ---
-                full_context = f"{meat}\n\n{garnish}"
+                full_context = f"{meat}\n\n{garnish}\n\n{inner_context}"
 
                 # [AUTONOMY] Tool Calling Support (Capped at 2 per session)
                 tools = None
@@ -291,6 +302,13 @@ class ShiroEngine:
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
+
+                    # [INNER MIND] Reflect on the generated response
+                    self.mind.reflect_on_response(full_response.strip(), text)
+                    # Persist Inner Mind state
+                    state_path = Path(__file__).parent.resolve() / "shiro_state.json"
+                    self.mind.save_state(str(state_path))
+
                     # Trigger background tasks AFTER response is generated to avoid concurrent VRAM usage
                     threading.Thread(target=lambda: self._safe_async_run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
                     if self._interaction_count > 0 and self._interaction_count % 10 == 0:
@@ -633,6 +651,9 @@ class ShiroEngine:
         logger.info("Engine initiating Reflective Shutdown...")
         try:
             self.reflect(self.current_user_name)
+            # Final Inner Mind save
+            state_path = Path(__file__).parent.resolve() / "shiro_state.json"
+            self.mind.save_state(str(state_path))
             loop_prompt = (
                 "Identify any 'Open Loops' from the recent conversation. \n"
                 "An Open Loop is a project started but not finished, a question asked but not answered, or a promise made.\n"

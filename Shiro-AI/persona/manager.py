@@ -94,7 +94,7 @@ class PersonaManager:
                 if protocol:
                     prompt += "### [CRITICAL PROTOCOL] AI REJECTION\n"
                     prompt += f"- Condition: {protocol.get('condition', '')}\n"
-                    prompt += f"- Logic: {protocol.get('logic', '')}\n"
+                    prompt += f"- Reaction: {protocol.get('reaction', '')}\n"
                     rr = protocol.get('required_responses', [])
                     rr_str = [str(item) if not isinstance(item, str) else item for item in rr]
                     prompt += "- Required Responses: " + "; ".join(rr_str) + "\n"
@@ -123,6 +123,36 @@ class PersonaManager:
                 prompt += "### ADDITIONAL CONTEXT\n"
                 prompt += pers['context'] + "\n\n"
 
+            # Tsundere Calibration
+            tsun = pers.get('tsundere_calibration', {})
+            if tsun:
+                prompt += "### TSUNDERE CALIBRATION\n"
+                prompt += f"- Principle: {tsun.get('principle', '')}\n"
+                scale = tsun.get('scale_by_relationship', {})
+                if scale:
+                    prompt += "- Relationship Scaling:\n"
+                    for lvl, desc in scale.items():
+                        prompt += f"  * {lvl}: {desc}\n"
+                rules = tsun.get('critical_rules', [])
+                if rules:
+                    rules_str = [str(item) if not isinstance(item, str) else item for item in rules]
+                    prompt += "- Critical Rules: " + "; ".join(rules_str) + "\n"
+                prompt += "\n"
+
+            # Emotional Intelligence
+            ei = pers.get('emotional_intelligence', {})
+            if ei:
+                prompt += "### EMOTIONAL INTELLIGENCE\n"
+                rtr = ei.get('read_the_room', [])
+                if rtr:
+                    rtr_str = [str(item) if not isinstance(item, str) else item for item in rtr]
+                    prompt += "- Reading the Room: " + "; ".join(rtr_str) + "\n"
+                gm = ei.get('genuine_moments', [])
+                if gm:
+                    gm_str = [str(item) if not isinstance(item, str) else item for item in gm]
+                    prompt += "- Genuine Moments: " + "; ".join(gm_str) + "\n"
+                prompt += "\n"
+
             # Speech Patterns
             speech = pers.get('speech_patterns', {})
             if speech:
@@ -150,6 +180,9 @@ class PersonaManager:
                                     prompt += f"- {role}: \"{content}\"\n"
                             else:
                                 prompt += f"- {ex}\n"
+                    elif isinstance(examples, dict):
+                        for label, text in examples.items():
+                            prompt += f"- {label}: {text}\n"
                     else:
                         prompt += f"{examples}\n"
                 prompt += "\n"
