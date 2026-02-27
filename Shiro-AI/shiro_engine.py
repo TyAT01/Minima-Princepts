@@ -197,6 +197,7 @@ class ShiroEngine:
             if self.current_user_name != user_name:
                  logger.info(f"Switching active user to: {user_name}")
                  self.current_user_name = user_name
+                 self.mind.switch_user(user_name)
         else:
             user_name = self.current_user_name
 
@@ -223,7 +224,7 @@ class ShiroEngine:
                 drift_score = self._detect_context_drift(processed_text)
 
                 # [INNER MIND] Process input to get thoughts and strategy
-                inner_mind_data = self.mind.process_input(processed_text)
+                inner_mind_data = self.mind.process_input(processed_text, user_id=user_name)
                 inner_context = inner_mind_data.get("inner_context", "")
 
                 # --- THE CONTEXT SANDWICH ---
@@ -647,28 +648,34 @@ class ShiroEngine:
 
     def reflect(self, user_id: str):
         try:
+            # We don't hold the processing_lock for the entire reflection (LLM call can be slow)
+            # but we use it to safely get history.
             with self.processing_lock:
-                logger.info(f"Shiro is reflecting on {user_id}...")
                 history = self.memory.get_history()
-                if not history: return
-                reflection_prompt = (
-                    "### INSTRUCTION\n"
-                    "Analyze the recent conversation history below. Extract critical information to maintain perfect long-term memory.\n"
-                    "RETURN ONLY VALID YAML with these keys:\n"
-                    "  user_facts: { fact_name: fact_value, ... } # Specific persistent facts for profile.json\n"
-                    "  events: [List of specific notable actions or events that occurred]\n"
-                    "  insights: [List of abstract lessons learned about how to interact with this user]\n"
-                    "  relations: [ { source: \"Entity1\", target: \"Entity2\", relation: \"type\" }, ... ] # relationships between people/places/things\n"
-                    "  summary: \"A single paragraph (3-5 sentences) summarizing the narrative flow and emotional tone of this segment.\"\n\n"
-                    "Be extremely concise and accurate. Do not invent facts."
-                )
-                analysis_raw = self.llm.generate_response(
-                    "You are Shiro's Memory Processor. You are precise and observant.",
-                    f"HISTORY TO ANALYZE:\n{history}",
-                    [],
-                    context=reflection_prompt
-                )
-                cleaned_raw = clean_yaml_block(analysis_raw)
+
+            if not history: return
+
+            logger.info(f"Shiro is reflecting on {user_id}...")
+            reflection_prompt = (
+                "### INSTRUCTION\n"
+                "Analyze the recent conversation history below. Extract critical information to maintain perfect long-term memory.\n"
+                "RETURN ONLY VALID YAML with these keys:\n"
+                "  user_facts: { fact_name: fact_value, ... } # Specific persistent facts for profile.json\n"
+                "  events: [List of specific notable actions or events that occurred]\n"
+                "  insights: [List of abstract lessons learned about how to interact with this user]\n"
+                "  relations: [ { source: \"Entity1\", target: \"Entity2\", relation: \"type\" }, ... ] # relationships between people/places/things\n"
+                "  summary: \"A single paragraph (3-5 sentences) summarizing the narrative flow and emotional tone of this segment.\"\n\n"
+                "Be extremely concise and accurate. Do not invent facts. DO NOT use markdown or * bullet points in the YAML."
+            )
+            analysis_raw = self.llm.generate_response(
+                "You are Shiro's Memory Processor. You are precise and observant.",
+                f"HISTORY TO ANALYZE:\n{history}",
+                [],
+                context=reflection_prompt
+            )
+            cleaned_raw = clean_yaml_block(analysis_raw)
+
+            with self.processing_lock:
                 data = None
                 try:
                     data = yaml.safe_load(cleaned_raw)
@@ -757,13 +764,15 @@ class ShiroEngine:
                 system_prompt = self.persona.get_system_prompt(now=datetime.now())
                 history = self.memory.get_history()
                 context = self.memory.get_full_context("Recent status", user_id=self.current_user_name)
-                prompt = "Reflect on your kitsune nature and interactions. Generate a proactive thought in [THOUGHT] tags."
-                raw_thought = self.llm.generate_response(system_prompt, prompt, history, context=context)
-                match = re.search(r'\[THOUGHTS?\](.*?)\[/THOUGHTS?\]', raw_thought, re.IGNORECASE | re.DOTALL)
-                if match:
-                    content = match.group(1).strip()
+
+            prompt = "Reflect on your kitsune nature and interactions. Generate a proactive thought in [THOUGHT] tags."
+            raw_thought = self.llm.generate_response(system_prompt, prompt, history, context=context)
+            match = re.search(r'\[THOUGHTS?\](.*?)\[/THOUGHTS?\]', raw_thought, re.IGNORECASE | re.DOTALL)
+            if match:
+                content = match.group(1).strip()
+                with self.processing_lock:
                     self.memory.store_insight(f"Autonomous Thought: {content}", user_id=self.current_user_name, source="autonomous_reflection")
-                    return content
+                return content
         except Exception as e:
             logger.warning(f"Autonomous thought failed: {e}")
         return None

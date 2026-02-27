@@ -743,9 +743,10 @@ class ShiroInnerMind:
         self.self_model  = SelfModel()
         self.playfulness = PlayfulnessMeter()
 
-        self.relationship    = RelationshipState()
-        self.user_profile    = UserProfile()
-        self.sentiment_trend = SentimentTrend()
+        self.user_profiles: Dict[str, UserProfile] = {"default": UserProfile()}
+        self.relationships: Dict[str, RelationshipState] = {"default": RelationshipState()}
+        self.sentiment_trends: Dict[str, SentimentTrend] = {"default": SentimentTrend()}
+        self.active_user_id: str = "default"
 
         self.thought_stream:    deque            = deque(maxlen=self.MAX_THOUGHT_STREAM)
         self.working_memory:    Dict[str, WorkingMemoryItem] = {}
@@ -767,13 +768,40 @@ class ShiroInnerMind:
 
         logger.info(f"[{self.name}] Inner mind v3.0 initialized. Ready to think. 🦊")
 
+    @property
+    def user_profile(self) -> UserProfile:
+        return self.user_profiles.get(self.active_user_id, self.user_profiles["default"])
+
+    @property
+    def relationship(self) -> RelationshipState:
+        return self.relationships.get(self.active_user_id, self.relationships["default"])
+
+    @property
+    def sentiment_trend(self) -> SentimentTrend:
+        return self.sentiment_trends.get(self.active_user_id, self.sentiment_trends["default"])
+
+    def _ensure_user(self, user_id: str):
+        if user_id not in self.user_profiles:
+            self.user_profiles[user_id] = UserProfile()
+            self.relationships[user_id] = RelationshipState()
+            self.sentiment_trends[user_id] = SentimentTrend()
+
+    def switch_user(self, user_id: str):
+        if not user_id:
+            user_id = "default"
+        with self._lock:
+            self._ensure_user(user_id)
+            self.active_user_id = user_id
+
     # -----------------------------------------------------------------
     # PUBLIC API
     # -----------------------------------------------------------------
 
-    def process_input(self, user_message: str) -> dict:
+    def process_input(self, user_message: str, user_id: str = None) -> dict:
         """Call BEFORE the LLM."""
         with self._lock:
+            if user_id:
+                self.switch_user(user_id)
             self.turn_count += 1
             now = time.time()
 
@@ -869,6 +897,9 @@ class ShiroInnerMind:
 
     def introspect(self) -> str:
         with self._lock:
+            up = self.user_profile
+            rel = self.relationship
+            st = self.sentiment_trend
             lines = [
                 f"\n{'='*66}",
                 f"  {self.name}'s Inner Mind v3  Turn {self.turn_count}  {self._elapsed()}",
@@ -878,11 +909,12 @@ class ShiroInnerMind:
                 f"  Playfulness:  {self.playfulness.label()}  ({self.playfulness.level:.2f})",
                 f"  Traits:       {self.traits.summary()}",
                 "",
-                f"  User: {self.user_profile.display_name()}  "
-                f"| Relationship: {self.relationship.level.name}  "
-                f"| Familiarity: {self.relationship.familiarity_score:.1f}",
-                f"  Sentiment: {self.sentiment_trend.label()}  "
-                f"| Consecutive cold: {self.relationship.consecutive_cold}",
+                f"  Active User ID: {self.active_user_id}",
+                f"  User Name: {up.display_name()}  "
+                f"| Relationship: {rel.level.name}  "
+                f"| Familiarity: {rel.familiarity_score:.1f}",
+                f"  Sentiment: {st.label()}  "
+                f"| Consecutive cold: {rel.consecutive_cold}",
                 f"  Tease permission: {self.relationship.tease_permission():.0%}  "
                 f"| Warmth pressure: {self.relationship.warmth_pressure():.0%}",
                 "",
@@ -916,7 +948,13 @@ class ShiroInnerMind:
     # -----------------------------------------------------------------
 
     def _extract_user_info(self, message: str):
-        if self.user_profile.name is None:
+        # Allow updating name if it's unknown or a generic filler/placeholder
+        current_name = self.user_profile.name
+        is_generic = (current_name is None or
+                      current_name.lower() in _COMMON_FILLER or
+                      current_name in ["Stranger", "User", "you"])
+
+        if is_generic:
             name = _extract_name(message)
             if name:
                 self.user_profile.name = name
@@ -1535,25 +1573,32 @@ class ShiroInnerMind:
                     "persona_insights": self.self_model.persona_insights,
                     "interaction_count": self.self_model.interaction_count,
                 },
-                "user_profile": {
-                    "name": self.user_profile.name,
-                    "nickname": self.user_profile.nickname,
-                    "known_interests": self.user_profile.known_interests,
-                    "emotional_moments": self.user_profile.emotional_moments,
-                    "preferences": self.user_profile.preferences,
-                    "compliments_given": self.user_profile.compliments_given,
-                    "times_pushed_back": self.user_profile.times_pushed_back,
-                    "session_count": self.user_profile.session_count,
+                "active_user_id": self.active_user_id,
+                "user_profiles": {
+                    uid: {
+                        "name": up.name,
+                        "nickname": up.nickname,
+                        "known_interests": up.known_interests,
+                        "emotional_moments": up.emotional_moments,
+                        "preferences": up.preferences,
+                        "compliments_given": up.compliments_given,
+                        "times_pushed_back": up.times_pushed_back,
+                        "session_count": up.session_count,
+                    } for uid, up in self.user_profiles.items()
                 },
-                "relationship": {
-                    "level": self.relationship.level.value,
-                    "familiarity_score": self.relationship.familiarity_score,
-                    "total_exchanges": self.relationship.total_exchanges,
-                    "positive_exchanges": self.relationship.positive_exchanges,
-                    "consecutive_cold": self.relationship.consecutive_cold,
-                    "consecutive_warm": self.relationship.consecutive_warm,
+                "relationships": {
+                    uid: {
+                        "level": rel.level.value,
+                        "familiarity_score": rel.familiarity_score,
+                        "total_exchanges": rel.total_exchanges,
+                        "positive_exchanges": rel.positive_exchanges,
+                        "consecutive_cold": rel.consecutive_cold,
+                        "consecutive_warm": rel.consecutive_warm,
+                    } for uid, rel in self.relationships.items()
                 },
-                "sentiment_scores": list(self.sentiment_trend._scores),
+                "sentiment_trends": {
+                    uid: list(st._scores) for uid, st in self.sentiment_trends.items()
+                },
                 "interest_map": dict(self.interest_map),
                 "unresolved_questions": self.unresolved_questions[-self.MAX_UNRESOLVED_Q:],
                 "doc_count": self._doc_count,
@@ -1634,30 +1679,78 @@ class ShiroInnerMind:
                     interaction_count=sm.get("interaction_count", 0),
                 )
 
-                up = data.get("user_profile", {})
-                self.user_profile = UserProfile(
-                    name=up.get("name"),
-                    nickname=up.get("nickname"),
-                    known_interests=up.get("known_interests", []),
-                    emotional_moments=up.get("emotional_moments", []),
-                    preferences=up.get("preferences", {}),
-                    compliments_given=up.get("compliments_given", 0),
-                    times_pushed_back=up.get("times_pushed_back", 0),
-                    session_count=up.get("session_count", 0) + 1,
-                )
+                self.active_user_id = data.get("active_user_id", "default")
 
-                rel = data.get("relationship", {})
-                self.relationship = RelationshipState(
-                    level=RelationshipLevel(rel.get("level", 0)),
-                    familiarity_score=rel.get("familiarity_score", 0.0),
-                    total_exchanges=rel.get("total_exchanges", 0),
-                    positive_exchanges=rel.get("positive_exchanges", 0),
-                    consecutive_cold=0,  # reset cold streak on new session
-                    consecutive_warm=0,
-                )
+                # Load multi-user profiles
+                up_data = data.get("user_profiles")
+                if up_data:
+                    self.user_profiles = {}
+                    for uid, up in up_data.items():
+                        self.user_profiles[uid] = UserProfile(
+                            name=up.get("name"),
+                            nickname=up.get("nickname"),
+                            known_interests=up.get("known_interests", []),
+                            emotional_moments=up.get("emotional_moments", []),
+                            preferences=up.get("preferences", {}),
+                            compliments_given=up.get("compliments_given", 0),
+                            times_pushed_back=up.get("times_pushed_back", 0),
+                            session_count=up.get("session_count", 0) + 1,
+                        )
+                else:
+                    # Legacy fallback
+                    up = data.get("user_profile", {})
+                    legacy_up = UserProfile(
+                        name=up.get("name"),
+                        nickname=up.get("nickname"),
+                        known_interests=up.get("known_interests", []),
+                        emotional_moments=up.get("emotional_moments", []),
+                        preferences=up.get("preferences", {}),
+                        compliments_given=up.get("compliments_given", 0),
+                        times_pushed_back=up.get("times_pushed_back", 0),
+                        session_count=up.get("session_count", 0) + 1,
+                    )
+                    self.user_profiles = {self.active_user_id: legacy_up, "default": UserProfile()}
 
-                for score in data.get("sentiment_scores", []):
-                    self.sentiment_trend.record(score)
+                # Load multi-user relationships
+                rel_data = data.get("relationships")
+                if rel_data:
+                    self.relationships = {}
+                    for uid, rel in rel_data.items():
+                        self.relationships[uid] = RelationshipState(
+                            level=RelationshipLevel(rel.get("level", 0)),
+                            familiarity_score=rel.get("familiarity_score", 0.0),
+                            total_exchanges=rel.get("total_exchanges", 0),
+                            positive_exchanges=rel.get("positive_exchanges", 0),
+                            consecutive_cold=0,
+                            consecutive_warm=0,
+                        )
+                else:
+                    # Legacy fallback
+                    rel = data.get("relationship", {})
+                    legacy_rel = RelationshipState(
+                        level=RelationshipLevel(rel.get("level", 0)),
+                        familiarity_score=rel.get("familiarity_score", 0.0),
+                        total_exchanges=rel.get("total_exchanges", 0),
+                        positive_exchanges=rel.get("positive_exchanges", 0),
+                        consecutive_cold=0,
+                        consecutive_warm=0,
+                    )
+                    self.relationships = {self.active_user_id: legacy_rel, "default": RelationshipState()}
+
+                # Load multi-user sentiment
+                st_data = data.get("sentiment_trends")
+                if st_data:
+                    self.sentiment_trends = {}
+                    for uid, scores in st_data.items():
+                        trend = SentimentTrend()
+                        for s in scores: trend.record(s)
+                        self.sentiment_trends[uid] = trend
+                else:
+                    # Legacy fallback
+                    legacy_trend = SentimentTrend()
+                    for score in data.get("sentiment_scores", []):
+                        legacy_trend.record(score)
+                    self.sentiment_trends = {self.active_user_id: legacy_trend, "default": SentimentTrend()}
 
                 self.interest_map         = defaultdict(float, data.get("interest_map", {}))
                 self.unresolved_questions = data.get("unresolved_questions", [])
