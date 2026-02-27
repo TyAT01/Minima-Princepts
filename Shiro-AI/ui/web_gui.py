@@ -426,6 +426,11 @@ class ShiroGUI:
                         chatbot_kwargs["type"] = "messages"
                     except TypeError:
                         pass
+                    try:
+                        gr.Chatbot(bubble_full_width=False, render=False)
+                        chatbot_kwargs["bubble_full_width"] = False
+                    except TypeError:
+                        pass
 
                     chatbot = gr.Chatbot(**chatbot_kwargs)
 
