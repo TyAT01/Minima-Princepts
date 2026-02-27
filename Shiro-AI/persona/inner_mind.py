@@ -12,6 +12,7 @@ import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -1625,9 +1626,12 @@ class ShiroInnerMind:
             }
             payload  = json.dumps(data, indent=2, ensure_ascii=False)
             checksum = hashlib.sha256(payload.encode()).hexdigest()
-            with open(filepath, "w", encoding="utf-8") as f:
+            # Atomic write using temporary file
+            temp_path = Path(filepath).with_suffix(".tmp")
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump({"checksum": checksum, "data": data}, f,
                           indent=2, ensure_ascii=False)
+            temp_path.replace(filepath)
             logger.info(f"[{self.name}] Saved -> {filepath}  "
                       f"({len(self.memory_bank)} memories, "
                       f"user={self.user_profile.name or 'unknown'}, "

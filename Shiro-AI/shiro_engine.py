@@ -177,6 +177,8 @@ class ShiroEngine:
     def __init__(self, config: dict):
         self.config = config
         self.processing_lock = threading.Lock()
+        self.brain_lock = threading.RLock()
+        self.profile_lock = threading.RLock()
         self._interaction_count = 0
         self.current_user_name = "Stranger"
         self.session_start = datetime.now(timezone.utc)
@@ -252,16 +254,20 @@ class ShiroEngine:
 
     def _save_profiles(self):
         """Saves persistent user profiles."""
-        try:
-            # Handle non-serializable objects like datetime.date
-            def json_serial(obj):
-                if isinstance(obj, (datetime, date)):
-                    return obj.isoformat()
-                raise TypeError(f"Type {type(obj)} not serializable")
+        with self.profile_lock:
+            try:
+                # Handle non-serializable objects like datetime.date
+                def json_serial(obj):
+                    if isinstance(obj, (datetime, date)):
+                        return obj.isoformat()
+                    raise TypeError(f"Type {type(obj)} not serializable")
 
-            self.profile_file.write_text(json.dumps(self.user_profiles, indent=2, default=json_serial))
-        except Exception as e:
-            logger.error(f"Failed to save profiles: {e}")
+                # Atomic write to avoid corruption
+                temp_file = self.profile_file.with_suffix(".tmp")
+                temp_file.write_text(json.dumps(self.user_profiles, indent=2, default=json_serial))
+                temp_file.replace(self.profile_file)
+            except Exception as e:
+                logger.error(f"Failed to save profiles: {e}")
 
     def _load_session_objectives(self):
         """Loads session objectives from a local JSON file."""
@@ -588,9 +594,10 @@ class ShiroEngine:
             await self.memory.store_insight_async(f"Autonomous Thought: {thought}", user_id=user_id, source="autonomous_thought")
 
             # Update cap
-            thought_data["count"] += 1
-            brain["autonomous_thoughts"] = thought_data
-            self.brain_file.write_text(json.dumps(brain, indent=2))
+            with self.brain_lock:
+                thought_data["count"] += 1
+                self.brain["autonomous_thoughts"] = thought_data
+                self._save_brain()
 
     def add_feedback(self, feedback: str, user_id: str):
         """Stores user feedback for tricks/favors."""
@@ -929,7 +936,7 @@ class ShiroEngine:
                     self.memory.store_episodic_memory(f"OPEN LOOPS at session end: {open_loops_raw}", user_id=self.current_user_name, importance=7)
             self._save_profiles()
             # Final Brain Save
-            self.brain_file.write_text(json.dumps(self.brain, indent=2))
+            self._save_brain()
             self.memory.prune_old_memories()
 
             # Close LLM Session
@@ -1010,8 +1017,8 @@ class ShiroEngine:
         return block
 
     def _load_brain(self):
-        if not self.brain_file.exists():
-            brain = {
+        with self.brain_lock:
+            default_brain = {
                 "version": "eternal_1.0",
                 "born": time.time(),
                 "personality": {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()},
@@ -1021,8 +1028,32 @@ class ShiroEngine:
                 "achievements": [],
                 "outfits": ["default"],
             }
-            self.brain_file.write_text(json.dumps(brain, indent=2))
-        return json.loads(self.brain_file.read_text())
+            if not self.brain_file.exists():
+                self.brain = default_brain
+                self._save_brain()
+                return self.brain
+
+            try:
+                content = self.brain_file.read_text()
+                if not content.strip():
+                    logger.warning("Brain file is empty. Using default.")
+                    self.brain = default_brain
+                else:
+                    self.brain = json.loads(content)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.error(f"Failed to load brain: {e}. Using default.")
+                self.brain = default_brain
+            return self.brain
+
+    def _save_brain(self):
+        """Saves Shiro's brain to disk atomically."""
+        with self.brain_lock:
+            try:
+                temp_file = self.brain_file.with_suffix(".tmp")
+                temp_file.write_text(json.dumps(self.brain, indent=2))
+                temp_file.replace(self.brain_file)
+            except Exception as e:
+                logger.error(f"Failed to save brain: {e}")
 
     def shiro_learn_and_stay_shiro(self, user_msg: str, shiro_reply: str):
         brain = self._load_brain()
@@ -1075,7 +1106,7 @@ class ShiroEngine:
                 current = brain["personality"][trait]
                 center = (mn + mx) / 2
                 brain["personality"][trait] = current + (center - current) * 0.15
-        self.brain_file.write_text(json.dumps(brain, indent=2))
+        self._save_brain()
 
     def clamp(self, value, min_max):
         mn, mx = min_max
