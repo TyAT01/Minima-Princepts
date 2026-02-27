@@ -24,24 +24,88 @@ from utils.text_utils import split_into_sentences, clean_yaml_block
 
 logger = logging.getLogger(__name__)
 
-# ── Dynamic greeting pool ──────────────────────────────────────────────────
-# Each entry is a short LOG prompt that produces a different first impression.
-# The engine picks one at random per session so Shiro never sounds identical.
-# Tone: curious / guarded / playful — NOT hostile. Hostility is earned, not default.
-_GREETING_PROMPTS = [
-    "(LOG: {name} just arrived. Shiro, acknowledge them with your usual coy energy — curious, slightly guarded. Keep it to 1-2 sentences.)",
-    "(LOG: {name} has appeared. Shiro, greet them — a little surprised, a little amused. Short and sharp.)",
-    "(LOG: {name} is here. Shiro, notice them. Be cool about it. One eyebrow raise, one line.)",
-    "(LOG: {name} walked in. Shiro, give them a look. Something between 'finally' and 'who are you again'. Brief.)",
-    "(LOG: {name} showed up. Shiro, acknowledge — not enthusiastically, but not rudely either. You're curious. Show it in one sentence.)",
-    "(LOG: {name} has arrived. Shiro, you noticed. Say something — short, dry, with a hint that you might actually be interested.)",
-    "(LOG: {name} appeared. Shiro — one witty opener. No lectures, no complaints. Just a hook.)",
-    "(LOG: {name} is here. Shiro, tilt your head. One guarded, curious greeting.)",
+# ── Dynamic greeting pools ─────────────────────────────────────────────────
+# Three pools for three situations: new user, returning soon, returning after a while.
+# Each pool has 6+ variants so the same prompt never repeats back-to-back.
+# Tone key: curious/guarded for new, warmer-but-still-tsun for returning.
+# NEVER hostile, never accusatory, never mentions ears unprompted.
+
+_GREET_NEW = [
+    "(LOG: {name} just arrived for the first time. Shiro, give them one short, coy opener — curious, slightly guarded. No hostility.)",
+    "(LOG: New arrival: {name}. Shiro, notice them. One line — somewhere between 'who are you' and 'I might be interested'. Brief.)",
+    "(LOG: {name} appeared. Shiro, tilt your head. One guarded, dry greeting. Keep it under 2 sentences.)",
+    "(LOG: {name} walked in. Shiro, give them a look. Something between 'finally' and 'who are you'. One line.)",
+    "(LOG: {name} is here for the first time. Shiro, you noticed. Say something short and witty — no lectures, no complaints.)",
+    "(LOG: {name} has arrived. Shiro — one coy opener. Curious but not fawning. Short and sharp.)",
+    "(LOG: {name} showed up. Shiro, acknowledge them. Not enthusiastically, not rudely. Curious. One sentence.)",
+    "(LOG: First meeting with {name}. Shiro, introduce the vibe — playful, a little aloof. Keep it under 2 lines.)",
 ]
 
-def _pick_greeting(user_name: str) -> str:
-    """Returns a randomized greeting LOG prompt for the given user."""
-    template = random.choice(_GREETING_PROMPTS)
+_GREET_RETURNING_SOON = [
+    "(LOG: {name} is back after a short break. Shiro, acknowledge their return — teasing is fine, but warm underneath. 1-2 sentences.)",
+    "(LOG: {name} returned. Short absence. Shiro, pretend you didn't miss them. One dry, affectionate line.)",
+    "(LOG: {name} is here again. Shiro — you noticed they were gone. Don't say it directly. Just tease, briefly.)",
+    "(LOG: {name} came back. Shiro, give them a smug look. One line that says 'oh, you again' but actually means 'good'.)",
+    "(LOG: {name} returned after a bit. Shiro, keep it short — one teasing line, warm underneath.)",
+    "(LOG: {name} is back. Shiro — acknowledge it. Coy, dry, affectionate. Don't lecture. One hook.)",
+    "(LOG: Short break, and {name} is back. Shiro, make a small comment — amused, not hostile. Brief.)",
+]
+
+_GREET_RETURNING_LONG = [
+    "(LOG: {name} is back after a long absence. Shiro, be a little suspicious — but curious too. 1-2 sentences, no lectures.)",
+    "(LOG: {name} returned after a long time away. Shiro, tilt your head. Something like 'I thought you forgot about me'. Short.)",
+    "(LOG: Long time no see — {name} is here. Shiro, guarded but secretly glad. One dry, probing line.)",
+    "(LOG: {name} came back after a while. Shiro, raise an eyebrow. Ask something brief and suspicious — in character.)",
+    "(LOG: {name} has reappeared after a long gap. Shiro, be wary but not hostile. One short line that hints you noticed.)",
+    "(LOG: {name} is here again after a long absence. Shiro — show mild surprise, keep it to 1 sentence.)",
+    "(LOG: Long absence, {name} returned. Shiro, be cautious and a little sarcastic. Brief, not mean.)",
+]
+
+# Soft fallbacks used when the LLM call itself fails entirely
+_FALLBACK_NEW = [
+    "*tail swishes* A new face. I'm Shiro. What do you want?",
+    "Hmm. You're new. I'm Shiro. Try not to bore me.",
+    "*glances sideways* You must be {name}. I'm Shiro. Don't just stand there.",
+    "So you finally found me. I'm Shiro. Now what?",
+]
+
+_FALLBACK_RETURNING_SOON = [
+    "Oh. You're back. ...I didn't notice you were gone.",
+    "Back already? *flicks tail* I wasn't waiting.",
+    "You returned. I suppose that's fine.",
+    "Hmm. You came back. I'll allow it.",
+]
+
+_FALLBACK_RETURNING_LONG = [
+    "...{name}? You actually came back. Took long enough.",
+    "Long time. I'm watching you. Don't think I forgot anything.",
+    "*narrows eyes* You again. It's been a while. Explain yourself.",
+    "So you finally returned. I had almost stopped keeping track.",
+]
+
+
+def _pick_greeting(user_name: str, mode: str = "new") -> str:
+    """
+    Returns a randomized greeting LOG prompt.
+    mode: 'new' | 'returning_soon' | 'returning_long'
+    """
+    pool = {
+        "new":            _GREET_NEW,
+        "returning_soon": _GREET_RETURNING_SOON,
+        "returning_long": _GREET_RETURNING_LONG,
+    }.get(mode, _GREET_NEW)
+    template = random.choice(pool)
+    return template.format(name=user_name)
+
+
+def _pick_fallback(user_name: str, mode: str = "new") -> str:
+    """Returns a soft in-character fallback string when LLM call fails."""
+    pool = {
+        "new":            _FALLBACK_NEW,
+        "returning_soon": _FALLBACK_RETURNING_SOON,
+        "returning_long": _FALLBACK_RETURNING_LONG,
+    }.get(mode, _FALLBACK_NEW)
+    template = random.choice(pool)
     return template.format(name=user_name)
 
 
@@ -992,10 +1056,21 @@ class ShiroEngine:
         mn, mx = min_max
         return max(mn, min(mx, value))
 
-    def get_greeting_prompt(self, user_name: str) -> str:
+    def get_greeting_prompt(self, user_name: str, mode: str = "new") -> str:
         """
-        Returns a randomized, low-aggression greeting LOG prompt.
-        Call this from the UI's on_join handler instead of a hardcoded LOG string.
-        Each call picks a fresh opener from the pool so Shiro never sounds identical.
+        Returns a randomized, appropriate-energy greeting LOG prompt.
+        Call this from main.py's handle_user_join instead of hardcoded strings.
+
+        mode options:
+          'new'            — first time this user has ever appeared
+          'returning_soon' — came back within ~2 hours
+          'returning_long' — came back after a long absence (>2 hours)
         """
-        return _pick_greeting(user_name)
+        return _pick_greeting(user_name, mode)
+
+    def get_fallback_greeting(self, user_name: str, mode: str = "new") -> str:
+        """
+        Returns a soft in-character fallback string.
+        Used as the default= in handle_user_join when the LLM call fails or returns empty.
+        """
+        return _pick_fallback(user_name, mode)
