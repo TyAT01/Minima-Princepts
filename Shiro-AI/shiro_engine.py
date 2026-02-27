@@ -571,16 +571,17 @@ class ShiroEngine:
         """Checks for inactivity and triggers autonomous thought with daily caps."""
         if datetime.now(timezone.utc) - last_interaction > timedelta(minutes=10):
             # Check daily cap
-            brain = self._load_brain()
-            today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            thought_data = brain.get("autonomous_thoughts", {})
+            with self.brain_lock:
+                # Use self.brain directly
+                today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                thought_data = self.brain.get("autonomous_thoughts", {})
 
-            if thought_data.get("date") != today:
-                thought_data = {"date": today, "count": 0}
+                if thought_data.get("date") != today:
+                    thought_data = {"date": today, "count": 0}
 
-            if thought_data["count"] >= 5:
-                logger.info("Autonomous thought daily cap reached.")
-                return
+                if thought_data["count"] >= 5:
+                    logger.info("Autonomous thought daily cap reached.")
+                    return
 
             logger.info(f"Triggering inactivity thought for {user_id} ({thought_data['count']+1}/5)")
             thought_prompt = "Reflect on current tricks and inactivity. Update your coy plans."
@@ -1056,57 +1057,59 @@ class ShiroEngine:
                 logger.error(f"Failed to save brain: {e}")
 
     def shiro_learn_and_stay_shiro(self, user_msg: str, shiro_reply: str):
-        brain = self._load_brain()
-        if not brain: return
+        with self.brain_lock:
+            # self.brain is already loaded in __init__ and updated atomically in _load_brain
+            brain = self.brain
+            if not brain: return
 
-        msg = user_msg.lower()
-        # Defensive initialization
-        brain.setdefault("facts", {})
-        brain.setdefault("favors", [])
-        brain.setdefault("personality", {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()})
-        brain.setdefault("achievements", [])
+            msg = user_msg.lower()
+            # Defensive initialization
+            brain.setdefault("facts", {})
+            brain.setdefault("favors", [])
+            brain.setdefault("personality", {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()})
+            brain.setdefault("achievements", [])
 
-        if ("my name is" in msg or "call me" in msg) and "username" not in msg and "?" not in msg:
-            parts = msg.split("is") if "is" in msg else msg.split("me")
-            name = parts[-1].strip(" .,!?")
-            if len(name) >= 2 and len(name) < 20:
-                brain["facts"]["preferred_name"] = name.title()
-        if "i hate" in msg or "i love" in msg:
-            thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
-            brain["facts"][f"user_{'hates' if 'hate' in msg else 'loves'}_{thing}"] = True
-        if any(w in shiro_reply.lower() for w in ["dummy","silly","stranger"]):
-            if len(brain["favors"]) < 50:
-                brain["favors"].append({"tease": shiro_reply, "ts": time.time()})
-        intensity = self.intensity
-        brain.setdefault("mood_history", []).append(intensity)
-        brain["mood_history"] = brain["mood_history"][-200:]
-        avg_mood = sum(brain["mood_history"]) / len(brain["mood_history"])
-        drift = (avg_mood - 0.7) * 0.0008
+            if ("my name is" in msg or "call me" in msg) and "username" not in msg and "?" not in msg:
+                parts = msg.split("is") if "is" in msg else msg.split("me")
+                name = parts[-1].strip(" .,!?")
+                if len(name) >= 2 and len(name) < 20:
+                    brain["facts"]["preferred_name"] = name.title()
+            if "i hate" in msg or "i love" in msg:
+                thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
+                brain["facts"][f"user_{'hates' if 'hate' in msg else 'loves'}_{thing}"] = True
+            if any(w in shiro_reply.lower() for w in ["dummy","silly","stranger"]):
+                if len(brain["favors"]) < 50:
+                    brain["favors"].append({"tease": shiro_reply, "ts": time.time()})
+            intensity = self.intensity
+            brain.setdefault("mood_history", []).append(intensity)
+            brain["mood_history"] = brain["mood_history"][-200:]
+            avg_mood = sum(brain["mood_history"]) / len(brain["mood_history"])
+            drift = (avg_mood - 0.7) * 0.0008
 
-        # Safe personality updates
-        for trait in ["slyness", "kindness", "sass"]:
-            if trait not in brain["personality"]:
-                mn, mx = self.core_anchors.get(trait, (0.5, 0.5))
-                brain["personality"][trait] = (mn + mx) / 2
+            # Safe personality updates
+            for trait in ["slyness", "kindness", "sass"]:
+                if trait not in brain["personality"]:
+                    mn, mx = self.core_anchors.get(trait, (0.5, 0.5))
+                    brain["personality"][trait] = (mn + mx) / 2
 
-        brain["personality"]["slyness"] = self.clamp(brain["personality"]["slyness"] + drift * 1.2, self.core_anchors["slyness"])
-        brain["personality"]["kindness"] = self.clamp(brain["personality"]["kindness"] + drift * -1.0, self.core_anchors["kindness"])
-        brain["personality"]["sass"] = self.clamp(brain["personality"]["sass"] + random.uniform(-0.001, 0.001), self.core_anchors["sass"])
-        brain["personality"]["greed"] = min(1.0, brain["personality"].get("greed", 0.5) + 0.0005)
+            brain["personality"]["slyness"] = self.clamp(brain["personality"]["slyness"] + drift * 1.2, self.core_anchors["slyness"])
+            brain["personality"]["kindness"] = self.clamp(brain["personality"]["kindness"] + drift * -1.0, self.core_anchors["kindness"])
+            brain["personality"]["sass"] = self.clamp(brain["personality"]["sass"] + random.uniform(-0.001, 0.001), self.core_anchors["sass"])
+            brain["personality"]["greed"] = min(1.0, brain["personality"].get("greed", 0.5) + 0.0005)
 
-        # Safe trust updates
-        brain.setdefault("trust", 0)
-        if any(x in msg for x in ["thank", "good job", "love you", "treat"]):
-            brain["trust"] = min(100, brain["trust"] + 1)
-        if brain["trust"] >= 50 and "tail_pat_permission" not in brain["achievements"]:
-            brain["achievements"].append("tail_pat_permission")
-        total_messages = len(brain.get("mood_history", []))
-        if total_messages % 500 < 5:
-            for trait, (mn, mx) in self.core_anchors.items():
-                current = brain["personality"][trait]
-                center = (mn + mx) / 2
-                brain["personality"][trait] = current + (center - current) * 0.15
-        self._save_brain()
+            # Safe trust updates
+            brain.setdefault("trust", 0)
+            if any(x in msg for x in ["thank", "good job", "love you", "treat"]):
+                brain["trust"] = min(100, brain["trust"] + 1)
+            if brain["trust"] >= 50 and "tail_pat_permission" not in brain["achievements"]:
+                brain["achievements"].append("tail_pat_permission")
+            total_messages = len(brain.get("mood_history", []))
+            if total_messages % 500 < 5:
+                for trait, (mn, mx) in self.core_anchors.items():
+                    current = brain["personality"][trait]
+                    center = (mn + mx) / 2
+                    brain["personality"][trait] = current + (center - current) * 0.15
+            self._save_brain()
 
     def clamp(self, value, min_max):
         mn, mx = min_max
