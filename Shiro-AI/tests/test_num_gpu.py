@@ -13,7 +13,7 @@ class TestOllamaNumGpu(unittest.TestCase):
     def setUp(self):
         self.client = LlamaClient(
             base_url="http://localhost:11434/api",
-            model="shiro-v2:latest",
+            model="shiro:latest",
             num_gpu=20,
             use_native_tools=False
         )
