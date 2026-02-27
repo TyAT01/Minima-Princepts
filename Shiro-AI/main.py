@@ -116,26 +116,27 @@ class ShiroApp:
         self.active_users.add(user_name)
         logging.info(f"User {user_name} joined.")
 
-        # Check if we know this person
+        # Determine greeting mode based on last interaction time
         last_seen = self.engine.memory.get_last_interaction_time(user_name)
 
         if last_seen:
-             # Check how long it's been
-             delta = datetime.now(timezone.utc) - last_seen
-             if delta.total_seconds() < 7200: # 2 hours (Short absence)
-                  prompt = f"(LOG: {user_name} has returned after a short break. Shiro, greet them now in your typical coy/teasing style.)"
-                  resp = list(self.process_text(prompt, user_name))
-                  return resp if resp else ["Hmph, you're back? I didn't even notice you were gone, dummy."]
-
-             # Identity verification heuristic for long absences
-             prompt = f"(LOG: {user_name} has joined the room. You haven't seen them in a while. Shiro, greet them suspiciously and verify it's really them.)"
-             resp = list(self.process_text(prompt, user_name))
-             return resp if resp else ["Wait... who are you? Identifty yourself before I lose my patience, stranger."]
+            delta = datetime.now(timezone.utc) - last_seen
+            if delta.total_seconds() < 7200:  # Returned within 2 hours
+                mode = "returning_soon"
+            else:  # Long absence — guarded, slightly suspicious
+                mode = "returning_long"
         else:
-             # First time greeting
-             prompt = f"(LOG: {user_name} has arrived. Shiro, acknowledge them briefly — curious but guarded, not aggressive. Keep it short.)"
-             resp = list(self.process_text(prompt, user_name))
-             return resp if resp else ["A new face? *tail swishes* I'm Shiro. What do you want, stranger?"]
+            mode = "new"  # First time ever
+
+        # Each call picks a fresh variant from the pool — Shiro never sounds identical
+        prompt = self.engine.get_greeting_prompt(user_name, mode)
+        resp = list(self.process_text(prompt, user_name))
+
+        # Fallback: if LLM returns nothing, use a randomised in-character string
+        if not resp or not any(r.strip() for r in resp):
+            return [self.engine.get_fallback_greeting(user_name, mode)]
+
+        return resp
 
     def handle_user_leave(self, user_name: str):
         """Handles a user leaving the chat room."""
