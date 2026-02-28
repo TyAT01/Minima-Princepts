@@ -175,9 +175,9 @@ class ShiroApp:
             processed_text = str(text)
 
         if self.engine.processing_lock.locked():
-             logging.warning("System is busy processing another request.")
-             yield "Wait a moment, I'm thinking..."
-             return
+            logging.warning("System is busy processing another request.")
+            yield "Wait a moment, I'm thinking..."
+            return
 
         self.is_responding = True
         self.interrupt_event.clear()

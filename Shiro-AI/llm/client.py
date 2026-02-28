@@ -104,7 +104,7 @@ class LlamaClient:
                         effective_tools = tools if native_tools_enabled else None
                         actual_system_prompt = system_prompt
                         if tools and not native_tools_enabled:
-                             actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+                            actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
 
                         async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model):
                             yield chunk
@@ -156,7 +156,7 @@ class LlamaClient:
                             effective_tools = tools if native_tools_enabled else None
                             actual_system_prompt = system_prompt
                             if tools and not native_tools_enabled:
-                                 actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+                                actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
 
                             yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model)
                             if tools and self._supports_tools is None:

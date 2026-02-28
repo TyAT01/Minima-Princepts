@@ -1,3 +1,4 @@
+from __future__ import annotations
 import logging
 import os
 import sys
@@ -11,7 +12,7 @@ import asyncio
 import numpy as np
 from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
-from typing import Any, List, Dict, Optional, Generator
+from typing import Any, List, Dict, Optional, Generator, Callable
 
 # Add the current directory to sys.path to ensure local modules are found
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -229,13 +230,13 @@ class ShiroEngine:
 
         # Callback for autonomous voice
         async def _speak_callback(event):
-             # Bridging autonomous voice to the console/logger and provided callback
-             logger.info(f"[AUTONOMOUS VOICE]: {event.text}")
-             if self.on_autonomous_speak:
-                 if asyncio.iscoroutinefunction(self.on_autonomous_speak):
-                     await self.on_autonomous_speak(event.text, event.speech_type)
-                 else:
-                     self.on_autonomous_speak(event.text, event.speech_type)
+            # Bridging autonomous voice to the console/logger and provided callback
+            logger.info(f"[AUTONOMOUS VOICE]: {event.text}")
+            if self.on_autonomous_speak:
+                if asyncio.iscoroutinefunction(self.on_autonomous_speak):
+                    await self.on_autonomous_speak(event.text, event.speech_type)
+                else:
+                    self.on_autonomous_speak(event.text, event.speech_type)
 
         self.voice = AutonomousVoice(speak_callback=_speak_callback)
         self.v4_memory = ConversationMemory()
@@ -411,9 +412,9 @@ class ShiroEngine:
             user_name = self.current_user_name
         else:
             if self.current_user_name != user_name:
-                 logger.info(f"Switching active user to: {user_name}")
-                 self.current_user_name = user_name
-                 self.legacy_mind.switch_user(user_name)
+                logger.info(f"Switching active user to: {user_name}")
+                self.current_user_name = user_name
+                self.legacy_mind.switch_user(user_name)
 
         # [V4 UPGRADE] Observe user through SelfAwareness v4
         user_profile = self.awareness.user_spoke(user_name, processed_text)
@@ -440,9 +441,9 @@ class ShiroEngine:
 
         # Identity Verification Heuristic
         if processed_text and not processed_text.startswith("[") and user_name != "System":
-             last_seen = self.memory.get_last_interaction_time(user_name)
-             if last_seen and (datetime.now(timezone.utc) - last_seen).days > 7:
-                  processed_text = f"[IDENTITY CHECK REQUIRED] {processed_text}"
+            last_seen = self.memory.get_last_interaction_time(user_name)
+            if last_seen and (datetime.now(timezone.utc) - last_seen).days > 7:
+                processed_text = f"[IDENTITY CHECK REQUIRED] {processed_text}"
 
         logger.info(f"--- Engine Processing: '{processed_text}' ---")
 
@@ -516,7 +517,7 @@ class ShiroEngine:
                 # [AUTONOMY] Proactive memory injection
                 autonomous_mem = self._safe_async_run(self.fetch_relevant_memory_async(f"shiro tricks for {user_name}", n_results=2))
                 if autonomous_mem:
-                    shiro_context += f"\n[SCHEEMING MEMORY: {autonomous_mem}]"
+                    shiro_context += f"\n[SCHEMING MEMORY: {autonomous_mem}]"
 
                 # [AUTONOMY] Feedback injection
                 feedback_mems = self._safe_async_run(self.memory.search_relevant_memories_async("User Favor Feedback", n_results=2, user_id=user_name))
@@ -637,7 +638,7 @@ class ShiroEngine:
                     # Trigger background tasks AFTER response is generated to avoid concurrent VRAM usage
                     threading.Thread(target=lambda: self._safe_async_run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
                     if self._interaction_count > 0 and self._interaction_count % 10 == 0:
-                         threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
+                        threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
                     self.shiro_learn_and_stay_shiro(processed_text, full_response)
             except Exception as e:
                 logger.error(f"Engine text processing failed: {e}. Falling back to RuleEngine.")
@@ -1046,7 +1047,7 @@ class ShiroEngine:
                         self.user_profiles[user_id].update(facts)
                         self._save_profiles()
                         for k, v in facts.items():
-                             self.memory.update_user_profile(user_id, f"{k}: {v}")
+                            self.memory.update_user_profile(user_id, f"{k}: {v}")
                     for event in data.get('events', []):
                         self.memory.store_episodic_memory(event, user_id=user_id, importance=6)
                     for insight in data.get('insights', []):
