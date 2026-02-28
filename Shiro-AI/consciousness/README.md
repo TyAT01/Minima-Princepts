@@ -306,7 +306,7 @@ shiro_consciousness/
 ├── __init__.py         ← exports everything
 ├── core.py             ← ConsciousnessCore, ShiroConfig, ShiroPersona,
 │                          LocalLLMBridge, ShiroPromptBuilder
-├── thought_loop.py     ← InnerMind, Mood, Thought, MoodJournal
+├── inner_mind.py       ← InnerMind, Mood, Thought, MoodJournal
 ├── self_awareness.py   ← SelfAwareness, UserProfile, emotion inference
 ├── speech_cadence.py   ← SpeechCadence, CadenceModel
 ├── autonomous_voice.py ← AutonomousVoice, SpeechEvent

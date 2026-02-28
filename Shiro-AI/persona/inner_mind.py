@@ -809,17 +809,20 @@ def _trim_to_budget(inner_context: str, budget_tokens: int) -> str:
 # =====================================================================
 
 _NAME_PATTERNS = [
-    re.compile(r"my name is\s+([A-Za-z]+)", re.IGNORECASE),
-    re.compile(r"i'?m\s+([A-Za-z]+)", re.IGNORECASE),
-    re.compile(r"call me\s+([A-Za-z]+)", re.IGNORECASE),
-    re.compile(r"you can call me\s+([A-Za-z]+)", re.IGNORECASE),
-    re.compile(r"name'?s?\s+([A-Za-z]+)", re.IGNORECASE),
+    re.compile(r"my name is\s+([A-Za-z]{2,20})",    re.IGNORECASE),
+    re.compile(r"(?<!\w)i'?m\s+([A-Za-z]{2,20})\b", re.IGNORECASE),
+    re.compile(r'\bi\s+am\s+([A-Za-z]{2,20})\b',             re.IGNORECASE),
+    re.compile(r"call me\s+([A-Za-z]{2,20})",        re.IGNORECASE),
+    re.compile(r"you can call me\s+([A-Za-z]{2,20})",re.IGNORECASE),
+    re.compile(r"name'?s?\s+([A-Za-z]{2,20})\b",     re.IGNORECASE),
+    re.compile(r"i go by\s+([A-Za-z]{2,20})",         re.IGNORECASE),
 ]
 _COMMON_FILLER = frozenset({
-    "going","doing","fine","good","okay","here","tired","sorry","not","just","trying",
-    "happy","sad","sure","ready","new","back","home","busy","free","excited","glad",
-    "nervous","lost","stuck","confused","done","up","down","really","very","also",
-    "does","actually","indeed","it","is","that","this","was",
+    "going","doing","fine","good","okay","here","tired","sorry","just","trying",
+    "happy","sad","sure","ready","back","home","busy","free","glad","nervous",
+    "lost","stuck","confused","done","really","very","also","actually","pretty",
+    "currently","already","still","even","only","ever","never",
+    "does","indeed","it","is","that","this","was", "new", "up", "down"
 })
 
 def _extract_name(message: str) -> Optional[str]:
@@ -914,7 +917,7 @@ class EmotionalMomentum:
 
 class ShiroInnerMind:
     """
-    Shiro's inner consciousness engine — v4.0.
+    Shiro's inner consciousness engine — v5.0.
     Persona-aware. Relationship-tracking. Tone-calibrating. Robust.
     Multi-user support preserved from v3.1.
 
@@ -994,7 +997,7 @@ class ShiroInnerMind:
         # Profiling
         self._timings: Dict[str, float] = {}
 
-        logger.info(f"[{self.name}] Inner mind v4.0 (multi-user) initialized. 🦊")
+        logger.info(f"[{self.name}] Inner mind v5.0 (multi-user) initialized. 🦊")
 
     @property
     def user_profile(self) -> UserProfile:

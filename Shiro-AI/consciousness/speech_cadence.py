@@ -139,14 +139,20 @@ class SpeechCadence:
         self._burst_tracker[user_id] = burst_ts
         burst = float(len(burst_ts))
 
-        m.avg_msg_length      += a * (length              - m.avg_msg_length)
+        # Only update length stats for non-trivial messages (> 4 chars)
+        # This prevents "k", "lol", "ok" from collapsing avg_msg_length to near-zero
+        if length > 4:
+            m.avg_msg_length += a * (length - m.avg_msg_length)
         m.avg_response_delay  += a * (delay               - m.avg_response_delay)
         m.sentence_density    += a * (sentences           - m.sentence_density)
         m.emoji_rate          += a * (emojis * 100 / max(length, 1) - m.emoji_rate)
         m.exclamation_rate    += a * (excls / sentences   - m.exclamation_rate)
         m.question_rate       += a * (quests / sentences  - m.question_rate)
-        m.avg_word_length     += a * (avg_wl             - m.avg_word_length)
-        m.message_burst       += a * (burst              - m.message_burst)
+        m.avg_word_length     += a * (avg_wl              - m.avg_word_length)
+        m.message_burst       += a * (burst               - m.message_burst)
+        # Enforce minimum floors to prevent over-compression
+        m.avg_msg_length = max(m.avg_msg_length, 20.0)
+        m.avg_word_length = max(m.avg_word_length, 2.5)
 
         if n >= 3:
             m.uses_contractions  = contracs > 0 or m.uses_contractions
@@ -219,7 +225,15 @@ class SpeechCadence:
 
         # --- Capitalization ---
         if m.capitalization == "lower" and m.formality < 0.5:
-            text = text.lower()
+            # Lowercase but preserve acronyms (ALL_CAPS words > 2 chars)
+            words = text.split()
+            lowered = []
+            for w in words:
+                if len(w) > 2 and w.isupper():
+                    lowered.append(w)  # keep API, URL, etc.
+                else:
+                    lowered.append(w.lower())
+            text = " ".join(lowered)
 
         # --- Contractions ---
         if m.uses_contractions and m.formality < 0.4 and strength > 0.5:
@@ -242,10 +256,15 @@ class SpeechCadence:
             word = random.choice(vocab)
             text = self._inject_mirror_word(text, word)
 
-        # --- Length compression ---
-        target = m.avg_msg_length * 1.6
+        # --- Length calibration (compress OR expand) ---
+        target = m.avg_msg_length * 1.5
         if len(text) > target + 80 and strength > 0.4:
+            # Compress overly long replies
             text = self._compress_to_length(text, int(target + 40))
+        elif len(text) < target * 0.35 and m.avg_msg_length > 80 and strength > 0.5:
+            # User writes long messages, Shiro's reply is very short — expand slightly
+            # Don't add content, just soften the abruptness with a natural bridge
+            text = self._soften_short_reply(text)
 
         return text.strip()
 
@@ -282,7 +301,58 @@ class SpeechCadence:
             out += (" " if out else "") + s
         return out if out else text[:target]
 
+    def _soften_short_reply(self, text: str) -> str:
+        """
+        When Shiro's reply is very short but the user writes long messages,
+        add a natural follow-on bridge so it doesn't feel dismissive.
+        Doesn't add information — just makes the reply feel less abrupt.
+        """
+        bridges = [
+            " — what do you think?",
+            " does that track?",
+            " what's your take?",
+            " i'm curious what you'd say to that",
+            " tell me more about your angle on this",
+        ]
+        # Only add bridge if text doesn't already end in a question
+        if not text.rstrip().endswith("?"):
+            return text.rstrip(".") + random.choice(bridges)
+        return text
+
     # ── Reports ──────────────────────────────────────────────────
+
+    def get_style_summary(self, user_id: str) -> str:
+        """
+        Returns a short natural-language style summary for injection into LLM prompts.
+        More readable than describe_model() for the LLM.
+        """
+        m = self.user_models.get(user_id)
+        if not m or m.samples < 5:
+            return ""
+
+        parts = []
+        if m.formality < 0.25:
+            parts.append("very casual")
+        elif m.formality < 0.5:
+            parts.append("casual")
+        else:
+            parts.append("formal")
+
+        if m.avg_msg_length < 30:
+            parts.append("writes short messages")
+        elif m.avg_msg_length > 120:
+            parts.append("writes long messages")
+
+        if m.uses_ellipsis:
+            parts.append("uses ellipsis...")
+        if m.exclamation_rate > 0.4:
+            parts.append("enthusiastic punctuation!")
+        if m.question_rate > 0.5:
+            parts.append("asks lots of questions")
+        if m.message_burst > 2.0:
+            parts.append("sends messages in bursts")
+
+        return ", ".join(parts) if parts else "neutral style"
 
     def describe_model(self, user_id: str) -> str:
         m = self.user_models.get(user_id)

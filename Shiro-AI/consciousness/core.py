@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable, Optional, Any, Generator
 from urllib import request, error as urllib_error
 
-from .thought_loop import InnerMind, Mood, Thought
+from .inner_mind import InnerMind, Mood, Thought
 from .self_awareness import SelfAwareness
 from .speech_cadence import SpeechCadence
 from .autonomous_voice import AutonomousVoice, SpeechEvent
@@ -427,6 +427,11 @@ class ShiroPromptBuilder:
                 trajectory = c.sentiment.describe(user_id) if hasattr(c, "sentiment") else ""
                 timing_obs = c.timepattern.visit_observation(user_id) if hasattr(c, "timepattern") else ""
 
+                # Behavior profile
+                behavior_desc = c.aware.get_behavior_description(user_id) if hasattr(c.aware, "get_behavior_description") else ""
+                # Style summary from cadence
+                style_summary = c.cadence.get_style_summary(user_id) if hasattr(c.cadence, "get_style_summary") else ""
+
                 user_section = (
                     f"WHO YOU'RE TALKING TO ({profile.name}):\n"
                     f"  {session_desc}\n"
@@ -435,10 +440,11 @@ class ShiroPromptBuilder:
                 )
                 if trajectory:
                     user_section += f" ({trajectory})"
-                user_section += (
-                    f"\n  Conversation style: {depth}\n"
-                    f"  Speech cadence: {c.cadence.describe_model(user_id)}"
-                )
+                user_section += f"\n  Conversation style: {depth}"
+                if style_summary:
+                    user_section += f" ({style_summary})"
+                if behavior_desc:
+                    user_section += f"\n  Behavioral patterns: {behavior_desc}"
                 if timing_obs:
                     user_section += f"\n  Timing: {timing_obs}"
                 if profile.mirror_vocab:
@@ -461,6 +467,17 @@ class ShiroPromptBuilder:
                 f"confidence: {last_intent.confidence:.0%}):\n"
                 f"  {last_intent.prompt_hint}"
             )
+
+        # ── Session narrative (for close/friend tiers only) ───────
+        focus_tier = "stranger"
+        for uid, p in c.aware.users.items():
+            if p.present:
+                focus_tier = p.relationship_tier()
+                break
+        if focus_tier in ("friend", "close") and not compact:
+            narrative = c.mind.journal.session_narrative()
+            if narrative and narrative != "just started":
+                sections.append(f"SESSION ARC: {narrative}")
 
         # ── Behavior ──────────────────────────────────────────────
         if not compact:
@@ -622,8 +639,9 @@ class ConsciousnessCore:
 
         if self.cfg.auto_greet:
             is_returning = profile.absence_count > 0
+            tier = profile.relationship_tier()
             asyncio.create_task(
-                self.voice.greet_user(user_id, profile.name, is_returning=is_returning)
+                self.voice.greet_user(user_id, profile.name, is_returning=is_returning, tier=tier)
             )
         self.voice.schedule_probes(user_id, profile.name)
 
@@ -680,7 +698,10 @@ class ConsciousnessCore:
             new_mood, base_arousal = mood_map[dominant]
             # Scale arousal shift by contagion
             arousal = 0.5 + (base_arousal - 0.5) * contagion_scale
-            self.mind.set_mood(new_mood, arousal=arousal)
+            # Strong emotional signals (strength > 0.7 from friends) apply immediately
+            emotion_strength = current_emotions.get(dominant, 0)
+            use_immediate = emotion_strength > 0.7 and tier in ("friend", "close")
+            self.mind.set_mood(new_mood, arousal=arousal, immediate=use_immediate)
         else:
             self.mind.set_mood(Mood.ENGAGED, arousal=0.65 + 0.2 * contagion_scale)
 
@@ -745,9 +766,10 @@ class ConsciousnessCore:
         Speak a reply. Adapts to user's style + adds timing.
         Optionally prepends a micro-reaction based on current mood.
         """
-        # Micro-reaction (optional)
+        # Micro-reaction with emotional coherence gate
         if inject_reaction and self.cfg.enable_reactions and user_id:
-            reaction = self.mind.get_reaction()
+            current_intent = self._last_intent.name if self._last_intent else None
+            reaction = self.mind.get_reaction(intent=current_intent)
             if reaction:
                 text = f"{reaction} {text}"
 
@@ -817,14 +839,20 @@ class ConsciousnessCore:
         focus = self.aware.get_focus_user()
         return {
             **state,
-            "environment":    self.aware.describe_environment(),
-            "room_state":     self.aware.room_state,
-            "self":           self.aware.describe_self(),
-            "time_of_day":    self.aware.time_of_day(),
-            "uptime_seconds": time.time() - self._boot_ts if self._boot_ts else 0,
-            "current_intent": self._last_intent.name if self._last_intent else None,
-            "sentiment_trend": self.sentiment.trend(focus.user_id) if focus else "unknown",
+            "environment":      self.aware.describe_environment(),
+            "room_state":       self.aware.room_state,
+            "self":             self.aware.describe_self(),
+            "time_of_day":      self.aware.time_of_day(),
+            "uptime_seconds":   time.time() - self._boot_ts if self._boot_ts else 0,
+            "current_intent":   self._last_intent.name if self._last_intent else None,
+            "sentiment_trend":  self.sentiment.trend(focus.user_id) if focus else "unknown",
             "relationship_tier": focus.relationship_tier() if focus else "stranger",
+            "session_narrative": self.mind.journal.session_narrative(),
+            "thought_diversity_recent": round(
+                self.mind.diversity_scorer.similarity_to_recent(
+                    self.mind.focus or ""
+                ), 3
+            ),
             "users": {
                 uid: {**p.to_dict(), "tier": p.relationship_tier()}
                 for uid, p in self.aware.users.items()
@@ -845,12 +873,65 @@ class ConsciousnessCore:
         p = self.aware.users.get(user_id)
         return p.relationship_tier() if p else "stranger"
 
+    def get_behavior_profile(self, user_id: str):
+        """Get the BehaviorProfile for a user (cross-session patterns)."""
+        return self.aware.behavior_profiles.get(user_id)
+
+    def get_behavior_description(self, user_id: str) -> str:
+        """Get natural-language behavioral patterns for a user."""
+        return self.aware.get_behavior_description(user_id)
+
     def get_cadence_report(self, user_id: str) -> str:
         return self.cadence.describe_model(user_id)
 
     def get_memory_recall(self, user_id: str) -> str:
         """What does Shiro remember about this user?"""
         return self.memory.recall(user_id)
+
+    def get_relevant_memory(self, user_id: str, query: str) -> list[str]:
+        """Find memories relevant to a query/topic."""
+        return self.memory.recall_relevant(user_id, query)
+
+    def get_session_narrative(self) -> str:
+        """Rich narrative of Shiro's emotional arc this session."""
+        return self.mind.journal.session_narrative()
+
+    def get_thought_diversity(self, candidate: str) -> float:
+        """Check how similar a candidate thought is to recent thoughts (0=unique, 1=duplicate)."""
+        return self.mind.diversity_scorer.similarity_to_recent(candidate)
+
+    async def speak_memory(self, user_id: Optional[str] = None, query: Optional[str] = None):
+        """
+        Shiro recalls something about the user.
+        query: if provided, finds contextually relevant memories.
+        Otherwise, picks a high-confidence fact randomly.
+        """
+        if not user_id:
+            user_id = next((u for u in self.aware.users if self.aware.users[u].present), None)
+        if not user_id:
+            return
+
+        profile = self.aware.users.get(user_id)
+        name = profile.name if profile else user_id
+        from .memory import KeyFact
+
+        if query:
+            relevant = self.memory.recall_relevant(user_id, query, top_n=3)
+            if relevant:
+                await self.voice.speak_relevant_memory(user_id, name, relevant)
+                return
+
+        summary = self.memory.get_summary(user_id)
+        if not summary or not summary.key_facts:
+            return
+        confident = [f for f in summary.key_facts
+                     if isinstance(f, KeyFact) and f.confidence >= 2]
+        candidates = confident or summary.key_facts
+        if not candidates:
+            return
+        f = random.choice(candidates)
+        fact_text = f.text if hasattr(f, "text") else str(f)
+        await self.voice.speak_memory(user_id, fact_text)
 
     # ── Teaching ─────────────────────────────────────────────────
 
@@ -967,18 +1048,35 @@ class ConsciousnessCore:
         """
         Generate a reply using RuleEngine when no LLM is available.
         Produces short but authentic-feeling responses grounded in current state.
+        Uses recall_relevant() for contextual memory — not just random facts.
         """
-        profile = self.aware.users.get(user_id)
-        summary = self.memory.get_summary(user_id)
+        from .memory import KeyFact
+        profile  = self.aware.users.get(user_id)
+        summary  = self.memory.get_summary(user_id)
         intent_name = self._last_intent.name if self._last_intent else "share"
-        trajectory = self.sentiment.trend(user_id)
+        trajectory  = self.sentiment.trend(user_id)
+
+        # Get contextually relevant memory facts for this message
+        relevant_facts: Optional[list] = None
+        if summary:
+            relevant = self.memory.recall_relevant(user_id, text, top_n=3)
+            if relevant:
+                relevant_facts = relevant
+            else:
+                # Fallback: high-confidence facts
+                confident = [
+                    f.text if isinstance(f, KeyFact) else str(f)
+                    for f in summary.key_facts
+                    if not isinstance(f, KeyFact) or f.confidence >= 2
+                ]
+                relevant_facts = confident[:3] if confident else None
 
         response = self.rules.full_response(
             intent=intent_name,
             mood=self.mind.mood.value,
             user_message=text,
             user_name=profile.name if profile else "",
-            memory_facts=summary.key_facts[:3] if summary else None,
+            memory_facts=relevant_facts,
             trajectory=trajectory,
         )
 
@@ -1035,23 +1133,41 @@ class ConsciousnessCore:
                 target = random.choice(present)
                 top_topics = target.top_topics(1)
                 topic = top_topics[0] if top_topics and random.random() < 0.4 else None
-                asyncio.create_task(
-                    self.voice.initiate_conversation(target.user_id, topic=topic)
-                )
+
+                # Thought-voice bridge: 35% chance to voice current thought instead of
+                # generic initiation — makes Shiro feel alive between conversations
+                if (self.mind.focus
+                        and random.random() < 0.35
+                        and idle_s < self.cfg.idle_initiate_seconds * 2.0):
+                    asyncio.create_task(
+                        self.voice.speak_current_thought(
+                            target.user_id,
+                            self.mind.focus,
+                            mood=self.mind.mood.value,
+                        )
+                    )
+                else:
+                    asyncio.create_task(
+                        self.voice.initiate_conversation(target.user_id, topic=topic)
+                    )
                 self._last_user_message_ts = time.time()
 
-            # Memory recall: occasionally bring up something Shiro knows
+            # Contextual memory recall: reference memories relevant to what's being discussed
             if (present
                     and self.cfg.enable_memory_recall
                     and idle_s > 30.0
                     and random.random() < 0.08):
                 target = random.choice(present)
-                summary = self.memory.get_summary(target.user_id)
-                if summary and summary.key_facts:
-                    fact = random.choice(summary.key_facts)
+                # Get last user message for context
+                last_msg = None
+                if target.recent_messages:
+                    last_msg = target.recent_messages[-1].get("text", "")
+                if last_msg:
                     asyncio.create_task(
-                        self.voice.speak_memory(target.user_id, fact)
+                        self.speak_memory(target.user_id, query=last_msg)
                     )
+                else:
+                    asyncio.create_task(self.speak_memory(target.user_id))
 
     async def _auto_save_loop(self):
         while self._booted:

@@ -1,4 +1,3 @@
-from __future__ import annotations
 """
 events.py — Internal event bus for the consciousness engine.
 
@@ -71,31 +70,44 @@ class EventBus:
         Emit an event. Calls all subscribed handlers.
         Async handlers are scheduled via create_task.
         Returns number of handlers called.
+
+        Wildcard handlers (subscribed via bus.on("*", handler)) receive
+        an extra keyword arg `event_type` with the event name.
         """
         payload = {"event": event, "ts": time.time(), **data}
         self._history.append(payload)
         if len(self._history) > self._history_max:
             self._history = self._history[-80:]
 
-        handlers = self._handlers.get(event, []) + self._handlers.get("*", [])
         count = 0
-        for h in handlers:
-            try:
-                if asyncio.iscoroutinefunction(h):
-                    try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            loop.create_task(h(**data))
-                        else:
-                            loop.run_until_complete(h(**data))
-                    except RuntimeError:
-                        pass   # no event loop — skip async handler gracefully
-                else:
-                    h(**data)
-                count += 1
-            except Exception as e:
-                logger.warning(f"[EventBus] handler error on '{event}': {e}")
+        specific  = self._handlers.get(event, [])
+        wildcards = self._handlers.get("*", [])
+
+        for h in specific:
+            count += self._call(h, event, data)
+        for h in wildcards:
+            # Wildcard handlers receive event_type so they know what fired
+            count += self._call(h, event, {**data, "event_type": event})
         return count
+
+    def _call(self, handler: Callable, event: str, data: dict) -> int:
+        """Call a single handler, returning 1 on success or 0 on error."""
+        try:
+            if asyncio.iscoroutinefunction(handler):
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(handler(**data))
+                    else:
+                        loop.run_until_complete(handler(**data))
+                except RuntimeError:
+                    pass  # no event loop — skip async handler gracefully
+            else:
+                handler(**data)
+            return 1
+        except Exception as e:
+            logger.warning(f"[EventBus] handler error on '{event}': {type(e).__name__}: {e}")
+            return 0
 
     def recent(self, event: Optional[str] = None, n: int = 10) -> list[dict]:
         """Get recent events, optionally filtered by type."""

@@ -28,7 +28,7 @@ from consciousness.events import EventBus
 from consciousness.intent import IntentPlanner, SentimentTrajectory, RuleEngine, TimePattern
 from consciousness.speech_cadence import SpeechCadence
 from consciousness.self_awareness import SelfAwareness
-from consciousness.thought_loop import InnerMind, Mood
+from consciousness.inner_mind import InnerMind, Mood
 from consciousness.autonomous_voice import AutonomousVoice
 from consciousness.memory import ConversationMemory
 

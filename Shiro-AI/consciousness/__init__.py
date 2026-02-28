@@ -1,5 +1,5 @@
 """
-Shiro Consciousness Engine v4.0
+Shiro Consciousness Engine v5.0
 =================================
 Local-first. Zero external dependencies. Drop-in Python package.
 
@@ -46,11 +46,11 @@ from .core import (
     LocalLLMBridge,
     ShiroPromptBuilder,
 )
-from .thought_loop import InnerMind, Mood, Thought, MoodJournal
-from .self_awareness import SelfAwareness, UserProfile
+from .inner_mind import InnerMind, Mood, Thought, MoodJournal, ThoughtDiversityScorer
+from .self_awareness import SelfAwareness, UserProfile, BehaviorProfile
 from .speech_cadence import SpeechCadence, CadenceModel
 from .autonomous_voice import AutonomousVoice, SpeechEvent
-from .memory import ConversationMemory, ContextWindow, MemorySummary
+from .memory import ConversationMemory, ContextWindow, MemorySummary, KeyFact
 from .events import EventBus
 from .intent import (
     IntentPlanner, Intent,
@@ -72,9 +72,11 @@ __all__ = [
     "Mood",
     "Thought",
     "MoodJournal",
+    "ThoughtDiversityScorer",
     # Awareness
     "SelfAwareness",
     "UserProfile",
+    "BehaviorProfile",
     # Cadence
     "SpeechCadence",
     "CadenceModel",
@@ -85,6 +87,7 @@ __all__ = [
     "ConversationMemory",
     "ContextWindow",
     "MemorySummary",
+    "KeyFact",
     # Events
     "EventBus",
     # Intent & planning
@@ -96,4 +99,4 @@ __all__ = [
     "RuleEngine",
 ]
 
-__version__ = "4.0.0"
+__version__ = "5.0.0"

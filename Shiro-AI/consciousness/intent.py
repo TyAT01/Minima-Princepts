@@ -319,10 +319,15 @@ class IntentPlanner:
             scores["empathize"] += 1.0
             scores["joke"] *= 0.2  # don't joke when someone is clearly negative
 
-        # ── Prevent repetition ────────────────────────────────────
+        # ── Prevent repetition (adaptive decay) ──────────────────
+        # Each additional recent occurrence multiplies penalty: 0.5x, 0.25x, 0.1x
+        intent_recency: dict[str, int] = {}
         for past in self._recent_intents:
-            if past in scores:
-                scores[past] *= 0.3
+            intent_recency[past] = intent_recency.get(past, 0) + 1
+        for intent_name, count in intent_recency.items():
+            if intent_name in scores:
+                # Exponential decay: 0.5^count — each repeat halves the score
+                scores[intent_name] *= (0.5 ** count)
 
         # ── Pick best ─────────────────────────────────────────────
         if not scores or max(scores.values()) < 0.01:
@@ -616,6 +621,21 @@ class RuleEngine:
                 "there's something in there",
                 "i'm still working it out",
                 "some things just stick",
+            ],
+            "info": [
+                "let me think about how to say this",
+                "the way i understand it —",
+                "from what i know —",
+            ],
+            "deflect": [
+                "anyway —",
+                "that's a whole thing",
+                "i don't have a great answer right now",
+            ],
+            "greet": [
+                "how's things?",
+                "what's up with you?",
+                "what are you up to?",
             ],
         }
 

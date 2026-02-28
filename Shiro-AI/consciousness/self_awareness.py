@@ -184,6 +184,117 @@ class UserProfile:
         return p
 
 
+
+# ─────────────────────────────────────────────────────────────
+#  BehaviorProfile — cross-session behavioral patterns per user
+# ─────────────────────────────────────────────────────────────
+
+class BehaviorProfile:
+    """
+    Tracks behavioral patterns for a user across sessions.
+    Learns things like: do they open with questions? go quiet when stressed?
+    prefer short or long conversations? return quickly?
+    """
+
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self.opener_counts: dict[str, int] = {}
+        self.opener_styles: list[str] = []
+        self.session_lengths: list[int] = []
+        self.return_speeds: list[float] = []
+        self.burst_preference: float = 0.5
+        self.prefers_depth: float = 0.0
+        self._session_count: int = 0
+        self._current_session_msgs: int = 0
+
+    def record_opener(self, text: str, emotions: dict):
+        if emotions.get("greeting", 0) > 0.5:
+            style = "greeting"
+        elif "?" in text or emotions.get("curious", 0) > 0.5:
+            style = "question"
+        elif emotions.get("sad", 0) > 0.4 or emotions.get("anxious", 0) > 0.4:
+            style = "vent"
+        else:
+            style = "statement"
+        self.opener_styles.append(style)
+        self.opener_counts[style] = self.opener_counts.get(style, 0) + 1
+        if len(self.opener_styles) > 30:
+            self.opener_styles = self.opener_styles[-20:]
+
+    def record_session_end(self):
+        if self._current_session_msgs > 0:
+            self.session_lengths.append(self._current_session_msgs)
+            self._session_count += 1
+            self._current_session_msgs = 0
+        if len(self.session_lengths) > 30:
+            self.session_lengths = self.session_lengths[-20:]
+
+    def record_message(self, depth: float = 0.0, burst: float = 0.0):
+        self._current_session_msgs += 1
+        a = 0.1
+        self.prefers_depth += a * (depth - self.prefers_depth)
+        self.burst_preference += a * (burst - self.burst_preference)
+
+    def record_return(self, hours_absent: float):
+        self.return_speeds.append(hours_absent)
+        if len(self.return_speeds) > 20:
+            self.return_speeds = self.return_speeds[-15:]
+
+    def typical_opener(self) -> Optional[str]:
+        if not self.opener_counts or sum(self.opener_counts.values()) < 3:
+            return None
+        return max(self.opener_counts, key=self.opener_counts.get)
+
+    def avg_session_length(self) -> float:
+        return sum(self.session_lengths) / len(self.session_lengths) if self.session_lengths else 0.0
+
+    def avg_return_hours(self) -> float:
+        return sum(self.return_speeds) / len(self.return_speeds) if self.return_speeds else 0.0
+
+    def describe(self) -> str:
+        parts = []
+        opener = self.typical_opener()
+        if opener and sum(self.opener_counts.values()) >= 3:
+            parts.append(f"usually opens with {opener}s")
+        avg_len = self.avg_session_length()
+        if avg_len > 0 and self._session_count >= 2:
+            if avg_len < 5:
+                parts.append("tends toward short sessions")
+            elif avg_len > 20:
+                parts.append("likes long conversations")
+        if self.prefers_depth > 0.6 and self._current_session_msgs >= 5:
+            parts.append("goes deep on topics")
+        if self.burst_preference > 0.7:
+            parts.append("sends messages in bursts")
+        avg_ret = self.avg_return_hours()
+        if avg_ret > 0 and len(self.return_speeds) >= 2:
+            if avg_ret < 2:
+                parts.append("comes back frequently")
+            elif avg_ret > 48:
+                parts.append("visits less often")
+        return "; ".join(parts) if parts else ""
+
+    def export(self) -> dict:
+        return {
+            "opener_counts":   self.opener_counts,
+            "session_lengths": self.session_lengths[-10:],
+            "return_speeds":   self.return_speeds[-10:],
+            "burst_preference": round(self.burst_preference, 3),
+            "prefers_depth":   round(self.prefers_depth, 3),
+            "session_count":   self._session_count,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict, user_id: str) -> "BehaviorProfile":
+        bp = cls(user_id)
+        bp.opener_counts    = d.get("opener_counts", {})
+        bp.session_lengths  = d.get("session_lengths", [])
+        bp.return_speeds    = d.get("return_speeds", [])
+        bp.burst_preference = d.get("burst_preference", 0.5)
+        bp.prefers_depth    = d.get("prefers_depth", 0.0)
+        bp._session_count   = d.get("session_count", 0)
+        return bp
+
 # ─────────────────────────────────────────────────────────────
 #  SelfAwareness
 # ─────────────────────────────────────────────────────────────
@@ -230,6 +341,9 @@ class SelfAwareness:
         self._last_humor_ts: float = 0.0
         self._last_high_energy_ts: float = 0.0
         self._last_complex_ts: float = 0.0
+
+        # Cross-session behavioral profiles
+        self.behavior_profiles: dict[str, "BehaviorProfile"] = {}
 
     # ── User lifecycle ───────────────────────────────────────────
 
@@ -352,6 +466,14 @@ class SelfAwareness:
             if new_tier != old_tier:
                 self.bus.emit("relationship_changed",
                               user_id=user_id, old_tier=old_tier, new_tier=new_tier)
+
+        # Update behavioral profile
+        bp = self.behavior_profiles.setdefault(user_id, BehaviorProfile(user_id))
+        if p.session_message_count == 1:
+            bp.record_opener(text, emotions)
+            if p.last_absent_duration > 0:
+                bp.record_return(p.last_absent_duration / 3600.0)
+        bp.record_message(depth=depth_signal, burst=p.energy_level)
 
         return p
 
@@ -548,6 +670,10 @@ class SelfAwareness:
                 "topics_encountered": list(sk["topics_encountered"]),
                 "people_met":         list(sk["people_met"]),
             },
+            "behavior_profiles": {
+                uid: bp.export()
+                for uid, bp in self.behavior_profiles.items()
+            },
         }
 
     def import_data(self, data: dict):
@@ -558,3 +684,10 @@ class SelfAwareness:
         self.self_knowledge["total_messages_received"] = sk.get("total_messages_received", 0)
         self.self_knowledge["topics_encountered"]      = set(sk.get("topics_encountered", []))
         self.self_knowledge["people_met"]              = set(sk.get("people_met", []))
+        for uid, d in data.get("behavior_profiles", {}).items():
+            self.behavior_profiles[uid] = BehaviorProfile.from_dict(d, uid)
+
+    def get_behavior_description(self, user_id: str) -> str:
+        """Get a natural-language behavioral pattern description for this user."""
+        bp = self.behavior_profiles.get(user_id)
+        return bp.describe() if bp else ""

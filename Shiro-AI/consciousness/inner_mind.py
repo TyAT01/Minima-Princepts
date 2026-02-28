@@ -1,22 +1,113 @@
 """
-InnerMind v3 — Shiro's continuous thought loop.
+InnerMind v5.0 — Shiro's continuous thought loop.
 
-New in v3:
-  - MoodJournal: Shiro tracks her emotional arc over time
-  - Micro-reactions: inline expressive interjections tied to mood
-  - Thought tagging: thoughts carry semantic tags for memory queries
-  - Sustained focus: Shiro can stay on a topic across multiple ticks
-  - Arousal baseline drift: baseline shifts with time of day / session length
-  - Richer template library (50+ new entries)
+New in v5.0:
+  - ThoughtDiversityScorer: n-gram overlap scoring blocks semantically
+    similar thoughts, not just exact templates. Prevents "same idea,
+    different words" repetition in the thought stream.
+  - MoodJournal.session_narrative(): richer arc descriptions like
+    "started curious, dipped into reflective during the emotional part,
+    landed warm — solid conversation" instead of just "started X, now Y"
+  - Thought similarity decay: recently fired thoughts still inform the
+    diversity scorer even after the block expires, just with less weight
+  - Emotional coherence gate: suppresses mismatched micro-reactions
+    (e.g., won't prepend *laughs* to an empathetic reply)
+  - Burst deduplication: rapid learn_thought() calls (from fast messages)
+    are deduplicated before being added to templates
 """
 
 import asyncio
 import random
+import re
 import time
 from typing import Callable, Optional, Any
 from dataclasses import dataclass, field
 from collections import deque, Counter
 from enum import Enum
+
+
+# ─────────────────────────────────────────────────────────────
+#  ThoughtDiversityScorer
+# ─────────────────────────────────────────────────────────────
+
+class ThoughtDiversityScorer:
+    """
+    Prevents semantically similar thoughts from firing back-to-back.
+    Uses character n-gram overlap (trigrams) as a cheap similarity proxy
+    — no ML, no embeddings, pure Python.
+
+    Why trigrams: they capture "same idea, different words" better than
+    exact matching. "i find this interesting" and "this is genuinely
+    interesting" share enough trigrams to be flagged.
+
+    scored_similarity returns 0.0 (totally different) to 1.0 (identical).
+    Thoughts scoring above BLOCK_THRESHOLD are suppressed.
+    """
+
+    BLOCK_THRESHOLD = 0.55   # tune: lower = stricter diversity
+    DECAY_SECONDS   = 120.0  # thoughts older than this get half-weight
+    HISTORY_MAX     = 20     # how many recent thought texts to track
+
+    def __init__(self):
+        self._history: deque[tuple[float, str]] = deque(maxlen=self.HISTORY_MAX)
+
+    def _ngrams(self, text: str, n: int = 3) -> set[str]:
+        """Character n-grams of cleaned text."""
+        t = re.sub(r"[^a-z0-9 ]", "", text.lower())
+        t = re.sub(r"\s+", " ", t).strip()
+        return {t[i:i+n] for i in range(len(t) - n + 1)} if len(t) >= n else set()
+
+    def _weighted_similarity(self, a_ngrams: set, b_ngrams: set, age_s: float) -> float:
+        """Jaccard similarity with time-decay weight."""
+        if not a_ngrams or not b_ngrams:
+            return 0.0
+        jaccard = len(a_ngrams & b_ngrams) / len(a_ngrams | b_ngrams)
+        # Decay: full weight for first 60s, then linear decay to 0.3x at DECAY_SECONDS
+        decay = max(0.3, 1.0 - (age_s / self.DECAY_SECONDS) * 0.7)
+        return jaccard * decay
+
+    def should_suppress(self, candidate: str) -> bool:
+        """Return True if candidate is too similar to recent thoughts."""
+        now = time.time()
+        cand_ngrams = self._ngrams(candidate)
+        for ts, hist_text in self._history:
+            age = now - ts
+            hist_ngrams = self._ngrams(hist_text)
+            sim = self._weighted_similarity(cand_ngrams, hist_ngrams, age)
+            if sim >= self.BLOCK_THRESHOLD:
+                return True
+        return False
+
+    def record(self, text: str):
+        """Record a thought that was actually fired."""
+        self._history.append((time.time(), text))
+
+    def similarity_to_recent(self, candidate: str) -> float:
+        """Return max weighted similarity to recent thought history."""
+        now = time.time()
+        cand_ngrams = self._ngrams(candidate)
+        max_sim = 0.0
+        for ts, hist_text in self._history:
+            age = now - ts
+            hist_ngrams = self._ngrams(hist_text)
+            sim = self._weighted_similarity(cand_ngrams, hist_ngrams, age)
+            max_sim = max(max_sim, sim)
+        return max_sim
+
+
+# ─────────────────────────────────────────────────────────────
+#  Emotional coherence table
+# ─────────────────────────────────────────────────────────────
+
+# Reactions that should NOT fire when the response intent leans a certain way.
+# key=reaction_mood, value=set of intents that are incompatible with this reaction.
+_REACTION_INTENT_GATE: dict[str, set] = {
+    "amused":     {"empathize", "encourage", "reflect"},
+    "excited":    {"empathize", "deflect"},
+    "annoyed":    {"empathize", "encourage", "greet"},
+    "lonely":     {"joke", "excited"},
+    "focused":    {"joke", "greet"},
+}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -163,6 +254,75 @@ class MoodJournal:
         if volt < 0.2:
             return f"steady {dominant} throughout"
         return f"started {first}, mostly {dominant}, currently {last}"
+
+    def session_narrative(self) -> str:
+        """
+        Richer emotional arc narrative. Detects emotional movements,
+        peaks, and the overall shape of the session.
+        Used in system prompts when relationship tier is friend/close.
+        """
+        if len(self._entries) < 4:
+            return self.session_arc()
+
+        entries = self._entries
+        first = entries[0].mood
+        last  = entries[-1].mood
+        dominant = self.most_common_mood()
+        volt = self.emotional_volatility()
+        peak = self.peak_arousal_mood()
+        peak_mood = peak.mood if peak else dominant
+
+        # Detect trajectory: is arousal trending up or down?
+        mid = len(entries) // 2
+        early_arousal = sum(e.arousal for e in entries[:mid]) / mid
+        late_arousal  = sum(e.arousal for e in entries[mid:]) / (len(entries) - mid)
+        arousal_trend = "energy picked up" if late_arousal > early_arousal + 0.1 else                         "energy wound down" if late_arousal < early_arousal - 0.1 else                         "steady energy"
+
+        # Detect emotional shifts
+        shift_points: list[str] = []
+        for i in range(1, len(entries)):
+            if entries[i].mood != entries[i-1].mood:
+                shift_points.append(entries[i].mood)
+
+        if volt < 0.15:
+            return f"mostly {dominant} throughout — stable and consistent"
+        elif volt < 0.35:
+            if first == last:
+                return f"started and ended {first} — {arousal_trend} in between"
+            return f"moved from {first} to {last}, stayed mostly {dominant}"
+        else:
+            unique_shifts = len(set(shift_points))
+            if unique_shifts >= 4:
+                return f"emotionally varied session — hit {peak_mood} at peak, landed {last}"
+            return (
+                f"started {first}, shifted through a few moods "
+                f"(peaked at {peak_mood}), currently {last}"
+            )
+
+    def arc_segments(self, n_segments: int = 3) -> list[dict]:
+        """
+        Break the session into N segments and describe each.
+        Useful for detailed session review or debugging.
+        """
+        if not self._entries:
+            return []
+        size = max(1, len(self._entries) // n_segments)
+        segments = []
+        for i in range(n_segments):
+            chunk = self._entries[i*size:(i+1)*size]
+            if not chunk:
+                break
+            moods = Counter(e.mood for e in chunk)
+            dominant = moods.most_common(1)[0][0]
+            avg_arousal = sum(e.arousal for e in chunk) / len(chunk)
+            segments.append({
+                "segment": i + 1,
+                "dominant_mood": dominant,
+                "avg_arousal": round(avg_arousal, 2),
+                "transitions": len([j for j in range(1, len(chunk))
+                                    if chunk[j].mood != chunk[j-1].mood]),
+            })
+        return segments
 
     def export(self) -> dict:
         # Only keep last 50 for persistence
@@ -452,6 +612,12 @@ class InnerMind:
         self._task: Optional[asyncio.Task] = None
         self._tick_count: int = 0
 
+        # Diversity scorer — prevents semantically similar thoughts
+        self.diversity_scorer = ThoughtDiversityScorer()
+
+        # Burst dedup: track recently learned templates to avoid dups from fast messages
+        self._recent_learned: deque[str] = deque(maxlen=50)
+
     # ── Lifecycle ────────────────────────────────────────────────
 
     async def start(self):
@@ -519,6 +685,15 @@ class InnerMind:
         # Tag the thought semantically
         tags = self._tag(category, text)
 
+        # Diversity check — suppress if too similar to recent thoughts
+        if self.diversity_scorer.should_suppress(text):
+            # Try once more with a different template from same category
+            alt_raw = self._pick_template(bucket)
+            alt_text = self._fill(alt_raw)
+            if not self.diversity_scorer.should_suppress(alt_text):
+                raw, text = alt_raw, alt_text
+            # else: proceed with original — diversity scorer is advisory, not blocking
+
         thought = Thought(
             text=text,
             mood=self.mood,
@@ -531,6 +706,7 @@ class InnerMind:
         self.focus = text
         self.category_counts[category] += 1
         self._blocked[raw] = time.time() + self.REPEAT_BLOCK_SECONDS
+        self.diversity_scorer.record(text)
 
         # Journal mood shifts
         if self.mood.value != self._last_journal_mood:
@@ -615,13 +791,17 @@ class InnerMind:
 
     def _fill(self, tpl: str) -> str:
         ctx = self._context
-        snippet = (ctx.get("last_snippet") or "…")[:40]
+        snippet = (ctx.get("last_snippet") or "what was just said")[:40]
+        # Use "them" when no user is focused — more natural than "someone"
+        user_ref = ctx.get("focus_user") or "them"
+        pattern = ctx.get("user_pattern") or "go quiet sometimes"
+        env = ctx.get("env_state") or "quiet"
         return (
             tpl
-            .replace("{user}",      ctx.get("focus_user") or "someone")
+            .replace("{user}",      user_ref)
             .replace("{snippet}",   snippet)
-            .replace("{pattern}",   ctx.get("user_pattern") or "do that thing")
-            .replace("{env_state}", ctx.get("env_state") or "calm")
+            .replace("{pattern}",   pattern)
+            .replace("{env_state}", env)
         )
 
     def _drift_baseline(self):
@@ -637,15 +817,28 @@ class InnerMind:
     # ── Mood management ──────────────────────────────────────────
 
     def set_mood(self, mood: Mood, arousal: Optional[float] = None, immediate: bool = False):
+        """
+        Schedule a mood transition.
+        immediate=True: apply instantly (for strong emotional events).
+        immediate=False: phase in over 2-4 thought ticks (default).
+
+        Arousal always updates immediately regardless of immediate flag,
+        so Shiro's energy level reflects events instantly even if mood lags.
+        """
+        # Arousal always reflects the moment — no lag
+        if arousal is not None:
+            self.arousal = max(0.0, min(1.0, arousal))
+
         if immediate:
             self.mood = mood
             self._mood_target = None
+            self._mood_steps = 0
         else:
-            self._mood_target = mood.value if isinstance(mood, Mood) else mood
-            self._mood_steps = random.randint(2, 4)
-
-        if arousal is not None:
-            self.arousal = max(0.0, min(1.0, arousal))
+            # Don't restart a transition if already heading to same mood
+            target_val = mood.value if isinstance(mood, Mood) else mood
+            if self._mood_target != target_val:
+                self._mood_target = target_val
+                self._mood_steps = random.randint(2, 4)
 
     def _step_mood(self):
         if self._mood_target and self._mood_steps > 0:
@@ -678,11 +871,17 @@ class InnerMind:
 
     # ── Reactions ────────────────────────────────────────────────
 
-    def get_reaction(self) -> Optional[str]:
+    def get_reaction(self, intent: Optional[str] = None) -> Optional[str]:
         """
         Returns an optional micro-reaction for the current mood.
         Call this when generating a reply — prepend or inject naturally.
-        Returns None if reactions are disabled or randomly skipped.
+
+        intent: the planned communicative intent (from IntentPlanner).
+        If provided, applies the emotional coherence gate to suppress
+        reactions that would clash with the intent. E.g., won't return
+        *laughs* when the intent is "empathize".
+
+        Returns None if reactions are disabled, randomly skipped, or gated.
         """
         if not self.enable_reactions:
             return None
@@ -691,6 +890,13 @@ class InnerMind:
         reactions = MICRO_REACTIONS.get(self.mood.value)
         if not reactions:
             return None
+
+        # Emotional coherence gate
+        if intent:
+            blocked_intents = _REACTION_INTENT_GATE.get(self.mood.value, set())
+            if intent in blocked_intents:
+                return None   # suppress mismatched reaction
+
         return random.choice(reactions)
 
     # ── Context + learning ───────────────────────────────────────
@@ -699,11 +905,19 @@ class InnerMind:
         self._context = ctx
 
     def learn_thought(self, category: str, template: str):
+        # Burst dedup: skip if we just learned something very similar
+        if template in self._recent_learned:
+            return
+        # Also skip if it's semantically too similar to something recently fired
+        if self.diversity_scorer.similarity_to_recent(template) > 0.70:
+            return
+
         if category not in self.templates:
             self.templates[category] = []
         bucket = self.templates[category]
         if template not in bucket:
             bucket.append(template)
+            self._recent_learned.append(template)
             default_len = len(THOUGHT_TEMPLATES.get(category, []))
             if len(bucket) > default_len + self.MAX_LEARNED_PER_CAT:
                 if default_len < len(bucket):
