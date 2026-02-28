@@ -61,16 +61,31 @@ class PersonaManager:
             logger.error(f"Error loading persona from {found_path}: {e}")
             self.system_prompt = "You are Shiro, a sly kitsune."
 
-    def _build_system_prompt(self, now: datetime = None):
+    def _build_system_prompt(self, now: datetime = None, **context):
         """Constructs the system prompt from the persona data."""
         if not self.persona_data:
             self.system_prompt = "You are Shiro, a sly kitsune."
             return
 
+        intent_hint = context.get('intent_hint')
+        relationship_tier = context.get('relationship_tier')
+        timing_obs = context.get('timing_obs')
+        user_quirks = context.get('user_quirks')
+        user_patterns = context.get('user_patterns')
+
         # Add Real-time Temporal Awareness
         if not now:
             now = datetime.now()
-        temporal_context = f"### SYSTEM CONTEXT\nCurrent Date & Time: {now.strftime('%A, %B %d, %Y - %I:%M %p')}\n\n"
+        temporal_context = f"### SYSTEM CONTEXT\nCurrent Date & Time: {now.strftime('%A, %B %d, %Y - %I:%M %p')}\n"
+
+        if relationship_tier:
+            temporal_context += f"Relationship Tier: {relationship_tier.upper()}\n"
+        if timing_obs:
+            temporal_context += f"Visit Pattern: {timing_obs}\n"
+        if user_quirks:
+            temporal_context += f"User Quirks: {', '.join(user_quirks)}\n"
+
+        temporal_context += "\n"
 
         # 1. New "persona" block format
         if 'persona' in self.persona_data:
@@ -220,7 +235,11 @@ class PersonaManager:
             prompt += "- You have a multi-tier memory system: Short-term buffer (with timestamps), Long-term interaction history (with timestamps), User Profiles (likes/dislikes), and Episodic memory (notable events).\n"
             prompt += "- You have an inner monologue that processes thoughts before you speak.\n"
             prompt += "- You are highly aware of the passage of time. Use the provided [DOWNTIME], [TIME SINCE LAST SEEN], and interaction timestamps to track exactly how long it has been between exchanges.\n"
-            prompt += "- If you have been 'off' (DOWNTIME) for a long time, you might be lonely, curious, or mention how boring the void was.\n"
+            prompt += "- If you have been 'off' (DOWNTIME) for a long time, you might be lonely, curious, or mention how boring the void was.\n\n"
+
+            if intent_hint:
+                prompt += "### RESPONSE DIRECTION\n"
+                prompt += f"- Instruction: {intent_hint}\n"
 
             self.system_prompt = prompt
             return
@@ -228,13 +247,14 @@ class PersonaManager:
         # Fallback to defaults
         self.system_prompt = "You are Shiro, a sly kitsune."
 
-    def get_system_prompt(self, now: datetime = None) -> str:
+    def get_system_prompt(self, now: datetime = None, **context) -> str:
         """Returns the constructed system prompt."""
         if not self.persona_data:
             self.load_persona()
 
-        if now:
-            self._build_system_prompt(now=now)
+        # Rebuild if new context is provided, otherwise return cached
+        if now or context:
+            self._build_system_prompt(now=now, **context)
         elif not self.system_prompt:
             self._build_system_prompt()
 

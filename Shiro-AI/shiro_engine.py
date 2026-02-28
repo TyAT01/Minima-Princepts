@@ -22,6 +22,15 @@ from persona.manager import PersonaManager
 from persona.inner_mind import ShiroInnerMind
 from utils.text_utils import split_into_sentences, clean_yaml_block
 
+# v4 Consciousness Upgrades
+from consciousness.events import EventBus
+from consciousness.intent import IntentPlanner, SentimentTrajectory, RuleEngine, TimePattern
+from consciousness.speech_cadence import SpeechCadence
+from consciousness.self_awareness import SelfAwareness
+from consciousness.thought_loop import InnerMind, Mood
+from consciousness.autonomous_voice import AutonomousVoice
+from consciousness.memory import ConversationMemory
+
 logger = logging.getLogger(__name__)
 
 # ── Dynamic greeting pools ─────────────────────────────────────────────────
@@ -174,8 +183,9 @@ class ShiroEngine:
     # Unified keywords for various thought/meta tags to ensure consistency across filtering methods
     THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG"
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, on_autonomous_speak: Optional[Callable[[str, str], Any]] = None):
         self.config = config
+        self.on_autonomous_speak = on_autonomous_speak
         self.processing_lock = threading.Lock()
         self.brain_lock = threading.RLock()
         self.profile_lock = threading.RLock()
@@ -200,6 +210,37 @@ class ShiroEngine:
         self.intensity = 0.5
         self._hmph_counter = 0          # tracks recent hmph usage
         self._hmph_session_count = 0    # total this session
+
+        # v4 Consciousness Core
+        self.bus = EventBus()
+        self.intent_planner = IntentPlanner()
+        self.sentiment_trajectory = SentimentTrajectory()
+        self.time_pattern = TimePattern()
+        self.cadence = SpeechCadence()
+        self.rules = RuleEngine()
+        self.awareness = SelfAwareness(name="Shiro", event_bus=self.bus)
+
+        # [V4 UPGRADE] Inner Mind v3
+        self.mind = InnerMind(
+            thought_tick_seconds=4.0,
+            thought_callback=self._on_v4_thought,
+            enable_reactions=True
+        )
+
+        # Callback for autonomous voice
+        async def _speak_callback(event):
+             # Bridging autonomous voice to the console/logger and provided callback
+             logger.info(f"[AUTONOMOUS VOICE]: {event.text}")
+             if self.on_autonomous_speak:
+                 if asyncio.iscoroutinefunction(self.on_autonomous_speak):
+                     await self.on_autonomous_speak(event.text, event.speech_type)
+                 else:
+                     self.on_autonomous_speak(event.text, event.speech_type)
+
+        self.voice = AutonomousVoice(speak_callback=_speak_callback)
+        self.v4_memory = ConversationMemory()
+        self._idle_task: Optional[asyncio.Task] = None
+
         # ---------------------
         # Robust path resolution
         base_path = Path(__file__).parent.resolve()
@@ -228,7 +269,7 @@ class ShiroEngine:
         )
         pers_cfg = config.get('persona', {})
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'shiro_sheet.yaml'))
-        self.mind = ShiroInnerMind(name="Shiro", verbose=True)
+        self.legacy_mind = ShiroInnerMind(name="Shiro", verbose=True)
         self.last_thought = ""
         self._load_session_objectives()
         # Eternal Learning Brain
@@ -283,10 +324,14 @@ class ShiroEngine:
     def initialize(self):
         """Initializes components."""
         self.persona.load_persona()
-        # Load Inner Mind state
+        # Load Legacy Inner Mind state
         state_path = Path(__file__).parent.resolve() / "shiro_state.json"
         if state_path.exists():
-            self.mind.load_state(str(state_path))
+            self.legacy_mind.load_state(str(state_path))
+
+        # [V4 UPGRADE] Start continuous thought loop and idle loop
+        asyncio.create_task(self.mind.start())
+        self._idle_task = asyncio.create_task(self._v4_idle_loop())
 
         # LLM Diagnostics
         diag = self.llm.perform_diagnostics()
@@ -319,23 +364,79 @@ class ShiroEngine:
             # No running event loop in this thread, use asyncio.run to create one
             return asyncio.run(coro)
 
+    def _on_v4_thought(self, thought):
+        """Callback for v4 InnerMind thoughts."""
+        self.last_thought = thought.text
+        # Optional: Emit to EventBus
+        self.bus.emit("thought_fired", thought=thought.text)
+
+    async def _v4_idle_loop(self):
+        """Continuous idle loop for autonomous behavior."""
+        while True:
+            await asyncio.sleep(20.0 * random.uniform(0.8, 1.3))
+            idle_s = (datetime.now(timezone.utc) - self.last_interaction_time).total_seconds()
+            present = [p for p in self.awareness.users.values() if p.present]
+
+            if not present and idle_s > 120.0:
+                await self.voice.mutter_idle()
+            elif present and idle_s > 90.0:
+                target = random.choice(present)
+                # Use v4 memory to find something to talk about
+                recall = self.v4_memory.get_summary(target.user_id)
+                if recall and recall.key_facts and random.random() < 0.3:
+                    fact = random.choice(recall.key_facts)
+                    await self.voice.speak_memory(target.user_id, fact)
+                else:
+                    await self.voice.initiate_conversation(target.user_id)
+                self.last_interaction_time = datetime.now(timezone.utc)
+
+    def on_user_join(self, user_name: str):
+        """V4 hook for user join."""
+        profile = self.awareness.user_entered(user_name)
+        self.v4_memory.new_session(user_name)
+        # Reset idle timer on join
+        self.last_interaction_time = datetime.now(timezone.utc)
+
+    def on_user_leave(self, user_name: str):
+        """V4 hook for user leave."""
+        self.awareness.user_left(user_name)
+
     def process_text(self, text: str, user_name: str = None, interrupt_event: threading.Event = None) -> Generator[str, None, None]:
         """Core text processing logic."""
         self.last_thought = ""
         current_time = datetime.now(timezone.utc)
         processed_text = text
 
+        if not user_name:
+            user_name = self.current_user_name
+        else:
+            if self.current_user_name != user_name:
+                 logger.info(f"Switching active user to: {user_name}")
+                 self.current_user_name = user_name
+                 self.legacy_mind.switch_user(user_name)
+
+        # [V4 UPGRADE] Observe user through SelfAwareness v4
+        user_profile = self.awareness.user_spoke(user_name, processed_text)
+
+        # Sync mirror vocab to SpeechCadence
+        self.cadence.sync_mirror_vocab(user_name, user_profile.mirror_vocab)
+
+        # [V4 UPGRADE] Observe user cadence
+        self.cadence.observe(user_name, processed_text)
+
+        # [V4 UPGRADE] Emit user_spoke event
+        self.bus.emit("user_spoke", user_id=user_name, text=processed_text)
+
+        # [V4 UPGRADE] Detect emotions and track trajectory
+        user_emotions = user_profile.current_emotion_strength()
+        self.sentiment_trajectory.record(user_name, user_emotions)
+        trajectory = self.sentiment_trajectory.trend(user_name)
+        self.time_pattern.record_visit(user_name)
+
         # Handle outfit changes
         if processed_text.lower().startswith("shiro change to"):
             yield self.change_outfit(processed_text[15:])
             return
-        if user_name:
-            if self.current_user_name != user_name:
-                 logger.info(f"Switching active user to: {user_name}")
-                 self.current_user_name = user_name
-                 self.mind.switch_user(user_name)
-        else:
-            user_name = self.current_user_name
 
         # Identity Verification Heuristic
         if processed_text and not processed_text.startswith("[") and user_name != "System":
@@ -368,13 +469,47 @@ class ShiroEngine:
                     length_hint = "\n[SYSTEM: Keep response focused. 2-3 sentences.]"
 
                 # [INNER MIND] Process input to get thoughts and strategy
-                inner_mind_data = self.mind.process_input(processed_text, user_id=user_name)
+                inner_mind_data = self.legacy_mind.process_input(processed_text, user_id=user_name)
                 inner_context = inner_mind_data.get("inner_context", "")
+
+                # [V4 UPGRADE] Update v4 InnerMind context
+                self.mind.update_context({
+                    "focus_user": user_name,
+                    "last_snippet": processed_text[:40],
+                    "relationship_tier": inner_mind_data.get("relationship", "STRANGER").lower(),
+                    "sentiment_trajectory": trajectory,
+                    "idle_ms": (datetime.now(timezone.utc) - self.last_interaction_time).total_seconds() * 1000
+                })
+
+                # [V4 UPGRADE] Plan communicative intent
+                rel_tier_raw = inner_mind_data.get("relationship", "STRANGER").lower()
+                # Map InnerMind familiarity to a 0-1 depth scale
+                conv_depth = min(1.0, inner_mind_data.get("familiarity", 0) / 60.0)
+
+                planned_intent = self.intent_planner.plan(
+                    user_message=processed_text,
+                    user_emotions=user_emotions,
+                    mood=self.mind.mood.value,
+                    tier=rel_tier_raw,
+                    trajectory=trajectory,
+                    depth=conv_depth,
+                    valence=self.sentiment_trajectory.current_valence(user_name),
+                    has_question="?" in processed_text,
+                    is_greeting=bool(user_emotions.get("greeting", 0) > 0.5)
+                )
+                self.bus.emit("intent_planned", user_id=user_name, intent=planned_intent.name, confidence=planned_intent.confidence)
 
                 # --- THE CONTEXT SANDWICH ---
 
                 # 1. Top Bun: System Instructions & Identity
-                system_prompt = self.persona.get_system_prompt(now=datetime.now())
+                system_prompt = self.persona.get_system_prompt(
+                    now=datetime.now(),
+                    intent_hint=planned_intent.prompt_hint,
+                    relationship_tier=rel_tier_raw,
+                    timing_obs=self.time_pattern.visit_observation(user_name),
+                    user_quirks=user_profile.quirks,
+                    user_patterns=[self.awareness.get_user_pattern_description(user_name)]
+                )
                 drift_note = f"\n[SYSTEM: Topic Drift Detected ({drift_score:.2f}). Adjusting focus.]" if drift_score > 0.6 else ""
                 shiro_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]{drift_note}{length_hint}\n{self.outfit_block()}"
 
@@ -400,6 +535,12 @@ class ShiroEngine:
                 # 2. Meat: Retrieved Long-Term Memory (RAG)
                 hyp_ans = self._imagine_reply(processed_text)
                 long_term_memory = self.memory.get_full_context(processed_text, user_id=user_name, hypothetical_answer=hyp_ans)
+
+                # [V4 UPGRADE] Inject v4 Memory recall
+                v4_recall = self.v4_memory.recall(user_name)
+                if v4_recall:
+                    long_term_memory = f"{v4_recall}\n\n{long_term_memory}"
+
                 # Add Temporal Context
                 meat = self._add_temporal_context(long_term_memory, user_name)
 
@@ -462,6 +603,9 @@ class ShiroEngine:
                 full_response = " ".join(response_fragments)
                 full_response = self._throttle_hmph(full_response)
 
+                # [V4 UPGRADE] Adapt to user speech cadence
+                full_response = self.cadence.adapt_text(full_response, user_name)
+
                 # Re-split into fragments for streaming yield so the GUI still gets
                 # incremental updates. Simple word-chunk split to avoid re-splitting logic.
                 if full_response:
@@ -478,13 +622,17 @@ class ShiroEngine:
                         self.memory.store_episodic_memory(f"SESSION START: First interaction with {user_name} today: '{text}'", user_id=user_name, importance=8)
 
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
+                    # [V4 UPGRADE] Sync to v4 memory for potential spontaneous callbacks
+                    self.v4_memory.add_user_message(user_name, text, emotions=user_emotions)
+                    self.v4_memory.add_assistant_message(full_response.strip(), user_id=user_name)
+
                     self._interaction_count += 1
 
                     # [INNER MIND] Reflect on the generated response
-                    self.mind.reflect_on_response(full_response.strip(), text)
-                    # Persist Inner Mind state
+                    self.legacy_mind.reflect_on_response(full_response.strip(), text)
+                    # Persist Legacy Inner Mind state
                     state_path = Path(__file__).parent.resolve() / "shiro_state.json"
-                    self.mind.save_state(str(state_path))
+                    self.legacy_mind.save_state(str(state_path))
 
                     # Trigger background tasks AFTER response is generated to avoid concurrent VRAM usage
                     threading.Thread(target=lambda: self._safe_async_run(self.check_and_think_async(user_name, previous_interaction)), daemon=True).start()
@@ -492,8 +640,27 @@ class ShiroEngine:
                          threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
                     self.shiro_learn_and_stay_shiro(processed_text, full_response)
             except Exception as e:
-                logger.error(f"Engine text processing failed: {e}")
-                raise
+                logger.error(f"Engine text processing failed: {e}. Falling back to RuleEngine.")
+                # [V4 UPGRADE] Fallback to RuleEngine if LLM fails
+                try:
+                    rel_tier = self.legacy_mind.relationship.level.name.lower()
+                    mood = self.mind.mood.value
+                    # Determine intent (simplified for fallback)
+                    fallback_intent = "empathize" if self.sentiment_trajectory.current_valence(user_name) < -0.3 else "share"
+
+                    response = self.rules.full_response(
+                        intent=fallback_intent,
+                        mood=mood,
+                        user_message=processed_text,
+                        user_name=user_name,
+                        trajectory=trajectory
+                    )
+
+                    yield response
+                    self.memory.add_interaction(text, response, user_id=user_name)
+                except Exception as fallback_err:
+                    logger.error(f"RuleEngine fallback also failed: {fallback_err}")
+                    raise e
 
     async def fetch_relevant_memory_async(self, query_text: str, n_results: int = 2):
         """Async fetch of relevant memories."""
@@ -917,9 +1084,13 @@ class ShiroEngine:
         logger.info("Engine initiating Reflective Shutdown...")
         try:
             self.reflect(self.current_user_name)
-            # Final Inner Mind save
+            # Final Legacy Inner Mind save
             state_path = Path(__file__).parent.resolve() / "shiro_state.json"
-            self.mind.save_state(str(state_path))
+            self.legacy_mind.save_state(str(state_path))
+            # [V4 UPGRADE] Stop v4 InnerMind and idle loop
+            if self._idle_task:
+                self._idle_task.cancel()
+            self._safe_async_run(self.mind.stop())
             loop_prompt = (
                 "Identify any 'Open Loops' from the recent conversation. \n"
                 "An Open Loop is a project started but not finished, a question asked but not answered, or a promise made.\n"
