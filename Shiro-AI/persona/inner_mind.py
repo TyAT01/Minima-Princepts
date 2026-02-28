@@ -569,8 +569,8 @@ def _select_strategy(
         return (ResponseStrategy.WARM,
                 "They're hurting. Tsun act is wrong here — be genuinely present.")
 
-    # Greeting → warmth first with strangers, tease with familiar
-    if re.search(r"\b(hello|hi|hey|greetings|howdy|good morning|good evening|good afternoon)\b", message, re.IGNORECASE):
+    # Greeting → warmth first with strangers, tease with familiar. Only if early in session.
+    if turn_count <= 3 and re.search(r"\b(hello|hi|hey|greetings|howdy|good morning|good evening|good afternoon)\b", message, re.IGNORECASE):
         if relationship.level == RelationshipLevel.STRANGER:
             return (ResponseStrategy.WARM,
                     "First impression — inviting and playful, not cold. Warmth first, sass later.")

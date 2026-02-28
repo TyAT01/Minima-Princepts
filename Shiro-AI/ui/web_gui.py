@@ -585,9 +585,10 @@ class ShiroGUI:
                     history = _load_session(name)
                 if self.join_chat_cb:
                     resp_fragments = self.join_chat_cb(name)
-                    response = " ".join(resp_fragments)
-                    history.append({"role": "assistant", "content": response})
-                    _save_session(name, history)
+                    if resp_fragments:
+                        response = " ".join(resp_fragments)
+                        history.append({"role": "assistant", "content": response})
+                        _save_session(name, history)
                 status = f"<span class='status-text'>🟢 Online · Room: **{name} is here**</span>"
                 return history, status
 

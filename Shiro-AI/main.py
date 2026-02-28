@@ -118,6 +118,10 @@ class ShiroApp:
 
     def handle_user_join(self, user_name: str):
         """Handles a user joining the chat room."""
+        if user_name in self.active_users:
+            logging.info(f"User {user_name} already joined. Skipping greeting.")
+            return []
+
         self.active_users.add(user_name)
         logging.info(f"User {user_name} joined.")
 
