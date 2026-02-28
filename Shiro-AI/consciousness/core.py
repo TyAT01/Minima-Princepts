@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable, Optional, Any, Generator
 from urllib import request, error as urllib_error
 
-from .inner_mind import InnerMind, Mood, Thought
+from .thought_loop import InnerMind, Mood, Thought
 from .self_awareness import SelfAwareness
 from .speech_cadence import SpeechCadence
 from .autonomous_voice import AutonomousVoice, SpeechEvent

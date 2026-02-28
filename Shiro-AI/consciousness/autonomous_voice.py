@@ -56,7 +56,6 @@ DEFAULT_SPEECH_BANK: dict[str, Any] = {
         "there's {name}. hey",
         "hey {name} — good to see you",
         "oh, {name}. hi",
-        "hey {name}, good timing",
         "{name}'s here. nice.",
         "hey there {name}",
         "oh hi {name} — what's up",

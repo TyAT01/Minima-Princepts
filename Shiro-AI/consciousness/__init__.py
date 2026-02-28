@@ -46,7 +46,7 @@ from .core import (
     LocalLLMBridge,
     ShiroPromptBuilder,
 )
-from .inner_mind import InnerMind, Mood, Thought, MoodJournal, ThoughtDiversityScorer
+from .thought_loop import InnerMind, Mood, Thought, MoodJournal, ThoughtDiversityScorer
 from .self_awareness import SelfAwareness, UserProfile, BehaviorProfile
 from .speech_cadence import SpeechCadence, CadenceModel
 from .autonomous_voice import AutonomousVoice, SpeechEvent
