@@ -233,7 +233,7 @@ DEFAULT_SPEECH_BANK: dict[str, Any] = {
 
 
 class AutonomousVoice:
-    """Shiro's proactive speech engine. v3."""
+    """Shiro's proactive speech engine. v5.0."""
 
     # Cooldown seconds per speech type
     _COOLDOWNS: dict[str, float] = {
