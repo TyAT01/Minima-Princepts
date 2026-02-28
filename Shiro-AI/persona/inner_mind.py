@@ -2296,9 +2296,9 @@ class ShiroInnerMind:
                     for m in self.memory_bank
                 ],
             }
-            payload  = json.dumps(data, indent=2, ensure_ascii=False)
+            payload  = json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True)
             checksum = hashlib.sha256(payload.encode()).hexdigest()
-            payload_wrapper = json.dumps({"checksum": checksum, "data": data}, indent=2, ensure_ascii=False)
+            payload_wrapper = json.dumps({"checksum": checksum, "data": data}, indent=2, ensure_ascii=False, sort_keys=True)
             # Atomic write using temporary file
             temp_path = Path(filepath).with_suffix(".tmp")
             with open(temp_path, "w", encoding="utf-8") as f:
@@ -2321,7 +2321,7 @@ class ShiroInnerMind:
                     wrapper = json.load(f)
 
                 if "checksum" in wrapper:
-                    payload  = json.dumps(wrapper["data"], indent=2, ensure_ascii=False)
+                    payload  = json.dumps(wrapper["data"], indent=2, ensure_ascii=False, sort_keys=True)
                     computed = hashlib.sha256(payload.encode()).hexdigest()
                     if computed != wrapper["checksum"]:
                         logger.warning(f"[{self.name}] WARNING: Checksum mismatch — possible corruption.")
