@@ -196,6 +196,7 @@ class ShiroEngine:
         self.last_interaction_time = datetime.now(timezone.utc)
         self.user_session_info = {}
         self.session_tool_count = 0
+        self._background_loop: Optional[asyncio.AbstractEventLoop] = None
 
         # --- SHIRO SPECIFIC ---
         self.wardrobe = {
@@ -330,9 +331,21 @@ class ShiroEngine:
         if state_path.exists():
             self.legacy_mind.load_state(str(state_path))
 
-        # [V4 UPGRADE] Start continuous thought loop and idle loop
-        asyncio.create_task(self.mind.start())
-        self._idle_task = asyncio.create_task(self._v4_idle_loop())
+        # [V4 UPGRADE] Start background event loop for thought loop and idle loop
+        self._background_loop = asyncio.new_event_loop()
+        def _run_loop():
+            asyncio.set_event_loop(self._background_loop)
+            self._background_loop.run_forever()
+
+        threading.Thread(target=_run_loop, daemon=True).start()
+
+        # Schedule tasks in the background loop
+        asyncio.run_coroutine_threadsafe(self.mind.start(), self._background_loop)
+
+        # Store the task so it can be cancelled
+        def _start_idle():
+            self._idle_task = self._background_loop.create_task(self._v4_idle_loop())
+        self._background_loop.call_soon_threadsafe(_start_idle)
 
         # LLM Diagnostics
         diag = self.llm.perform_diagnostics()
@@ -357,6 +370,9 @@ class ShiroEngine:
 
     def _safe_async_run(self, coro):
         """Safely runs an async coroutine from a synchronous context."""
+        if self._background_loop and self._background_loop.is_running():
+            return asyncio.run_coroutine_threadsafe(coro, self._background_loop).result()
+
         try:
             # Try to get the running loop (preferred in Python 3.7+)
             loop = asyncio.get_running_loop()
@@ -596,7 +612,7 @@ class ShiroEngine:
                         fragment = self._safe_async_run(self.handle_tool_calls_async(fragment, processed_text))
                         self.session_tool_count += 1
 
-                    clean_fragment = self._clean_response(fragment)
+                    clean_fragment = self._clean_response(fragment, processed_text)
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
 
@@ -835,12 +851,14 @@ class ShiroEngine:
                         buffer = buffer[match.end():].lstrip()
                         is_block_start = False
                         inner_text = re.sub(r'[\[\]\(\)\<\>\*]', '', tag_content).strip()
+                        # Strict check for thought block start
                         if any(re.fullmatch(k, inner_text, re.IGNORECASE) for k in self.THOUGHT_KEYWORDS.split('|')):
                             is_block_start = True
+
                         if is_block_start:
                             in_thought = True
-                            # Hide [THOUGHT] from UI
                         else:
+                            # If it's a minor tag like (LOG: ...), add to last_thought but don't enter in_thought state
                             self.last_thought += tag_content + " "
                         continue
                     else:
@@ -907,11 +925,12 @@ class ShiroEngine:
                         return
                 yield buffer
 
-    def _clean_response(self, text: str) -> str:
+    def _clean_response(self, text: str, user_query: Optional[str] = None) -> str:
         # Preserve thought markers — the stream extractor handles these separately
         if "[THOUGHT]" in text or "[/THOUGHT]" in text:
             return text
 
+        # Remove various meta/thought tags
         clean = re.sub(
             rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?\[/(?:{self.THOUGHT_KEYWORDS})\]',
             '', text, flags=re.IGNORECASE | re.DOTALL
@@ -921,20 +940,31 @@ class ShiroEngine:
             '', clean, flags=re.IGNORECASE | re.DOTALL
         )
         clean = re.sub(r'<THOUGHTS?>.*?</THOUGHTS?>', '', clean, flags=re.IGNORECASE | re.DOTALL)
+
+        # Remove unclosed opening tags at the very start
         clean = re.sub(
             rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*',
             '', clean, count=1
         ).strip()
+
+        # Remove asterisk-wrapped actions or thoughts
         clean = re.sub(r'(?i)\*(?:Shiro\s+)?(?:thinks?|thinking|schem\w+|plott\w+).*?\*', '', clean).strip()
+
+        # Remove any other bracketed/parenthetical meta-info that isn't a link
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
 
+        # ── Echo/Repetition Stripping ────────────────────────────────────────────
+        # If the response starts with exactly what the user said (common failure mode)
+        if user_query:
+            query_clean = user_query.strip().lower()
+            if clean.lower().startswith(query_clean):
+                clean = clean[len(query_clean):].lstrip(" :,.-")
+
         # ── Speaker tag stripping ────────────────────────────────────────────────
-        # Model sometimes prefixes its spoken response with "Shiro:" — strip it.
-        # Handles: "Shiro: text", "Shiro : text", "shiro: text"
-        clean = re.sub(r'(?i)^\s*shiro\s*:\s*', '', clean).strip()
-        # Also strip generic "Name:" patterns at line start that the model may echo
-        # (e.g. if the prompt had speaker-tagged examples)
-        # ── End speaker tag stripping ────────────────────────────────────────────
+        # Model sometimes prefixes its spoken response with "Shiro:" or similar
+        clean = re.sub(r'(?i)^\s*(?:shiro|system|user|assistant)\s*:\s*', '', clean).strip()
+        # Also strip generic "Name:" patterns (capitalized word followed by colon)
+        clean = re.sub(r'^[A-Z][a-z]+:\s*', '', clean).strip()
 
         lines = clean.splitlines()
         cleaned_lines = []

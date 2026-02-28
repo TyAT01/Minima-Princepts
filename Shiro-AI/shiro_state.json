@@ -1,35 +1,110 @@
 {
-  "checksum": "7974284920214264c1c1e64573a622380eaedb82d50c1feb6556375ada47d6a2",
+  "checksum": "b7eb1f2e8e28021f043b123a6af4e59bdd8e674776ee408eb10c210b76d6c48a",
   "data": {
-    "version": "3.0",
-    "name": "Shiro",
-    "turn_count": 2,
-    "session_start": "2026-02-28T03:53:53.958978",
+    "active_user_id": "TestUser",
+    "doc_count": 2,
+    "doc_freq": {
+      "day": 1,
+      "glad": 1,
+      "great": 1,
+      "happy": 1,
+      "having": 1,
+      "here": 1,
+      "see": 1,
+      "shiro": 1,
+      "today": 1
+    },
+    "emotional_momenta": {
+      "default": []
+    },
+    "interest_map": {
+      "day": 0.15,
+      "great": 0.15,
+      "happy": 0.15,
+      "having": 0.15,
+      "see": 0.15,
+      "shiro": 0.15
+    },
     "last_active": 1772250842.2878904,
+    "memory_bank": [
+      {
+        "consolidated": false,
+        "emotional_tag": "playful",
+        "importance": 0.4,
+        "is_session_summary": false,
+        "keywords": [
+          "happy",
+          "see",
+          "shiro",
+          "today"
+        ],
+        "recall_count": 0,
+        "summary": "I am so happy to see you Shiro!",
+        "tfidf_vector": {
+          "happy": 0.25,
+          "see": 0.25,
+          "shiro": 0.25,
+          "today": 0.25
+        },
+        "timestamp": 1772250841.04883,
+        "topic": "happy",
+        "user_tag": null
+      },
+      {
+        "consolidated": false,
+        "emotional_tag": "excited",
+        "importance": 0.4,
+        "is_session_summary": false,
+        "keywords": [
+          "having",
+          "great",
+          "day",
+          "glad",
+          "here"
+        ],
+        "recall_count": 0,
+        "summary": "I am having a great day!",
+        "tfidf_vector": {
+          "day": 0.2810930216216329,
+          "glad": 0.2810930216216329,
+          "great": 0.2810930216216329,
+          "having": 0.2810930216216329,
+          "here": 0.2810930216216329
+        },
+        "timestamp": 1772250845.3801205,
+        "topic": "happy",
+        "user_tag": null
+      }
+    ],
     "mood": {
-      "valence": 0.65652,
       "arousal": 0.47714,
       "dominance": 0.42664,
-      "inertia": 0.55
+      "inertia": 0.55,
+      "valence": 0.65652
     },
-    "traits": {
-      "openness": 0.88,
-      "conscientiousness": 0.72,
-      "extraversion": 0.78,
-      "agreeableness": 0.8,
-      "neuroticism": 0.18
-    },
+    "name": "Shiro",
     "playfulness": 0.8099999999999999,
+    "relationships": {
+      "TestUser": {
+        "consecutive_cold": 0,
+        "consecutive_warm": 0,
+        "familiarity_score": 1.6,
+        "level": 0,
+        "positive_exchanges": 2,
+        "recent_deltas": [],
+        "total_exchanges": 2
+      },
+      "default": {
+        "consecutive_cold": 0,
+        "consecutive_warm": 0,
+        "familiarity_score": 0.0,
+        "level": 0,
+        "positive_exchanges": 0,
+        "recent_deltas": [],
+        "total_exchanges": 0
+      }
+    },
     "self_model": {
-      "strengths": [
-        "I notice what people actually need, not just what they say.",
-        "My playfulness puts people at ease — they open up faster.",
-        "I'm loyal. Once I care about someone, that doesn't waver."
-      ],
-      "growth_areas": [
-        "I sometimes lean too hard on the tsun when a sincere moment lands better.",
-        "I can be impatient when people are slow to warm up."
-      ],
       "core_values": [
         "Loyalty matters more than looking cool.",
         "Teasing is an act of affection — not cruelty.",
@@ -38,29 +113,101 @@
         "Every person who talks to me deserves to feel like they matter.",
         "Honesty beats comfortable lies — even when it's embarrassing."
       ],
+      "growth_areas": [
+        "I sometimes lean too hard on the tsun when a sincere moment lands better.",
+        "I can be impatient when people are slow to warm up."
+      ],
+      "interaction_count": 2,
       "persona_insights": [
         "The 'hmph' is a shield, not a weapon. Use it sparingly and with purpose.",
         "When I tease, it should feel like a gift, not a put-down.",
         "A stranger seeing peak tsun will just think I'm rude. Warm first.",
         "The teasing is the seasoning, not the whole meal."
       ],
-      "interaction_count": 2
+      "strategy_compliance_rate": 1.0,
+      "strengths": [
+        "I notice what people actually need, not just what they say.",
+        "My playfulness puts people at ease — they open up faster.",
+        "I'm loyal. Once I care about someone, that doesn't waver."
+      ]
     },
-    "active_user_id": "TestUser",
-    "user_profiles": {
-      "default": {
-        "name": null,
-        "nickname": null,
-        "known_interests": [],
-        "emotional_moments": [],
-        "preferences": {},
-        "compliments_given": 0,
-        "times_pushed_back": 0,
-        "session_count": 0
+    "sentiment_trends": {
+      "TestUser": [
+        0.0,
+        0.0
+      ],
+      "default": []
+    },
+    "session_start": "2026-02-28T03:53:53.958978",
+    "thought_type_history": {
+      "default": {}
+    },
+    "topic_graph": {
+      "day": {
+        "first_seen": 1772250842.2880197,
+        "related": {
+          "great": 0.2,
+          "having": 0.2
+        },
+        "visit_count": 1
       },
+      "great": {
+        "first_seen": 1772250842.2880168,
+        "related": {
+          "day": 0.2,
+          "having": 0.2
+        },
+        "visit_count": 1
+      },
+      "happy": {
+        "first_seen": 1772250834.3694994,
+        "related": {
+          "see": 0.2,
+          "shiro": 0.2
+        },
+        "visit_count": 1
+      },
+      "having": {
+        "first_seen": 1772250842.2880108,
+        "related": {
+          "day": 0.2,
+          "great": 0.2
+        },
+        "visit_count": 1
+      },
+      "see": {
+        "first_seen": 1772250834.3695128,
+        "related": {
+          "happy": 0.2,
+          "shiro": 0.2
+        },
+        "visit_count": 1
+      },
+      "shiro": {
+        "first_seen": 1772250834.3695083,
+        "related": {
+          "happy": 0.2,
+          "see": 0.2
+        },
+        "visit_count": 1
+      }
+    },
+    "traits": {
+      "agreeableness": 0.8,
+      "conscientiousness": 0.72,
+      "extraversion": 0.78,
+      "neuroticism": 0.18,
+      "openness": 0.88
+    },
+    "turn_count": 2,
+    "unresolved_questions": [
+      "Is there a deeper need beneath this question?"
+    ],
+    "user_profiles": {
       "TestUser": {
-        "name": null,
-        "nickname": null,
+        "compliments_given": 0,
+        "curiosity_journal": [],
+        "emotional_moments": [],
         "known_interests": [
           "happy",
           "shiro",
@@ -69,157 +216,25 @@
           "great",
           "day"
         ],
-        "emotional_moments": [],
+        "name": null,
+        "nickname": null,
         "preferences": {},
-        "compliments_given": 0,
-        "times_pushed_back": 0,
-        "session_count": 0
-      }
-    },
-    "relationships": {
+        "session_count": 1,
+        "times_pushed_back": 0
+      },
       "default": {
-        "level": 0,
-        "familiarity_score": 0.0,
-        "total_exchanges": 0,
-        "positive_exchanges": 0,
-        "consecutive_cold": 0,
-        "consecutive_warm": 0
-      },
-      "TestUser": {
-        "level": 0,
-        "familiarity_score": 1.6,
-        "total_exchanges": 2,
-        "positive_exchanges": 2,
-        "consecutive_cold": 0,
-        "consecutive_warm": 2
+        "compliments_given": 0,
+        "curiosity_journal": [],
+        "emotional_moments": [],
+        "known_interests": [],
+        "name": null,
+        "nickname": null,
+        "preferences": {},
+        "session_count": 1,
+        "times_pushed_back": 0
       }
     },
-    "sentiment_trends": {
-      "default": [],
-      "TestUser": [
-        0.0,
-        0.0
-      ]
-    },
-    "interest_map": {
-      "happy": 0.15,
-      "shiro": 0.15,
-      "see": 0.15,
-      "having": 0.15,
-      "great": 0.15,
-      "day": 0.15
-    },
-    "unresolved_questions": [
-      "Is there a deeper need beneath this question?"
-    ],
-    "doc_count": 2,
-    "doc_freq": {
-      "see": 1,
-      "today": 1,
-      "happy": 1,
-      "shiro": 1,
-      "glad": 1,
-      "great": 1,
-      "having": 1,
-      "day": 1,
-      "here": 1
-    },
-    "topic_graph": {
-      "happy": {
-        "visit_count": 1,
-        "first_seen": 1772250834.3694994,
-        "related": {
-          "shiro": 0.2,
-          "see": 0.2
-        }
-      },
-      "shiro": {
-        "visit_count": 1,
-        "first_seen": 1772250834.3695083,
-        "related": {
-          "happy": 0.2,
-          "see": 0.2
-        }
-      },
-      "see": {
-        "visit_count": 1,
-        "first_seen": 1772250834.3695128,
-        "related": {
-          "happy": 0.2,
-          "shiro": 0.2
-        }
-      },
-      "having": {
-        "visit_count": 1,
-        "first_seen": 1772250842.2880108,
-        "related": {
-          "great": 0.2,
-          "day": 0.2
-        }
-      },
-      "great": {
-        "visit_count": 1,
-        "first_seen": 1772250842.2880168,
-        "related": {
-          "having": 0.2,
-          "day": 0.2
-        }
-      },
-      "day": {
-        "visit_count": 1,
-        "first_seen": 1772250842.2880197,
-        "related": {
-          "having": 0.2,
-          "great": 0.2
-        }
-      }
-    },
-    "working_memory": {},
-    "memory_bank": [
-      {
-        "topic": "happy",
-        "summary": "I am so happy to see you Shiro!",
-        "emotional_tag": "playful",
-        "keywords": [
-          "happy",
-          "see",
-          "shiro",
-          "today"
-        ],
-        "tfidf_vector": {
-          "happy": 0.25,
-          "see": 0.25,
-          "shiro": 0.25,
-          "today": 0.25
-        },
-        "timestamp": 1772250841.04883,
-        "recall_count": 0,
-        "importance": 0.4,
-        "consolidated": false
-      },
-      {
-        "topic": "happy",
-        "summary": "I am having a great day!",
-        "emotional_tag": "excited",
-        "keywords": [
-          "having",
-          "great",
-          "day",
-          "glad",
-          "here"
-        ],
-        "tfidf_vector": {
-          "having": 0.2810930216216329,
-          "great": 0.2810930216216329,
-          "day": 0.2810930216216329,
-          "glad": 0.2810930216216329,
-          "here": 0.2810930216216329
-        },
-        "timestamp": 1772250845.3801205,
-        "recall_count": 0,
-        "importance": 0.4,
-        "consolidated": false
-      }
-    ]
+    "version": "4.0",
+    "working_memory": {}
   }
 }
