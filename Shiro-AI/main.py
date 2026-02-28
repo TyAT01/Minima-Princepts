@@ -47,7 +47,7 @@ from queue import Queue
 class ShiroApp:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
-        self.engine = ShiroEngine(self.config)
+        self.engine = ShiroEngine(self.config, on_autonomous_speak=self.handle_autonomous_speak)
         self.error_handler = ErrorHandler(ai_comment_callback=self.ai_comment_on_error)
 
         stt_cfg = self.config.get('stt', {})
@@ -111,10 +111,18 @@ class ShiroApp:
             logging.info("!!! Interrupt received !!!")
             self.interrupt_event.set()
 
+    def handle_autonomous_speak(self, text: str, speech_type: str):
+        """Bridge for autonomous speech from engine to GUI."""
+        # For now, put it into the results queue so the GUI picks it up
+        self.results_queue.put(("[Shiro]", text))
+
     def handle_user_join(self, user_name: str):
         """Handles a user joining the chat room."""
         self.active_users.add(user_name)
         logging.info(f"User {user_name} joined.")
+
+        # [V4 UPGRADE] Sync join to engine
+        self.engine.on_user_join(user_name)
 
         # Determine greeting mode based on last interaction time
         last_seen = self.engine.memory.get_last_interaction_time(user_name)
@@ -143,6 +151,9 @@ class ShiroApp:
         if user_name in self.active_users:
             self.active_users.remove(user_name)
         logging.info(f"User {user_name} left.")
+
+        # [V4 UPGRADE] Sync leave to engine
+        self.engine.on_user_leave(user_name)
 
         if not self.active_users:
             logging.info("Chat room is now empty.")
