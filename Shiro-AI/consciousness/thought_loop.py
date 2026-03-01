@@ -24,6 +24,7 @@ from typing import Callable, Optional, Any
 from dataclasses import dataclass, field
 from collections import deque, Counter
 from enum import Enum
+from utils.text_utils import calculate_text_similarity, get_text_ngrams
 
 
 # ─────────────────────────────────────────────────────────────
@@ -51,17 +52,9 @@ class ThoughtDiversityScorer:
     def __init__(self):
         self._history: deque[tuple[float, str]] = deque(maxlen=self.HISTORY_MAX)
 
-    def _ngrams(self, text: str, n: int = 3) -> set[str]:
-        """Character n-grams of cleaned text."""
-        t = re.sub(r"[^a-z0-9 ]", "", text.lower())
-        t = re.sub(r"\s+", " ", t).strip()
-        return {t[i:i+n] for i in range(len(t) - n + 1)} if len(t) >= n else set()
-
-    def _weighted_similarity(self, a_ngrams: set, b_ngrams: set, age_s: float) -> float:
+    def _weighted_similarity(self, cand_text: str, hist_text: str, age_s: float) -> float:
         """Jaccard similarity with time-decay weight."""
-        if not a_ngrams or not b_ngrams:
-            return 0.0
-        jaccard = len(a_ngrams & b_ngrams) / len(a_ngrams | b_ngrams)
+        jaccard = calculate_text_similarity(cand_text, hist_text)
         # Decay: full weight for first 60s, then linear decay to 0.3x at DECAY_SECONDS
         decay = max(0.3, 1.0 - (age_s / self.DECAY_SECONDS) * 0.7)
         return jaccard * decay
@@ -69,11 +62,9 @@ class ThoughtDiversityScorer:
     def should_suppress(self, candidate: str) -> bool:
         """Return True if candidate is too similar to recent thoughts."""
         now = time.time()
-        cand_ngrams = self._ngrams(candidate)
         for ts, hist_text in self._history:
             age = now - ts
-            hist_ngrams = self._ngrams(hist_text)
-            sim = self._weighted_similarity(cand_ngrams, hist_ngrams, age)
+            sim = self._weighted_similarity(candidate, hist_text, age)
             if sim >= self.BLOCK_THRESHOLD:
                 return True
         return False
@@ -85,12 +76,10 @@ class ThoughtDiversityScorer:
     def similarity_to_recent(self, candidate: str) -> float:
         """Return max weighted similarity to recent thought history."""
         now = time.time()
-        cand_ngrams = self._ngrams(candidate)
         max_sim = 0.0
         for ts, hist_text in self._history:
             age = now - ts
-            hist_ngrams = self._ngrams(hist_text)
-            sim = self._weighted_similarity(cand_ngrams, hist_ngrams, age)
+            sim = self._weighted_similarity(candidate, hist_text, age)
             max_sim = max(max_sim, sim)
         return max_sim
 

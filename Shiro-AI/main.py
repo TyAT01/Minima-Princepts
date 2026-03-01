@@ -114,7 +114,8 @@ class ShiroApp:
     def handle_autonomous_speak(self, text: str, speech_type: str):
         """Bridge for autonomous speech from engine to GUI."""
         # For now, put it into the results queue so the GUI picks it up
-        self.results_queue.put(("[Shiro]", text))
+        # Use None as user tag to indicate autonomous speech (no user involved)
+        self.results_queue.put((None, text))
 
     def handle_user_join(self, user_name: str):
         """Handles a user joining the chat room."""

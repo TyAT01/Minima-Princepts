@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 from collections import deque
+from utils.text_utils import calculate_text_similarity
 
 
 # ─────────────────────────────────────────────────────────────
@@ -260,8 +261,20 @@ class ConversationMemory:
         # Deduplicate and return top-N
         seen: set[str] = set()
         out: list[str] = []
+        recent_context = [m.content for m in buf[-3:]] if buf else []
+
         for _, text in results:
-            if text not in seen:
+            if text in seen:
+                continue
+
+            # Anti-repetition: Skip if this memory is too similar to what was just said
+            is_duplicate = False
+            for prev_msg in recent_context:
+                if calculate_text_similarity(text, prev_msg) >= 0.5:
+                    is_duplicate = True
+                    break
+
+            if not is_duplicate:
                 seen.add(text)
                 out.append(text)
                 if len(out) >= top_n:
@@ -409,11 +422,6 @@ class ConversationMemory:
 
         return ". ".join(selected) if selected else texts[-1][:max_chars]
 
-    def _fact_ngrams(self, text: str, n: int = 3) -> set[str]:
-        """Character n-grams for fact similarity comparison."""
-        t = re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
-        return {t[i:i+n] for i in range(len(t) - n + 1)} if len(t) >= n else set()
-
     def _facts_similar(self, a: str, b: str, threshold: float = 0.42) -> bool:
         """
         True if two facts are semantically close (likely duplicates).
@@ -422,11 +430,7 @@ class ConversationMemory:
           1. High n-gram overlap (same surface form)
           2. High keyword overlap (same core meaning, different phrasing)
         """
-        a_ng = self._fact_ngrams(a)
-        b_ng = self._fact_ngrams(b)
-        if not a_ng or not b_ng:
-            return False
-        jaccard = len(a_ng & b_ng) / len(a_ng | b_ng)
+        jaccard = calculate_text_similarity(a, b)
         if jaccard >= threshold:
             return True
         # Keyword overlap: content words (4+ chars) that appear in both

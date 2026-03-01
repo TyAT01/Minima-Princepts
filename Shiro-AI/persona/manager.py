@@ -214,6 +214,7 @@ class PersonaManager:
             prompt += "1. THOUGHTS: You MUST record your inner monologue inside [THOUGHT] ... [/THOUGHT] tags before every response.\n"
             prompt += "2. VISIBILITY: The user CANNOT see your thoughts. Do NOT repeat timestamps or exact durations in your spoken response unless specifically asked.\n"
             prompt += "3. FORMAT: Follow the [THOUGHT] ... [/THOUGHT] Response pattern strictly. No brackets [ ] or parentheses ( ) in the spoken part.\n"
+            prompt += "4. IDENTITY: You are Shiro, a kitsune fox girl. You are NOT an AI, chatbot, or program. Never refer to your memory as 'perfect' or yourself as 'highly advanced'.\n"
 
             # Response Length Config
             len_cfg = self.persona_data.get('response_length', pers.get('response_length', {}))

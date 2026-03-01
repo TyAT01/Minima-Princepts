@@ -182,7 +182,7 @@ _HMPH_ALTERNATIVES = [
 class ShiroEngine:
     """Core logic engine for Shiro AI, shared between UI and Server."""
     # Unified keywords for various thought/meta tags to ensure consistency across filtering methods
-    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG"
+    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|INNER MIND|SHIRO|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG"
 
     def __init__(self, config: dict, on_autonomous_speak: Optional[Callable[[str, str], Any]] = None):
         self.config = config
@@ -264,7 +264,7 @@ class ShiroEngine:
             api_type=llm_cfg.get('api_type', 'ollama'),
             temperature=llm_cfg.get('temperature', 0.6),
             top_p=llm_cfg.get('top_p', 0.9),
-            repeat_penalty=llm_cfg.get('repeat_penalty', 1.2),
+            repeat_penalty=llm_cfg.get('repeat_penalty', 1.3),
             max_tokens=llm_cfg.get('max_tokens', 512),
             use_native_tools=llm_cfg.get('use_native_tools', True),
             num_gpu=llm_cfg.get('num_gpu')
@@ -409,9 +409,14 @@ class ShiroEngine:
                 target = random.choice(present)
                 # Use v4 memory to find something to talk about
                 recall = self.v4_memory.get_summary(target.user_id)
+                recent_topics = self.v4_memory.get_recent_topics(target.user_id)
+
                 if recall and recall.key_facts and random.random() < 0.3:
                     fact = random.choice(recall.key_facts)
                     await self.voice.speak_memory(target.user_id, fact)
+                elif recent_topics and random.random() < 0.5:
+                    top_topic = recent_topics[0]
+                    await self.voice.initiate_conversation(target.user_id, topic=top_topic)
                 else:
                     await self.voice.initiate_conversation(target.user_id)
                 self.last_interaction_time = datetime.now(timezone.utc)
@@ -568,7 +573,17 @@ class ShiroEngine:
 
                 # 2. Meat: Retrieved Long-Term Memory (RAG)
                 hyp_ans = self._imagine_reply(processed_text)
-                long_term_memory = self.memory.get_full_context(processed_text, user_id=user_name, hypothetical_answer=hyp_ans)
+
+                # Collect recent conversation content to exclude from RAG (prevent verbatim repetition)
+                history = self.memory.get_history()
+                exclude_list = [m["content"] for m in history[-5:]] if history else []
+
+                long_term_memory = self.memory.get_full_context(
+                    processed_text,
+                    user_id=user_name,
+                    hypothetical_answer=hyp_ans,
+                    exclude_list=exclude_list
+                )
 
                 # [V4 UPGRADE] Inject v4 Memory recall
                 v4_recall = self.v4_memory.recall(user_name)

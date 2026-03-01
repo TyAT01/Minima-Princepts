@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from cachetools import TTLCache
 import numpy as np
+from utils.text_utils import calculate_text_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +85,11 @@ class MemoryStore:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self.add_interaction, user_text, bot_text, user_id)
 
-    def search_relevant_memories(self, query: str, n_results: int = 5, filter_type: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def search_relevant_memories(self, query: str, n_results: int = 5, filter_type: Optional[str] = None, user_id: Optional[str] = None, exclude_list: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """Searches for relevant memories using vector similarity + MMR diversification."""
+        # Skip cache if we have an exclude list as it's dynamic
         cache_key = f"{query}_{n_results}_{filter_type}_{user_id}"
-        if cache_key in self._search_cache:
+        if not exclude_list and cache_key in self._search_cache:
              return self._search_cache[cache_key]
 
         filters = []
@@ -121,19 +123,32 @@ class MemoryStore:
             selected_indices = self._mmr(query, embs, n_results)
 
             for idx in selected_indices:
+                content = docs[idx]
+
+                # Anti-repetition: filter out memories too similar to exclude_list
+                if exclude_list:
+                    is_duplicate = False
+                    for excluded in exclude_list:
+                        if calculate_text_similarity(content, excluded) >= 0.5:
+                            is_duplicate = True
+                            break
+                    if is_duplicate:
+                        continue
+
                 formatted_results.append({
-                    "content": docs[idx],
+                    "content": content,
                     "metadata": metas[idx],
                     "distance": dist[idx]
                 })
 
-        self._search_cache[cache_key] = formatted_results
+        if not exclude_list:
+            self._search_cache[cache_key] = formatted_results
         return formatted_results
 
-    async def search_relevant_memories_async(self, query: str, n_results: int = 5, filter_type: Optional[str] = None, user_id: Optional[str] = None):
+    async def search_relevant_memories_async(self, query: str, n_results: int = 5, filter_type: Optional[str] = None, user_id: Optional[str] = None, exclude_list: Optional[List[str]] = None):
         """Async version of search_relevant_memories."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.search_relevant_memories, query, n_results, filter_type, user_id)
+        return await loop.run_in_executor(None, self.search_relevant_memories, query, n_results, filter_type, user_id, exclude_list)
 
     def _mmr(self, query: str, candidate_embs: List[List[float]], n_results: int, lambda_param: float = 0.5) -> List[int]:
         """Maximal Marginal Relevance selection."""
@@ -168,23 +183,23 @@ class MemoryStore:
 
         return selected
 
-    def get_full_context(self, query: str, user_id: str = "Stranger", n_memories: int = 5, hypothetical_answer: str = "") -> str:
+    def get_full_context(self, query: str, user_id: str = "Stranger", n_memories: int = 5, hypothetical_answer: str = "", exclude_list: Optional[List[str]] = None) -> str:
         """Assembles a rich context block from various memory tiers."""
         # Use HyDE if provided
         search_query = hypothetical_answer if hypothetical_answer else query
 
         # 1. Search Interactions
-        interactions = self.search_relevant_memories(search_query, n_results=n_memories, filter_type="interaction", user_id=user_id)
+        interactions = self.search_relevant_memories(search_query, n_results=n_memories, filter_type="interaction", user_id=user_id, exclude_list=exclude_list)
 
         # 2. Search Summaries
-        summaries = self.search_relevant_memories(search_query, n_results=2, filter_type="summary", user_id=user_id)
+        summaries = self.search_relevant_memories(search_query, n_results=2, filter_type="summary", user_id=user_id, exclude_list=exclude_list)
 
         # 3. Search Episodic / Insights
-        insights = self.search_relevant_memories(search_query, n_results=3, filter_type="insight", user_id=user_id)
+        insights = self.search_relevant_memories(search_query, n_results=3, filter_type="insight", user_id=user_id, exclude_list=exclude_list)
 
         # 4. Search Related Entities (Context Hops)
         # (This would use the Graph layer if implemented, for now just entities)
-        entities = self.search_relevant_memories(search_query, n_results=3, filter_type="entity", user_id=user_id)
+        entities = self.search_relevant_memories(search_query, n_results=3, filter_type="entity", user_id=user_id, exclude_list=exclude_list)
 
         context_parts = []
 
