@@ -573,7 +573,17 @@ class ShiroEngine:
 
                 # 2. Meat: Retrieved Long-Term Memory (RAG)
                 hyp_ans = self._imagine_reply(processed_text)
-                long_term_memory = self.memory.get_full_context(processed_text, user_id=user_name, hypothetical_answer=hyp_ans)
+
+                # Collect recent conversation content to exclude from RAG (prevent verbatim repetition)
+                history = self.memory.get_history()
+                exclude_list = [m["content"] for m in history[-5:]] if history else []
+
+                long_term_memory = self.memory.get_full_context(
+                    processed_text,
+                    user_id=user_name,
+                    hypothetical_answer=hyp_ans,
+                    exclude_list=exclude_list
+                )
 
                 # [V4 UPGRADE] Inject v4 Memory recall
                 v4_recall = self.v4_memory.recall(user_name)

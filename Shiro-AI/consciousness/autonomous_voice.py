@@ -19,6 +19,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Any
+from collections import deque
 
 
 @dataclass
@@ -262,6 +263,7 @@ class AutonomousVoice:
         self.enabled: bool = True
         self._session_speech_count: int = 0
         self._session_speech_limit: int = 500   # safety cap
+        self._seen_phrases: deque[str] = deque(maxlen=25)
 
     # ── Core speak ───────────────────────────────────────────────
 
@@ -316,7 +318,15 @@ class AutonomousVoice:
         opts = self._get(key)
         if not opts:
             return ""
-        text = random.choice(opts)
+
+        # Filter out recently seen templates to ensure variety
+        available = [o for o in opts if o not in self._seen_phrases]
+        raw_choice = random.choice(available if available else opts)
+
+        # Track this template as "seen"
+        self._seen_phrases.append(raw_choice)
+
+        text = raw_choice
         for k, v in subs.items():
             text = text.replace(f"{{{k}}}", str(v))
         return text

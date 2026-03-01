@@ -104,3 +104,19 @@ def clean_yaml_block(text: str) -> str:
         text = "\n".join(yaml_lines)
 
     return text.strip()
+
+
+def get_text_ngrams(text: str, n: int = 3) -> set[str]:
+    """Character n-grams of cleaned text."""
+    t = re.sub(r"[^a-z0-9 ]", "", text.lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    return {t[i:i+n] for i in range(len(t) - n + 1)} if len(t) >= n else set()
+
+
+def calculate_text_similarity(text_a: str, text_b: str, n: int = 3) -> float:
+    """Jaccard similarity between character n-grams of two strings."""
+    ng_a = get_text_ngrams(text_a, n)
+    ng_b = get_text_ngrams(text_b, n)
+    if not ng_a or not ng_b:
+        return 0.0
+    return len(ng_a & ng_b) / len(ng_a | ng_b)
