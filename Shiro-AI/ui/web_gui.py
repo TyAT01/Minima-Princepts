@@ -607,7 +607,9 @@ class ShiroGUI:
                 new_results = self.poll_results_cb()
                 if new_results:
                     for u, b in new_results:
-                        history.append({"role": "user", "content": u})
+                        # Only add user message if it's a real user (not None or bot tag)
+                        if u and u != "[Shiro]":
+                            history.append({"role": "user", "content": u})
                         history.append({"role": "assistant", "content": b})
                     return history
                 return gr.update()

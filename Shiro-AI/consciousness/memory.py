@@ -260,8 +260,20 @@ class ConversationMemory:
         # Deduplicate and return top-N
         seen: set[str] = set()
         out: list[str] = []
+        recent_context = [m.content for m in buf[-3:]] if buf else []
+
         for _, text in results:
-            if text not in seen:
+            if text in seen:
+                continue
+
+            # Anti-repetition: Skip if this memory is too similar to what was just said
+            is_duplicate = False
+            for prev_msg in recent_context:
+                if self._facts_similar(text, prev_msg, threshold=0.5):
+                    is_duplicate = True
+                    break
+
+            if not is_duplicate:
                 seen.add(text)
                 out.append(text)
                 if len(out) >= top_n:
