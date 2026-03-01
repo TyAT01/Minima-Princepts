@@ -93,7 +93,6 @@ DEFAULT_SPEECH_BANK: dict[str, Any] = {
         "welcome back {name}",
         "{name} returned. nice.",
         "and {name} is back. hi again",
-        "oh good, {name}'s here again",
         "hey — glad you came back {name}",
     ],
 
@@ -102,11 +101,9 @@ DEFAULT_SPEECH_BANK: dict[str, Any] = {
         "{name}! good, you're back",
         "and {name} returns. hi :)",
         "was wondering when you'd come back. hey",
-        "oh good, {name}'s here again",
         "you came back! hi {name}",
         "hey — i was wondering when you'd be back",
         "{name} returned. i'm glad.",
-        "you're back. good.",
     ],
 
     "greet_returning_close": [
