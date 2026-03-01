@@ -25,7 +25,7 @@ def split_into_sentences(text_stream):
 
             # If no delimiter, but buffer is getting long, yield by word count for "instant" feel
             words = buffer.split()
-            if len(words) >= 8:
+            if len(words) >= 6:
                 # Find the last space to yield full words
                 last_space = buffer.rfind(" ")
                 if last_space != -1:

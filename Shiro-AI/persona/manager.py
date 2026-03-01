@@ -27,15 +27,7 @@ class PersonaManager:
             Path(__file__).resolve().parent.parent.parent / "Shiro-AI" / "shiro_sheet.yaml",
         ]
 
-        # Add even more candidate folders by looking for any folder named *shiro*
-        try:
-            cwd = Path.cwd()
-            for p in [cwd, cwd.parent]:
-                for candidate in p.glob("**/shiro_sheet.yaml"):
-                    if candidate not in search_paths:
-                        search_paths.append(candidate)
-        except:
-            pass
+        # Removed expensive recursive glob for performance
 
         found_path = None
         for p in search_paths:

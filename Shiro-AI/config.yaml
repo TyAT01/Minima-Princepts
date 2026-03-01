@@ -10,7 +10,7 @@ llm:
   repeat_penalty: 1.08
   max_tokens: 512
   use_native_tools: false
-  num_gpu: 20
+  num_gpu: 35
 
 stt:
   model_size: "base"

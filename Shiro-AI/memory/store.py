@@ -325,6 +325,53 @@ class MemoryStore:
         """Returns the current short-term conversation buffer."""
         return self.short_term_buffer
 
+    def load_recent_history(self, user_id: str = "Stranger", limit: int = 15):
+        """Loads recent interactions from ChromaDB into the short-term buffer."""
+        try:
+            results = self.collection.query(
+                query_texts=[""],
+                n_results=limit,
+                where={"$and": [{"user_id": user_id}, {"type": "interaction"}]},
+                include=["documents", "metadatas"]
+            )
+
+            if results and results['documents'] and results['documents'][0]:
+                # ChromaDB returns most relevant/recent if query is empty?
+                # Actually, without a query it might be random-ish or by insertion.
+                # Let's sort by timestamp_unix if available in metadata.
+                docs = results['documents'][0]
+                metas = results['metadatas'][0]
+
+                combined = list(zip(docs, metas))
+                # Sort by timestamp_unix ascending to rebuild conversation flow
+                combined.sort(key=lambda x: x[1].get('timestamp_unix', 0))
+
+                self.short_term_buffer = []
+                for doc, meta in combined:
+                    # Extract user and assistant parts from the stored document
+                    # Format: "[timestamp] User (id): user_text\nShiro: bot_text"
+                    lines = doc.split("\n")
+                    user_part = ""
+                    bot_part = ""
+                    for line in lines:
+                        if "User (" in line and "): " in line:
+                            user_part = line.split("): ", 1)[1]
+                        elif "Shiro: " in line:
+                            bot_part = line.split("Shiro: ", 1)[1]
+
+                    if user_part:
+                        self.short_term_buffer.append({"role": "user", "content": user_part})
+                    if bot_part:
+                        self.short_term_buffer.append({"role": "assistant", "content": bot_part})
+
+                # Truncate to max_short_term
+                if len(self.short_term_buffer) > self.max_short_term * 2:
+                    self.short_term_buffer = self.short_term_buffer[-(self.max_short_term * 2):]
+
+                logger.info(f"Loaded {len(self.short_term_buffer)//2} recent turns into short-term buffer for {user_id}.")
+        except Exception as e:
+            logger.error(f"Failed to load recent history: {e}")
+
     def prune_old_memories(self, days: int = 30):
         """Removes low-priority memories older than N days."""
         cutoff_unix = time.time() - (days * 86400)

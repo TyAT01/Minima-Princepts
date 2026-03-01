@@ -809,20 +809,21 @@ def _trim_to_budget(inner_context: str, budget_tokens: int) -> str:
 # =====================================================================
 
 _NAME_PATTERNS = [
-    re.compile(r"my name is\s+([A-Za-z]{2,20})",    re.IGNORECASE),
-    re.compile(r"(?<!\w)i'?m\s+([A-Za-z]{2,20})\b", re.IGNORECASE),
-    re.compile(r'\bi\s+am\s+([A-Za-z]{2,20})\b',             re.IGNORECASE),
-    re.compile(r"call me\s+([A-Za-z]{2,20})",        re.IGNORECASE),
-    re.compile(r"you can call me\s+([A-Za-z]{2,20})",re.IGNORECASE),
-    re.compile(r"name'?s?\s+([A-Za-z]{2,20})\b",     re.IGNORECASE),
-    re.compile(r"i go by\s+([A-Za-z]{2,20})",         re.IGNORECASE),
+    re.compile(r"\bmy name is\s+([A-Za-z]{2,20})\b",    re.IGNORECASE),
+    re.compile(r"\bi'?m\s+([A-Za-z]{2,20})\b",          re.IGNORECASE),
+    re.compile(r"\bi\s+am\s+([A-Za-z]{2,20})\b",        re.IGNORECASE),
+    re.compile(r"\bcall me\s+([A-Za-z]{2,20})\b",       re.IGNORECASE),
+    re.compile(r"\byou can call me\s+([A-Za-z]{2,20})\b",re.IGNORECASE),
+    re.compile(r"\bname'?s?\s+([A-Za-z]{2,20})\b",      re.IGNORECASE),
+    re.compile(r"\bi go by\s+([A-Za-z]{2,20})\b",        re.IGNORECASE),
 ]
 _COMMON_FILLER = frozenset({
     "going","doing","fine","good","okay","here","tired","sorry","just","trying",
     "happy","sad","sure","ready","back","home","busy","free","glad","nervous",
     "lost","stuck","confused","done","really","very","also","actually","pretty",
     "currently","already","still","even","only","ever","never",
-    "does","indeed","it","is","that","this","was", "new", "up", "down"
+    "does","indeed","it","is","that","this","was", "new", "up", "down",
+    "coming", "from", "actually", "indeed", "unknown", "user", "stranger"
 })
 
 def _extract_name(message: str) -> Optional[str]:
