@@ -71,6 +71,25 @@ _GREET_RETURNING_LONG = [
     "(LOG: Long absence, {name} returned. Shiro, be cautious and a little sarcastic. Brief, not mean.)",
 ]
 
+_GREET_SIMPLE = [
+    "(LOG: {name} is here. Shiro, give a simple, warm greeting. One sentence max. No fluff. Example: 'Shiro here! Hello {name}, what are we doing today?')",
+    "(LOG: {name} appeared. Shiro, just say hi. Short and sweet. No performative sass.)",
+    "(LOG: A quick greeting for {name}. Shiro, keep it to one direct line.)",
+    "(LOG: Shiro, just acknowledge {name}'s arrival with a short, friendly greeting. 1 sentence.)",
+]
+
+_GREET_MORNING = [
+    "(LOG: It's morning and {name} is here. Shiro, say a simple good morning. 1 sentence. No fluff.)",
+    "(LOG: {name} arrived early. Shiro, acknowledge the time with a short, sleepy or fresh greeting. Example: 'Just a simple good morning, {name}.')",
+    "(LOG: Shiro, wish {name} a good morning. Keep it very short.)",
+]
+
+_GREET_EVENING = [
+    "(LOG: It's late and {name} is here. Shiro, say a simple good evening. 1 sentence. No fluff.)",
+    "(LOG: {name} is here late. Shiro, acknowledge the late hour with a short line.)",
+    "(LOG: Shiro, it's evening. Greet {name} simply and acknowledge the time.)",
+]
+
 # Soft fallbacks used when the LLM call itself fails entirely
 _FALLBACK_NEW = [
     "*tail swishes* A new face. I'm Shiro. What do you want?",
@@ -99,6 +118,20 @@ def _pick_greeting(user_name: str, mode: str = "new") -> str:
     Returns a randomized greeting LOG prompt.
     mode: 'new' | 'returning_soon' | 'returning_long'
     """
+    # 30% chance of a "Simple" greeting to reduce fluff, regardless of mode
+    if random.random() < 0.3:
+        template = random.choice(_GREET_SIMPLE)
+        return template.format(name=user_name)
+
+    # Time-of-day awareness (Simple variants)
+    now_local = datetime.now()
+    if 5 <= now_local.hour < 11 and random.random() < 0.5:
+        template = random.choice(_GREET_MORNING)
+        return template.format(name=user_name)
+    elif 18 <= now_local.hour <= 23 and random.random() < 0.5:
+        template = random.choice(_GREET_EVENING)
+        return template.format(name=user_name)
+
     pool = {
         "new":            _GREET_NEW,
         "returning_soon": _GREET_RETURNING_SOON,
@@ -182,7 +215,7 @@ _HMPH_ALTERNATIVES = [
 class ShiroEngine:
     """Core logic engine for Shiro AI, shared between UI and Server."""
     # Unified keywords for various thought/meta tags to ensure consistency across filtering methods
-    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|INNER MIND|SHIRO|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG"
+    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|INNER MIND|SHIRO|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG|MOMENTUM|REL:|VALENCE"
 
     def __init__(self, config: dict, on_autonomous_speak: Optional[Callable[[str, str], Any]] = None):
         self.config = config
@@ -499,13 +532,13 @@ class ShiroEngine:
                 # Context Drift Detection
                 drift_score = self._detect_context_drift(processed_text)
 
-                # Aggression Reduction: dynamic length hint
+                # Aggression Reduction: dynamic length hint (Enforced Brevity)
                 length_hint = ""
                 user_msg_len = len(processed_text)
-                if user_msg_len < 40:
-                    length_hint = "\n[SYSTEM: Short user message detected. Respond in 1-2 sentences max. Match their energy.]"
-                elif user_msg_len < 100:
-                    length_hint = "\n[SYSTEM: Keep response focused. 2-3 sentences.]"
+                if user_msg_len < 100:
+                    length_hint = "\n[SYSTEM: CASUAL EXCHANGE. Keep it short and to the point. 1-2 sentences max. No fluff.]"
+                elif user_msg_len < 250:
+                    length_hint = "\n[SYSTEM: Focused response required. 2-3 sentences max.]"
 
                 # [INNER MIND] Process input to get thoughts and strategy
                 inner_mind_data = self.legacy_mind.process_input(processed_text, user_id=user_name)
@@ -868,8 +901,12 @@ class ShiroEngine:
     def _extract_thought_from_stream(self, stream):
         buffer = ""
         in_thought = False
+        # Improved patterns to catch metadata headers like [SHIRO INNER MIND v4 -- ...]
         start_pattern = re.compile(rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|(?<!\w)THOUGHTS?:|<THOUGHTS?>|\*(?:Shiro\s+)?(?:THOUGHTS?|THINKING|SCHEMING|PLOTTING|THINKS?).*?\*', re.IGNORECASE)
         end_pattern = re.compile(rf'\[/(?:{self.THOUGHT_KEYWORDS})\]|\(/(?:{self.THOUGHT_KEYWORDS})\)|</THOUGHTS?>|\*(?:/THOUGHTS?|END THINKING|END SCHEMING|END|/|THOUGHTS?)\*', re.IGNORECASE)
+
+        # Pattern for metadata lines that might leak if only partially bracketed
+        meta_line_pattern = re.compile(rf'^\s*\[(?:{self.THOUGHT_KEYWORDS}).*?$', re.MULTILINE | re.IGNORECASE)
 
         for chunk in stream:
             buffer += chunk
@@ -892,6 +929,12 @@ class ShiroEngine:
                         else:
                             # If it's a minor tag like (LOG: ...), add to last_thought but don't enter in_thought state
                             self.last_thought += tag_content + " "
+                            # If it's a Shiro metadata header, consume until the end of the line in the buffer
+                            if any(kw in tag_content.upper() for kw in ["SHIRO", "INNER", "MIND"]):
+                                line_end = buffer.find("\n")
+                                if line_end != -1:
+                                    self.last_thought += buffer[:line_end]
+                                    buffer = buffer[line_end:].lstrip()
                         continue
                     else:
                         if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
@@ -962,10 +1005,18 @@ class ShiroEngine:
         if "[THOUGHT]" in text or "[/THOUGHT]" in text:
             return text
 
+        # Aggressive cleaning of internal headers that start with keywords
+        # Matches patterns like "[SHIRO INNER MIND v4 -- turn 29 -- 17h 36m 20s] engaged..."
+        # We consume until we see something that looks like real dialogue (starts with Capital or *)
+        clean = re.sub(
+            rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?(?=\n|[A-Z]\w+|(?<!\|)\*|$)',
+            '', text, flags=re.IGNORECASE | re.DOTALL
+        )
+
         # Remove various meta/thought tags
         clean = re.sub(
             rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?\[/(?:{self.THOUGHT_KEYWORDS})\]',
-            '', text, flags=re.IGNORECASE | re.DOTALL
+            '', clean, flags=re.IGNORECASE | re.DOTALL
         )
         clean = re.sub(
             rf'\((?:{self.THOUGHT_KEYWORDS})[^\)]*\).*?\(/(?:{self.THOUGHT_KEYWORDS})\)',
