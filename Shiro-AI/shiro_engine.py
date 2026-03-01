@@ -285,6 +285,8 @@ class ShiroEngine:
         self.brain = self._load_brain()
         self.profile_file = base_path / "profile.json"
         self.user_profiles = self._load_profiles()
+        # Restore recent history for the default/last active user if possible
+        self.memory.load_recent_history(self.current_user_name)
 
     def _load_profiles(self):
         """Loads persistent user profiles (Garnish layer)."""
@@ -347,12 +349,19 @@ class ShiroEngine:
             self._idle_task = self._background_loop.create_task(self._v4_idle_loop())
         self._background_loop.call_soon_threadsafe(_start_idle)
 
-        # LLM Diagnostics
-        diag = self.llm.perform_diagnostics()
-        logger.info(f"LLM Diagnostics:\n{diag}")
+        # LLM Diagnostics (Async background execution)
+        def _run_diagnostics():
+            diag = self.llm.perform_diagnostics()
+            logger.info(f"LLM Diagnostics:\n{diag}")
+
+        threading.Thread(target=_run_diagnostics, daemon=True).start()
 
     def _imagine_reply(self, query: str) -> str:
         """HyDE: Generates a hypothetical answer to improve RAG retrieval."""
+        # Only run HyDE for longer queries where semantic enrichment is needed
+        if len(query.split()) < 15:
+            return query
+
         try:
             # Optimized for speed and semantic overlap
             hypothetical_prompt = "Provide a neutral, factual answer to this query as it might appear in a prior conversation log. Use specific nouns and keywords only. No personality."
@@ -414,6 +423,12 @@ class ShiroEngine:
         # Reset idle timer on join
         self.last_interaction_time = datetime.now(timezone.utc)
 
+        # Ensure engine is synced to this user immediately
+        if self.current_user_name != user_name:
+            self.current_user_name = user_name
+            self.legacy_mind.switch_user(user_name)
+            self.memory.load_recent_history(user_name)
+
     def on_user_leave(self, user_name: str):
         """V4 hook for user leave."""
         self.awareness.user_left(user_name)
@@ -431,6 +446,8 @@ class ShiroEngine:
                 logger.info(f"Switching active user to: {user_name}")
                 self.current_user_name = user_name
                 self.legacy_mind.switch_user(user_name)
+                # Re-load recent history for the new user if buffer is empty or user changed
+                self.memory.load_recent_history(user_name)
 
         # [V4 UPGRADE] Observe user through SelfAwareness v4
         user_profile = self.awareness.user_spoke(user_name, processed_text)
