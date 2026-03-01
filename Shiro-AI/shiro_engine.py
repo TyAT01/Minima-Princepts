@@ -901,16 +901,24 @@ class ShiroEngine:
     def _extract_thought_from_stream(self, stream):
         buffer = ""
         in_thought = False
+        waiting_for_meta_newline = False
         # Improved patterns to catch metadata headers like [SHIRO INNER MIND v4 -- ...]
         start_pattern = re.compile(rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|(?<!\w)THOUGHTS?:|<THOUGHTS?>|\*(?:Shiro\s+)?(?:THOUGHTS?|THINKING|SCHEMING|PLOTTING|THINKS?).*?\*', re.IGNORECASE)
         end_pattern = re.compile(rf'\[/(?:{self.THOUGHT_KEYWORDS})\]|\(/(?:{self.THOUGHT_KEYWORDS})\)|</THOUGHTS?>|\*(?:/THOUGHTS?|END THINKING|END SCHEMING|END|/|THOUGHTS?)\*', re.IGNORECASE)
 
-        # Pattern for metadata lines that might leak if only partially bracketed
-        meta_line_pattern = re.compile(rf'^\s*\[(?:{self.THOUGHT_KEYWORDS}).*?$', re.MULTILINE | re.IGNORECASE)
-
         for chunk in stream:
             buffer += chunk
             while True:
+                if waiting_for_meta_newline:
+                    line_end = buffer.find("\n")
+                    if line_end != -1:
+                        self.last_thought += buffer[:line_end]
+                        buffer = buffer[line_end:].lstrip()
+                        waiting_for_meta_newline = False
+                        continue
+                    else:
+                        break
+
                 if not in_thought:
                     match = start_pattern.search(buffer)
                     if match:
@@ -935,6 +943,8 @@ class ShiroEngine:
                                 if line_end != -1:
                                     self.last_thought += buffer[:line_end]
                                     buffer = buffer[line_end:].lstrip()
+                                else:
+                                    waiting_for_meta_newline = True
                         continue
                     else:
                         if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
@@ -1008,10 +1018,14 @@ class ShiroEngine:
         # Aggressive cleaning of internal headers that start with keywords
         # Matches patterns like "[SHIRO INNER MIND v4 -- turn 29 -- 17h 36m 20s] engaged..."
         # We consume until we see something that looks like real dialogue (starts with Capital or *)
+        # Updated to catch trailing metadata like "neutral [V:...] | momentum: ... | rel: ..."
         clean = re.sub(
-            rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?(?=\n|[A-Z]\w+|(?<!\|)\*|$)',
+            rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?(?=\n|[A-Z][a-z]+(?!\s*(?:[vA-Z]\:|momentum|rel|VALENCE|MOOD|SHIRO|INNER|MIND|STRANGER|ACQUAINTANCE|FAMILIAR|CLOSE))|(?<![a-z])\*|\Z)',
             '', text, flags=re.IGNORECASE | re.DOTALL
         )
+
+        # Catch-all for common leaked metadata keywords if the main regex fails
+        clean = re.sub(r'(?i).*?(?:momentum:|rel:|valence:|mood:).*?(\n|[A-Z][a-z]+|(?<![a-z])\*|\Z)', '', clean, flags=re.DOTALL).strip()
 
         # Remove various meta/thought tags
         clean = re.sub(
