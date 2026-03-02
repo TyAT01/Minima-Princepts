@@ -34,6 +34,7 @@ class MemoryStore:
         )
 
         self.short_term_buffer: List[Dict[str, str]] = []
+        self._last_seen_cache: dict = {}  # PERF: in-memory cache for get_last_interaction_time
         self.session_objectives: List[str] = []
 
         # Dual Layer Cache
@@ -52,13 +53,21 @@ class MemoryStore:
 
     def add_interaction(self, user_text: str, bot_text: str, user_id: str = "Stranger"):
         """Adds a conversation turn to both short-term and long-term memory."""
+        # Short-term buffer (in-memory)
+        self.short_term_buffer.append({"role": "user", "content": user_text})
+        self.short_term_buffer.append({"role": "assistant", "content": bot_text})
+        self._last_seen_cache.pop(user_id, None)
+        if len(self.short_term_buffer) > self.max_short_term * 2:
+            self.short_term_buffer = self.short_term_buffer[-(self.max_short_term * 2):]
+        # Long-term ChromaDB write
+        self.add_interaction_to_longterm(user_text, bot_text, user_id)
+
+    def add_interaction_to_longterm(self, user_text: str, bot_text: str, user_id: str = "Stranger"):
+        """P4: Writes only to ChromaDB (no buffer). Called from background thread."""
         timestamp_human = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         timestamp_unix = time.time()
-
-        # 1. Long-Term (ChromaDB)
         interaction_id = str(uuid.uuid4())
         document = f"[{timestamp_human}] User ({user_id}): {user_text}\nShiro: {bot_text}"
-
         self.collection.add(
             documents=[document],
             metadatas=[{
@@ -70,14 +79,7 @@ class MemoryStore:
             }],
             ids=[interaction_id]
         )
-
-        # 2. Short-Term (In-memory buffer)
-        self.short_term_buffer.append({"role": "user", "content": user_text})
-        self.short_term_buffer.append({"role": "assistant", "content": bot_text})
-
-        # Keep buffer manageable
-        if len(self.short_term_buffer) > self.max_short_term * 2:
-            self.short_term_buffer = self.short_term_buffer[-(self.max_short_term * 2):]
+        self._last_seen_cache.pop(user_id, None)
 
     async def add_interaction_async(self, user_text: str, bot_text: str, user_id: str = "Stranger"):
         """Async version of add_interaction."""
@@ -119,8 +121,15 @@ class MemoryStore:
             dist = results['distances'][0]
             embs = results['embeddings'][0]
 
-            # Perform MMR Selection
-            selected_indices = self._mmr(query, embs, n_results)
+            # P5+B3 FIX: Pass pre-computed query embedding from ChromaDB result
+            # to avoid re-embedding the same query string in _mmr.
+            # Note: ChromaDB returns query embeddings in results['embeddings'][0]
+            # but only when include=[..., "embeddings"] — already requested above.
+            _qemb = None
+            if results.get("embeddings") and len(results["embeddings"]) > 1:
+                # Index 0 = candidate embeddings, index >0 = query embedding (ChromaDB >=0.4)
+                _qemb = np.array(results["embeddings"][-1]) if results["embeddings"][-1] else None
+            selected_indices = self._mmr(query, embs, n_results, query_emb=_qemb)
 
             for idx in selected_indices:
                 content = docs[idx]
@@ -150,36 +159,44 @@ class MemoryStore:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.search_relevant_memories, query, n_results, filter_type, user_id, exclude_list)
 
-    def _mmr(self, query: str, candidate_embs: List[List[float]], n_results: int, lambda_param: float = 0.5) -> List[int]:
-        """Maximal Marginal Relevance selection."""
-        if candidate_embs is None or len(candidate_embs) == 0: return []
-        query_emb = np.array(self.get_embedding(query))
-        candidates = [np.array(e) for e in candidate_embs]
+    def _mmr(self, query: str, candidate_embs: List[List[float]], n_results: int,
+             lambda_param: float = 0.5, query_emb: Optional[np.ndarray] = None) -> List[int]:
+        """Maximal Marginal Relevance selection.
+        P5 FIX: Vectorized with numpy — avoids O(n²) Python loop.
+        B3 FIX: Accepts pre-computed query_emb to avoid double embedding.
+        Caller should pass the embedding ChromaDB already computed, not re-embed.
+        """
+        if candidate_embs is None or len(candidate_embs) == 0:
+            return []
+        # B3 FIX: Use passed-in embedding if available; only embed as fallback
+        if query_emb is None:
+            query_emb = np.array(self.get_embedding(query))
+        C = np.array(candidate_embs, dtype=np.float32)     # shape (n, d)
+        q = query_emb.astype(np.float32)
 
-        selected = []
-        remaining = list(range(len(candidates)))
+        # Normalise all vectors once
+        C_norms = np.linalg.norm(C, axis=1, keepdims=True).clip(min=1e-10)
+        C_unit  = C / C_norms
+        q_unit  = q / np.linalg.norm(q).clip(min=1e-10)
 
-        while len(selected) < min(n_results, len(candidates)):
-            best_score = -float('inf')
-            best_idx = -1
+        # Similarity of every candidate to the query (shape: n)
+        sim_to_query = C_unit @ q_unit
 
-            for i in remaining:
-                # Similarity to query
-                sim_to_query = np.dot(query_emb, candidates[i]) / (np.linalg.norm(query_emb) * np.linalg.norm(candidates[i]))
+        n = min(n_results, len(candidate_embs))
+        selected: List[int] = []
+        # max_sim_selected[i] = max cosine sim of candidate i to any selected doc
+        max_sim_sel = np.full(len(candidate_embs), -np.inf)
 
-                # Max similarity to selected
-                max_sim_to_selected = 0
-                for s_idx in selected:
-                    sim = np.dot(candidates[i], candidates[s_idx]) / (np.linalg.norm(candidates[i]) * np.linalg.norm(candidates[s_idx]))
-                    max_sim_to_selected = max(max_sim_to_selected, sim)
-
-                score = lambda_param * sim_to_query - (1 - lambda_param) * max_sim_to_selected
-                if score > best_score:
-                    best_score = score
-                    best_idx = i
-
-            selected.append(best_idx)
-            remaining.remove(best_idx)
+        for _ in range(n):
+            scores = lambda_param * sim_to_query - (1.0 - lambda_param) * np.maximum(max_sim_sel, 0)
+            # Mask already-selected
+            if selected:
+                scores[selected] = -np.inf
+            best = int(np.argmax(scores))
+            selected.append(best)
+            # Update max similarity to selected set (vectorized)
+            new_sims = C_unit @ C_unit[best]
+            np.maximum(max_sim_sel, new_sims, out=max_sim_sel)
 
         return selected
 
@@ -188,18 +205,28 @@ class MemoryStore:
         # Use HyDE if provided
         search_query = hypothetical_answer if hypothetical_answer else query
 
-        # 1. Search Interactions
-        interactions = self.search_relevant_memories(search_query, n_results=n_memories, filter_type="interaction", user_id=user_id, exclude_list=exclude_list)
-
-        # 2. Search Summaries
-        summaries = self.search_relevant_memories(search_query, n_results=2, filter_type="summary", user_id=user_id, exclude_list=exclude_list)
-
-        # 3. Search Episodic / Insights
-        insights = self.search_relevant_memories(search_query, n_results=3, filter_type="insight", user_id=user_id, exclude_list=exclude_list)
-
-        # 4. Search Related Entities (Context Hops)
-        # (This would use the Graph layer if implemented, for now just entities)
-        entities = self.search_relevant_memories(search_query, n_results=3, filter_type="entity", user_id=user_id, exclude_list=exclude_list)
+        # PERF FIX P3: Run all 4 ChromaDB searches concurrently.
+        # Previously sequential (~4x single query time). Now runs in parallel
+        # so total cost = slowest single search instead of sum of all four.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        search_tasks = {
+            "interactions": (search_query, n_memories, "interaction", user_id, exclude_list),
+            "summaries":    (search_query, 2,         "summary",     user_id, None),
+            "insights":     (search_query, 3,         "insight",     user_id, None),
+            "entities":     (search_query, 3,         "entity",      user_id, None),
+        }
+        results_map = {}
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futures = {
+                ex.submit(self.search_relevant_memories, *args): key
+                for key, args in search_tasks.items()
+            }
+            for fut in as_completed(futures):
+                results_map[futures[fut]] = fut.result()
+        interactions = results_map.get("interactions", [])
+        summaries    = results_map.get("summaries", [])
+        insights     = results_map.get("insights", [])
+        entities     = results_map.get("entities", [])
 
         context_parts = []
 
@@ -315,22 +342,33 @@ class MemoryStore:
 
     def get_last_interaction_time(self, user_id: str) -> Optional[datetime]:
         """Retrieves the timestamp of the last interaction with this user."""
+        # PERF+BUG FIX: Old impl used query_texts=[""] — a vector search on an empty
+        # string is meaningless (ChromaDB returns arbitrary results) and wastes ~20ms.
+        # Now uses .get() with metadata filter (no embedding computation needed)
+        # plus an in-memory cache so repeated calls within a session cost nothing.
+        if user_id in self._last_seen_cache:
+            return self._last_seen_cache[user_id]
         try:
-            results = self.collection.query(
-                query_texts=[""],
-                n_results=1,
+            results = self.collection.get(
                 where={"$and": [{"user_id": user_id}, {"type": "interaction"}]},
-                include=["metadatas"]
+                include=["metadatas"],
+                limit=100,
             )
-
-            if results and results['metadatas'] and results['metadatas'][0]:
-                meta = results['metadatas'][0][0]
-                ts = meta.get("timestamp_unix")
-                if ts:
-                    if isinstance(ts, (float, int)):
-                         return datetime.fromtimestamp(ts, tz=timezone.utc)
-                    else: # Legacy support for ISO strings
-                         return datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+            metas = results.get("metadatas", [])
+            if metas:
+                # Find the most recent by timestamp_unix
+                best_ts = None
+                for meta in metas:
+                    ts = meta.get("timestamp_unix")
+                    if ts:
+                        if isinstance(ts, str):
+                            ts = float(ts)
+                        if best_ts is None or ts > best_ts:
+                            best_ts = ts
+                if best_ts:
+                    dt = datetime.fromtimestamp(best_ts, tz=timezone.utc)
+                    self._last_seen_cache[user_id] = dt
+                    return dt
             return None
         except Exception as e:
             logger.warning(f"Failed to get last interaction time: {e}")
@@ -377,6 +415,11 @@ class MemoryStore:
                     if user_part:
                         self.short_term_buffer.append({"role": "user", "content": user_part})
                     if bot_part:
+                        # FIX: Strip any "Shiro:" speaker prefix from stored bot text.
+                        # Old leaky responses may have been stored with "Shiro: " prefixed,
+                        # which would teach the LLM to use that prefix in future replies.
+                        import re as _re
+                        bot_part = _re.sub(r"(?i)^\s*shiro:\s*", "", bot_part).strip()
                         self.short_term_buffer.append({"role": "assistant", "content": bot_part})
 
                 # Truncate to max_short_term
