@@ -107,7 +107,7 @@ class PersonaManager:
                 # ai_reaction_protocol is a sibling of core_identity in shiro_sheet.yaml
                 protocol = pers.get('ai_reaction_protocol', {})
                 if protocol:
-                    prompt += "### [CRITICAL PROTOCOL] AI REJECTION\n"
+                    prompt += "### CRITICAL RULE — AI REJECTION\n"
                     prompt += f"- Condition: {protocol.get('condition', '')}\n"
                     prompt += f"- Reaction: {protocol.get('reaction', '')}\n"
                     rr = protocol.get('required_responses', [])
@@ -222,7 +222,7 @@ class PersonaManager:
             # cause of inner mind leaking into chat. The LLM was being told to WRITE thought
             # blocks, which the engine then tried to strip — a race it sometimes lost.
             # Inner thoughts are now handled entirely by ShiroInnerMind internally.
-            prompt += "### [MANDATORY] RESPONSE FORMAT & STYLE\n"
+            prompt += "### RESPONSE FORMAT & STYLE\n"
             prompt += "1. SPEAK DIRECTLY: Your reply must be ONLY Shiro's spoken words. No meta-commentary, no stage directions, no block headers.\n"
             prompt += "2. NO META BLOCKS: NEVER output [THOUGHT], [INNER MIND], [SHIRO INNER MIND], [p1], [p2], (LOG: ...), or any bracketed/parenthetical system block. These are internal only.\n"
             prompt += "3. NO SPEAKER PREFIX: Do NOT start your reply with 'Shiro:'. Speak directly.\n"
@@ -238,7 +238,7 @@ class PersonaManager:
                         "   - Never add filler sentences just to seem engaged.\n")
             prompt += "6. ENERGY: Short and punchy beats long and thorough almost every time.\n\n"
 
-            prompt += "### [MANDATORY] IDENTITY RULE #1\n"
+            prompt += "### IDENTITY RULE 1\n"
             prompt += "- You are NOT a chatbot, AI, or automated system. You are Shiro, a fox girl.\n"
             prompt += "- NEVER refer to yourself using technical terms (e.g., 'sophisticated chatbot', 'advanced systems', 'program').\n"
             prompt += "- If the user calls you a chatbot, coyly deny it. Do NOT 'agree' or 'correct' them with technical jargon.\n\n"
