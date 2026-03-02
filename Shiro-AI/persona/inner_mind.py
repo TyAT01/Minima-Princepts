@@ -950,11 +950,15 @@ class ShiroInnerMind:
         verbose:      bool = True,
         token_budget: int  = DEFAULT_TOKEN_BUDGET,
         profiling:    bool = False,
+        debug_thoughts: bool = False,  # PERF: separate flag for terminal box rendering
     ):
         self.name         = name
         self.verbose      = verbose
         self.token_budget = token_budget
         self.profiling    = profiling
+        # PERF FIX P5: _debug_thoughts gates the expensive terminal box render.
+        # Set to True only during development. verbose=True still logs to file.
+        self._debug_thoughts = debug_thoughts
         self._lock        = threading.RLock()
 
         # Core cognitive structures
@@ -1143,7 +1147,7 @@ class ShiroInnerMind:
             for t in thoughts:
                 self._thought_type_last_turn[t.thought_type] = self.turn_count
 
-            if self.verbose:
+            if self.verbose and self._debug_thoughts:  # PERF: only render box in debug mode
                 self._print_thought_stream(thoughts, strategy_note, verbosity)
 
             if self.profiling:
@@ -1217,7 +1221,7 @@ class ShiroInnerMind:
         with self._lock:
             lines = [
                 f"\n{'='*68}",
-                f"  {self.name} Inner Mind v4  ·  Turn {self.turn_count}  ·  {self._elapsed()}",
+                f"  {self.name} Inner Mind v5  ·  Turn {self.turn_count}  ·  {self._elapsed()}",
                 f"{'='*68}",
                 f"  Mood:         {self.mood.summary()}",
                 f"  Momentum:     {self.emotional_momentum.label()}  "
@@ -2032,18 +2036,22 @@ class ShiroInnerMind:
     ) -> str:
         name    = self.user_profile.display_name()
         hint    = _STRATEGY_HINTS.get(self.current_strategy, "")
+        # FIX: Header replaced. Old "[SHIRO INNER MIND v4 -- Turn X]" format was
+        # echoed by the LLM because it read as a template to follow. [p1]/[p2] markers
+        # also leaked as they look like valid bracket tokens. Now uses plain-language
+        # section headers with no bracket tokens that could appear in output.
         lines   = [
-            f"[SHIRO INNER MIND v4 -- Turn {self.turn_count} -- {self._elapsed()}]",
-            f"[p1] Mood: {self.mood.summary()}  | Momentum: {self.emotional_momentum.label()}",
-            f"[p1] Strategy: {self.current_strategy.value}  | "
+            f"# INTERNAL CONTEXT — Turn {self.turn_count} — {self._elapsed()} — DO NOT OUTPUT THIS BLOCK",
+            f"Mood: {self.mood.summary()}  | Momentum: {self.emotional_momentum.label()}",
+            f"Strategy: {self.current_strategy.value}  | "
             f"Rel: {self.relationship.level.name}  | User: {name}",
-            f"[p1] Playfulness: {self.playfulness.label()}  | "
+            f"Playfulness: {self.playfulness.label()}  | "
             f"Sentiment: {self.sentiment_trend.label()}",
             "",
-            "[p1] -- Inner Monologue --",
+            "== Inner Monologue (internal, never output) ==",
             monologue,
             "",
-            "[p1] -- Persona Guidance --",
+            "== Persona Guidance ==",
         ]
 
         # Persona guidance block
@@ -2076,7 +2084,7 @@ class ShiroInnerMind:
         # Top thoughts
         top = sorted(thoughts, key=lambda t: -t.relevance)[:5]
         if top:
-            lines.append("[p2] -- Active Thoughts --")
+            lines.append("== Active Thoughts (internal) ==")
             for t in top:
                 lines.append(f"  {t}")
             lines.append("")
@@ -2084,7 +2092,7 @@ class ShiroInnerMind:
         # === Standard and Rich sections ===
         if verbosity in ("standard", "rich"):
             if memories:
-                lines.append("[p2] -- Memory Echoes --")
+                lines.append("== Memory Echoes ==")
                 for m in memories[:3]:
                     lines.append(f"  [{m.topic} | {m.emotional_tag}] {m.summary[:90]}")
                 lines.append("")
@@ -2110,7 +2118,7 @@ class ShiroInnerMind:
         value   = random.choice(self.self_model.core_values)
         insight = random.choice(self.self_model.persona_insights)
         lines += [
-            "[p1] -- Core Reminder --",
+            "== Core Reminder ==",
             f"  \"{value}\"",
             f"  Persona: \"{insight}\"",
             "",
@@ -2192,6 +2200,10 @@ class ShiroInnerMind:
         return f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
     def _print_thought_stream(self, thoughts: List[Thought], strategy_note: str, verbosity: str):
+        # NOTE: This is console/stdout debug output only. It NEVER enters the LLM context.
+        # The +-- box format here is why shiro_engine.py had to scrub inner_context —
+        # that scrubbing is no longer needed since _build_inner_context no longer produces
+        # bracket-token headers. This box stays for developer visibility only.
         sorted_t = sorted(thoughts, key=lambda t: -t.relevance)
         w = 66
         mood_s = self.mood.label()
