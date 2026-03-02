@@ -349,6 +349,7 @@ class ShiroEngine:
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'shiro_sheet.yaml'))
         self.legacy_mind = ShiroInnerMind(name="Shiro", verbose=True)
         self.last_thought = ""
+        self._greeting_silent = False  # set True when silence chosen on join
         self._load_session_objectives()
         self.brain_file = base_path / "shiro_brain.json"
         self.core_anchors = {
@@ -490,9 +491,11 @@ class ShiroEngine:
         if random.random() > greet_chance:
             # Shiro stays silent — she noticed but isn't announcing it
             logger.info(f"Shiro chose silence on join for {user_name} (mode={mode})")
+            self._greeting_silent = True  # suppress if main.py calls process_text with directive
             return None
 
         # Generate greeting on the spot via LLM
+        self._greeting_silent = False
         greeting_prompt = self.get_greeting_prompt(user_name, mode)
         try:
             return self.process_text(greeting_prompt, user_name="System")
@@ -541,6 +544,24 @@ class ShiroEngine:
 
         if processed_text.lower().startswith("shiro change to"):
             yield self.change_outfit(processed_text[15:])
+            return
+
+        # If this looks like a raw greeting directive (from main.py calling
+        # get_greeting_prompt + process_text independently) AND silence was
+        # chosen on join — drop it silently.
+        _is_greeting_directive = (
+            user_name == "System" and
+            any(processed_text.lower().startswith(pfx) for pfx in [
+                "tyler just arrived", "user just arrived",
+                "someone new is here", "new arrival",
+                "they just came back", "they've been gone",
+                "they came back", "back again",
+                "just say hi", "quick greeting"
+            ])
+        )
+        if _is_greeting_directive and self._greeting_silent:
+            logger.info("Greeting directive suppressed (silence was chosen on join)")
+            self._greeting_silent = False
             return
 
         # Identity check (only add flag, don't alter user text visibly)
@@ -1448,16 +1469,22 @@ class ShiroEngine:
         if not history or len(history) < 2:
             return 0.0
         try:
-            query_emb = np.array(self.memory.get_embedding(query))
-            recent_texts = [re.sub(r'^\[.*?\]\s*', '', m["content"]) for m in history[-4:]]
-            recent_embs = [np.array(self.memory.get_embedding(t)) for t in recent_texts]
-            avg_recent_emb = np.mean(recent_embs, axis=0)
-            norm_q = np.linalg.norm(query_emb)
-            norm_r = np.linalg.norm(avg_recent_emb)
-            if norm_q == 0 or norm_r == 0:
-                return 0.0
-            similarity = np.dot(query_emb, avg_recent_emb) / (norm_q * norm_r)
-            drift = 1.0 - max(0, similarity)
+            import math
+            def _dot(a, b): return sum(x*y for x,y in zip(a,b))
+            def _norm(a): return math.sqrt(sum(x*x for x in a))
+            def _cosine(a, b):
+                na, nb = _norm(a), _norm(b)
+                return _dot(a, b) / (na * nb) if na and nb else 0.0
+
+            query_emb = self.memory.get_embedding(query)
+            recent_texts = [re.sub(r'\^\[.*?\]\s*', '', m["content"]) for m in history[-4:]]
+            recent_embs = [self.memory.get_embedding(t) for t in recent_texts]
+            # Average the recent embeddings element-wise
+            n = len(recent_embs)
+            avg_recent_emb = [sum(e[i] for e in recent_embs) / n
+                              for i in range(len(recent_embs[0]))]
+            similarity = _cosine(query_emb, avg_recent_emb)
+            drift = 1.0 - max(0.0, similarity)
             logger.info(f"Context Drift Score: {drift:.2f}")
             return drift
         except Exception as e:
