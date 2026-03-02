@@ -180,7 +180,7 @@ _HMPH_ALTERNATIVES = ["...", "Tch.", "Whatever.", "Fine.", "Hmm."]
 # Expanded from the original to catch inner mind v4 headers and LOG directives.
 _THOUGHT_BLOCK_START = re.compile(
     r'\[(?:THOUGHT|INNER[\s_]MIND|INNER[\s_]MONOLOGUE|SHIRO|THINKING|PLOT|SCHEME|META|SYSTEM|LOG|'
-    r'MOMENTUM|STRATEGY|PERSONA|CURIOSITY|BELIEF|QUESTION|ASSOCIATION|MEMORY)[^\]]*\]'
+    r'MOMENTUM|STRATEGY|PERSONA|CURIOSITY|BELIEF|QUESTION|ASSOCIATION|CRITICAL PROTOCOL|MANDATORY|IDENTITY RULE|ABSOLUTE OUTPUT RULE|MEMORY)[^\]]*\]'
     r'|\((?:THOUGHT|INNER[\s_]MIND|LOG|SYSTEM|META|SHIRO)[^\)]*\)'
     r'|<THOUGHT[S]?>'
     r'|\*(?:Shiro\s+)?(?:THOUGHT|THINK|SCHEME|PLOT).*?\*'
@@ -772,8 +772,19 @@ class ShiroEngine:
                         }
                     }]
 
+                # Fix 4: Scale max_tokens by message complexity.
+                # Default 512 cuts off moral dilemmas, explanations, story responses.
+                # ~4 words per token on average. 512 ≈ 2000 chars ≈ ~350 words.
+                # For deep/complex messages, allow up to 800 tokens.
+                _tokens_override = None
+                if _user_words > 40:
+                    _tokens_override = 800
+                elif _user_words > 15:
+                    _tokens_override = 600
+
                 raw_stream = self.llm.stream_response(
-                    top_bun, processed_text, short_term_buffer, full_context, tools=tools
+                    top_bun, processed_text, short_term_buffer, full_context,
+                    tools=tools, max_tokens_override=_tokens_override
                 )
 
                 response_stream = self._extract_thought_from_stream(raw_stream)
@@ -923,8 +934,8 @@ class ShiroEngine:
                         pre = buffer[:m.start()]
                         if pre:
                             yield pre
-                        # Capture the marker itself into last_thought (not UI)
-                        self.last_thought += m.group(0) + " "
+                        # Enter thought mode — don't store the tag itself, only the content
+                        # Fix: storing m.group(0) put "[THOUGHT]" into the thought log
                         buffer = buffer[m.end():]
                         in_thought = True
                         continue
@@ -1044,6 +1055,22 @@ class ShiroEngine:
 
         # One more speaker prefix pass
         text = _SPEAKER_PREFIX.sub('', text).strip()
+
+        # Fix 3: Missing spaces after contractions — model artifact where tokens
+        # "i'd" and "choose" are emitted without a space between them.
+        # Pattern: apostrophe-contraction-suffix immediately followed by a letter.
+        # e.g. "i'dchoose" → "i'd choose", "it'snot" → "it's not"
+        # Also fix: two lowercase words run together like "tobe" or "areaction"
+        text = re.sub(
+            r"('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])",
+            r"\1 \2", text
+        )
+
+        # Strip any remaining [CRITICAL PROTOCOL], [MANDATORY], [IDENTITY] echoes
+        text = re.sub(
+            r'\[(?:CRITICAL PROTOCOL|MANDATORY|IDENTITY RULE|ABSOLUTE OUTPUT RULE)[^\]]*\]\s*',
+            '', text, flags=re.IGNORECASE
+        ).strip()
 
         return text
 
