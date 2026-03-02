@@ -7,7 +7,10 @@ def split_into_sentences(text_stream):
     """
     buffer = ""
     # Punctuation that usually ends a sentence or indicates a pause
-    delimiters = re.compile(r'([.!?\n,])')
+    # FIX: Comma removed from sentence delimiters — it was splitting mid-clause
+    # (e.g. 'Hmph, whatever.' became two fragments: 'Hmph,' and 'whatever.').
+    # Commas now only trigger a flush when the buffer is long (handled below).
+    delimiters = re.compile(r'([.!?\n])')
 
     for chunk in text_stream:
         buffer += chunk
@@ -19,19 +22,25 @@ def split_into_sentences(text_stream):
                 pos = match.end()
                 sentence = buffer[:pos].strip()
                 if sentence:
+                    # B2 FIX: Add a trailing space after sentence-ending punctuation
+                    # so "".join in process_text produces "Sentence one. Sentence two."
+                    # instead of "Sentence one.Sentence two." (no separator).
+                    if sentence[-1] in '.!?' and not sentence.endswith('...'):
+                        sentence += ' '
                     yield sentence
                 buffer = buffer[pos:]
                 continue
 
             # If no delimiter, but buffer is getting long, yield by word count for "instant" feel
             words = buffer.split()
-            if len(words) >= 6:
-                # Find the last space to yield full words
+            # FIX: Raised from 6 → 12 words. At 6 words, short tsundere phrases
+            # like 'It\'s not like I wanted to help you' were flushed mid-sentence.
+            if len(words) >= 12:
                 last_space = buffer.rfind(" ")
                 if last_space != -1:
                     fragment = buffer[:last_space].strip()
                     if fragment:
-                        yield fragment
+                        yield fragment + " "  # B2: space separator for "".join
                     buffer = buffer[last_space:].lstrip()
                 else:
                     # Fallback if no space (unlikely with 8 words)
