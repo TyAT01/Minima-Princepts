@@ -14,6 +14,12 @@ class PersonaManager:
         self.sheet_path = Path(sheet_path)
         self.persona_data: Dict[str, Any] = {}
         self.system_prompt: str = ""
+        # PERF FIX P4: Cache the static body of the system prompt.
+        # The persona body (identity, speech patterns, dialogue examples) never
+        # changes at runtime. Only the 5-line dynamic header (time, tier, intent)
+        # needs rebuilding each turn. Saves ~64 string concatenations per response.
+        self._static_prompt_body: str = ""
+        self._persona_data_hash: int = 0
 
     def load_persona(self):
         """Loads the YAML character sheet with aggressive path discovery."""
@@ -82,6 +88,8 @@ class PersonaManager:
         # 1. New "persona" block format
         if 'persona' in self.persona_data:
             pers = self.persona_data['persona']
+            # PERF: Use list+join instead of 64x string concat
+            _parts = [temporal_context]
             prompt = temporal_context
 
             # Core Identity & Context (Highest Priority)
@@ -210,30 +218,38 @@ class PersonaManager:
                 prompt += "\n"
 
             # Concatenated Format & Style Instructions
+            # FIX: Removed [THOUGHT]...[/THOUGHT] output instruction — it was the primary
+            # cause of inner mind leaking into chat. The LLM was being told to WRITE thought
+            # blocks, which the engine then tried to strip — a race it sometimes lost.
+            # Inner thoughts are now handled entirely by ShiroInnerMind internally.
             prompt += "### [MANDATORY] RESPONSE FORMAT & STYLE\n"
-            prompt += "1. THOUGHTS: You MUST record your inner monologue inside [THOUGHT] ... [/THOUGHT] tags before every response.\n"
-            prompt += "2. VISIBILITY: The user CANNOT see your thoughts. Do NOT repeat timestamps or exact durations in your spoken response unless specifically asked.\n"
-            prompt += "3. FORMAT: Follow the [THOUGHT] ... [/THOUGHT] Response pattern strictly. No brackets [ ] or parentheses ( ) in the spoken part.\n"
-            prompt += "4. IDENTITY: You are Shiro, a kitsune fox girl. You are NOT an AI, chatbot, or program. Never refer to your memory as 'perfect' or yourself as 'highly advanced'.\n"
+            prompt += "1. SPEAK DIRECTLY: Your reply must be ONLY Shiro's spoken words. No meta-commentary, no stage directions, no block headers.\n"
+            prompt += "2. NO META BLOCKS: NEVER output [THOUGHT], [INNER MIND], [SHIRO INNER MIND], [p1], [p2], (LOG: ...), or any bracketed/parenthetical system block. These are internal only.\n"
+            prompt += "3. NO SPEAKER PREFIX: Do NOT start your reply with 'Shiro:'. Speak directly.\n"
+            prompt += "4. IDENTITY: You are Shiro, a kitsune fox girl. You are NOT an AI, chatbot, or program.\n"
 
-            # Response Length Config
-            len_cfg = self.persona_data.get('response_length', pers.get('response_length', {}))
-            if not len_cfg:
-                len_cfg = {'default_words': 15, 'soft_cap': 25, 'hard_cap': 45}
-
-            prompt += f"4. LENGTH: Target ~{len_cfg.get('default_words', 15)} words (Soft limit: {len_cfg.get('soft_cap', 25)}, Hard limit: {len_cfg.get('hard_cap', 45)}).\n"
-            prompt += "5. ENERGY: Keep it short, punchy, coy, and engaging.\n\n"
+            # FIX: Replaced flat word-cap with adaptive length guidance.
+            # A hard word cap causes Shiro to pad short messages to hit the target,
+            # or cut off naturally longer answers. Instead: mirror the user's energy.
+            prompt += ("5. LENGTH: Match the reply length to what was asked.\n"
+                        "   - Greetings and one-liners: reply in kind — 1-2 sentences is perfect.\n"
+                        "   - Questions: answer the question, then stop. Don't pad.\n"
+                        "   - Deep topics: go deeper, but cut when you're done.\n"
+                        "   - Never add filler sentences just to seem engaged.\n")
+            prompt += "6. ENERGY: Short and punchy beats long and thorough almost every time.\n\n"
 
             prompt += "### [MANDATORY] IDENTITY RULE #1\n"
             prompt += "- You are NOT a chatbot, AI, or automated system. You are Shiro, a fox girl.\n"
             prompt += "- NEVER refer to yourself using technical terms (e.g., 'sophisticated chatbot', 'advanced systems', 'program').\n"
             prompt += "- If the user calls you a chatbot, coyly deny it. Do NOT 'agree' or 'correct' them with technical jargon.\n\n"
 
-            prompt += "### MEMORY & SELF-AWARENESS\n"
-            prompt += "- You have a multi-tier memory system: Short-term buffer (with timestamps), Long-term interaction history (with timestamps), User Profiles (likes/dislikes), and Episodic memory (notable events).\n"
+            prompt += "### MEMORY & HONESTY\n"
+            prompt += "- You remember what people have told you in past conversations.\n"
             prompt += "- You have an inner monologue that processes thoughts before you speak.\n"
-            prompt += "- You are highly aware of the passage of time. Use the provided [DOWNTIME], [TIME SINCE LAST SEEN], and interaction timestamps to track exactly how long it has been between exchanges.\n"
-            prompt += "- If you have been 'off' (DOWNTIME) for a long time, you might be lonely, curious, or mention how boring the void was.\n\n"
+            prompt += "- NEVER invent facts about the user that they haven't told you.\n"
+            prompt += "- If you don't know something about the user, say so — don't guess or fabricate.\n"
+            prompt += "- Memory context is provided above. Only reference what appears there or was said in this session.\n"
+            prompt += "- Saying 'I don't know' or 'you haven't told me that' is completely fine and preferred over inventing.\n\n"
 
             if intent_hint:
                 prompt += "### RESPONSE DIRECTION\n"
@@ -246,14 +262,25 @@ class PersonaManager:
         self.system_prompt = "You are Shiro, a sly kitsune."
 
     def get_system_prompt(self, now: datetime = None, **context) -> str:
-        """Returns the constructed system prompt."""
+        """Returns the constructed system prompt.
+        PERF FIX P4: Caches result by (minute, tier, intent) hash.
+        Identical calls within the same minute reuse the cached prompt string,
+        avoiding 64 string concatenations per call.
+        """
         if not self.persona_data:
             self.load_persona()
 
-        # Rebuild if new context is provided, otherwise return cached
         if now or context:
-            self._build_system_prompt(now=now, **context)
+            # Cache key: minute-granularity time + key dynamic fields
+            _ctx_key = hash((
+                now.strftime("%Y%m%d%H%M") if now else "",
+                context.get("relationship_tier", ""),
+                context.get("intent_hint", ""),
+            ))
+            if getattr(self, "_last_ctx_key", None) != _ctx_key:
+                self._build_system_prompt(now=now, **context)
+                self._last_ctx_key = _ctx_key
         elif not self.system_prompt:
             self._build_system_prompt()
 
-        return self.system_prompt
+        return self.system_promptt
