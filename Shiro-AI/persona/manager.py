@@ -283,4 +283,4 @@ class PersonaManager:
         elif not self.system_prompt:
             self._build_system_prompt()
 
-        return self.system_promptt
+        return self.system_prompt
