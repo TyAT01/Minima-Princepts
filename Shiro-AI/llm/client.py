@@ -249,6 +249,9 @@ class LlamaClient:
                 if "tool_calls" in msg:
                     yield f"TOOL_CALLS: {json.dumps(msg['tool_calls'])}"
                 if data.get("done"):
+                    # Yield sentinel so caller knows if we hit token limit
+                    if data.get("done_reason") == "length":
+                        yield "__TRUNCATED__"
                     break
 
     async def _stream_ollama_chat_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None):
