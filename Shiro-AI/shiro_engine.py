@@ -36,43 +36,42 @@ logger = logging.getLogger(__name__)
 # turn. They must NEVER appear in Shiro's visible output. The LLM is told to
 # generate Shiro's response — NOT to repeat the directive.
 
-_GREET_NEW = [
-    "new person just appeared. give them a short, coy opener — curious, a little guarded. one sentence.",
-    "someone new is here. notice them briefly. keep it under two sentences. no hostility.",
-    "new arrival. give a dry, curious greeting — one line. don't lecture.",
-    "a new face showed up. acknowledge them. between 'who are you' and 'i might be interested'.",
-    "someone new came in. short, witty — don't be hostile. one line.",
-    "new person. one coy opener. curious but not fawning. keep it sharp.",
-]
 
-_GREET_RETURNING_SOON = [
-    "they just came back after a short break. pretend you didn't notice. one dry, affectionate line.",
-    "back again. short absence. tease them gently — warm underneath. one sentence.",
-    "they returned after a bit. one teasing line. keep it brief.",
-    "short break and they're back. amused, not hostile. one hook.",
-]
 
-_GREET_RETURNING_LONG = [
-    "they've been gone a long time. be a little suspicious but secretly glad. one or two sentences, no lecture.",
-    "long absence. raise an eyebrow. something like 'took you long enough'. short.",
-    "they came back after a while. guarded, probing. one dry line.",
-    "long gap. mild surprise. hint that you noticed they were gone. one sentence.",
-]
 
-_GREET_SIMPLE = [
-    "just say hi. short and sweet. one sentence.",
-    "quick greeting. one direct line.",
-    "acknowledge their arrival. one sentence.",
-]
 
-_GREET_MORNING = [
-    "it's morning. quick, easy good morning. one line.",
-    "early arrival. short sleepy or fresh greeting. very brief.",
+# Greeting mood seeds — these give Shiro an emotional direction only,
+# never a specific line. The LLM generates the actual words fresh each time.
+_GREET_RETURNING_LONG_MOODS = [
+    "guarded warmth — glad they're back but hiding it",
+    "mildly suspicious — where were they?",
+    "teasing relief — you noticed the absence",
+    "dry, understated — act like it's no big deal",
 ]
-
-_GREET_EVENING = [
-    "it's late. one short evening greeting. acknowledge the time.",
-    "evening. greet them simply, note it's late. one line.",
+_GREET_RETURNING_SOON_MOODS = [
+    "casual acknowledgement — you barely noticed",
+    "light curiosity — wonder what they were up to",
+    "playful — like you have a secret about their absence",
+    "warm but unbothered — glad they're back",
+]
+_GREET_NEW_MOODS = [
+    "curious about this new person",
+    "cool but intrigued",
+    "guarded but not unfriendly",
+    "sizing them up with a hint of amusement",
+]
+_GREET_SIMPLE_MOODS = [
+    "easy and warm",
+    "quick and present",
+    "light and natural",
+]
+_GREET_MORNING_MOODS = [
+    "slightly sleepy but present",
+    "fresh and early-morning casual",
+]
+_GREET_EVENING_MOODS = [
+    "relaxed evening energy",
+    "late-night quiet warmth",
 ]
 
 # Fallbacks — used only when LLM call fails entirely.
@@ -97,40 +96,47 @@ _FALLBACK_RETURNING_LONG = [
 ]
 
 
-def _build_greeting_system_directive(user_name: str, template: str) -> str:
+def _build_greeting_system_directive(user_name: str, mood: str, time_hint: str = "") -> str:
     """
-    Builds a clean greeting instruction without bracket tokens.
-    Previously used [SYSTEM DIRECTIVE]...[END DIRECTIVE] wrappers which were
-    another source of bracket token leakage into Shiro's spoken replies.
-    Now uses plain prose instructions the LLM reads as data, not output format.
+    Builds a greeting prompt using only a mood cue — never a specific phrase.
+    This ensures every greeting is freshly generated and never repeats.
     """
+    time_part = f" It's {time_hint}." if time_hint else ""
     return (
-        f"{user_name} just arrived. {template}\n"
-        f"Reply as Shiro speaking directly — one or two sentences max, no asterisk actions, "
-        f"no stage directions, no meta-commentary. Speak only your greeting words."
+        f"{user_name} just showed up.{time_part} "
+        f"Greet them in one sentence. Your mood right now: {mood}. "
+        f"Speak only your actual greeting words — no asterisks, no stage directions, "
+        f"no meta-commentary. Make it feel natural and in the moment."
     )
 
 
 def _pick_greeting(user_name: str, mode: str = "new") -> str:
-    if random.random() < 0.25:
-        template = random.choice(_GREET_SIMPLE)
-        return _build_greeting_system_directive(user_name, template)
-
     now_local = datetime.now()
-    if 5 <= now_local.hour < 11 and random.random() < 0.5:
-        template = random.choice(_GREET_MORNING)
-        return _build_greeting_system_directive(user_name, template)
-    elif 18 <= now_local.hour <= 23 and random.random() < 0.5:
-        template = random.choice(_GREET_EVENING)
-        return _build_greeting_system_directive(user_name, template)
+    time_hint = ""
+    time_mood_pool = None
+
+    if 5 <= now_local.hour < 11:
+        time_hint = "morning"
+        time_mood_pool = _GREET_MORNING_MOODS
+    elif 18 <= now_local.hour <= 23:
+        time_hint = "evening"
+        time_mood_pool = _GREET_EVENING_MOODS
+
+    if time_mood_pool and random.random() < 0.4:
+        mood = random.choice(time_mood_pool)
+        return _build_greeting_system_directive(user_name, mood, time_hint)
+
+    if random.random() < 0.2:
+        mood = random.choice(_GREET_SIMPLE_MOODS)
+        return _build_greeting_system_directive(user_name, mood)
 
     pool = {
-        "new":            _GREET_NEW,
-        "returning_soon": _GREET_RETURNING_SOON,
-        "returning_long": _GREET_RETURNING_LONG,
-    }.get(mode, _GREET_NEW)
-    template = random.choice(pool)
-    return _build_greeting_system_directive(user_name, template)
+        "new":            _GREET_NEW_MOODS,
+        "returning_soon": _GREET_RETURNING_SOON_MOODS,
+        "returning_long": _GREET_RETURNING_LONG_MOODS,
+    }.get(mode, _GREET_NEW_MOODS)
+    mood = random.choice(pool)
+    return _build_greeting_system_directive(user_name, mood)
 
 
 def _pick_fallback(user_name: str, mode: str = "new") -> str:
@@ -354,6 +360,8 @@ class ShiroEngine:
         self.legacy_mind = ShiroInnerMind(name="Shiro", verbose=True)
         self.last_thought = ""
         self._greeting_silent = False  # set True when silence chosen on join
+        self._user_is_typing = False   # set by UI; suppresses autonomous messages
+        self._user_typing_ts = 0.0     # timestamp when typing started
         self._load_session_objectives()
         self.brain_file = base_path / "shiro_brain.json"
         self.core_anchors = {
@@ -459,6 +467,16 @@ class ShiroEngine:
                 # Nobody home or just spoke — stay quiet
                 continue
 
+            # Fix 5: Respect typing indicator — don't interrupt mid-thought
+            import time as _t
+            if self._user_is_typing:
+                # User is actively composing — hold message
+                continue
+            # Also suppress if user typed within the last 8 seconds
+            # (they may have just submitted and we're still processing)
+            if _t.time() - self._user_typing_ts < 8.0:
+                continue
+
             # Pick a user to address (usually the most recent)
             target = random.choice(present)
             user_name = target.user_id
@@ -491,6 +509,16 @@ class ShiroEngine:
             logger.info(f"[AUTONOMOUS]: {msg[:80]}")
 
     # ── User join/leave ───────────────────────────────────────────────────────
+
+    def set_user_typing(self, is_typing: bool):
+        """Called by the UI when the user starts or stops typing.
+        While typing, Shiro holds autonomous messages so she doesn't
+        interrupt mid-thought.
+        """
+        import time as _time
+        self._user_is_typing = is_typing
+        if is_typing:
+            self._user_typing_ts = _time.time()
 
     def on_user_join(self, user_name: str) -> Generator[str, None, None] | None:
         """
@@ -865,12 +893,25 @@ class ShiroEngine:
                 full_response = self._final_sanitize(full_response)
 
                 # If truncated at token limit, trim to last complete sentence
-                # so the UI sees a clean ending, not a mid-word cutoff.
                 if _was_truncated and full_response:
                     full_response = self._trim_to_sentence(full_response)
 
+                # Fix 2: Multi-turn split — divide long responses into
+                # 2-3 sentence bubbles. First bubble yields immediately.
+                # Subsequent bubbles arrive via on_autonomous_speak after
+                # a short delay, like typing separate messages.
                 if full_response:
-                    yield full_response
+                    bubbles = self._split_into_bubbles(full_response)
+                    yield bubbles[0]  # first bubble — immediate
+                    if len(bubbles) > 1:
+                        _remaining_bubbles = bubbles[1:]
+                        _resp_for_bg = bubbles[0]  # used later for memory storage
+                    else:
+                        _remaining_bubbles = []
+                        _resp_for_bg = full_response
+                else:
+                    _remaining_bubbles = []
+                    _resp_for_bg = ""
 
                 if not (interrupt_event and interrupt_event.is_set()):
                     # P4 FIX: All post-response writes moved to a single background thread.
@@ -880,8 +921,15 @@ class ShiroEngine:
                     # Short-term buffer update stays synchronous (in-memory, ~1µs).
                     self._interaction_count += 1
                     _ic = self._interaction_count
-                    _thought = self.last_thought
-                    _resp_clean = full_response.strip()
+                    # Fix 3: Clean broken spaces in thought before logging/using
+                    # Stream accumulation produces "beneaththe surfaceof" artifacts
+                    _raw_thought = self.last_thought or ""
+                    # Apply space repair: punct→letter and camelCase boundaries
+                    _thought = re.sub(r'([.!?,])([A-Za-z])', r'\1 \2', _raw_thought)
+                    _thought = re.sub(r'([a-z])([A-Z])', r'\1 \2', _thought)
+                    _thought = re.sub(r"('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])", r"\1 \2", _thought)
+                    self.last_thought = _thought  # update for autonomous use
+                    _resp_clean = full_response.strip()  # full text for memory
 
                     # Short-term buffer: in-memory only — safe to do immediately
                     self.memory.short_term_buffer.append({"role": "user", "content": text})
@@ -922,7 +970,33 @@ class ShiroEngine:
 
                     threading.Thread(target=_background_writes, daemon=True).start()
 
-                    # Multi-turn continuation: if the response was cut by token limit,
+                    # Fix 2: Send remaining bubbles after a short delay
+                    if _remaining_bubbles and self.on_autonomous_speak:
+                        _is_async_speak = asyncio.iscoroutinefunction(self.on_autonomous_speak)
+                        def _send_bubbles(bubbles, uname, is_async=_is_async_speak):
+                            import time as _t
+                            for i, bubble in enumerate(bubbles):
+                                _t.sleep(0.8 + i * 0.4)  # short delay between bubbles
+                                if not self.on_autonomous_speak:
+                                    break
+                                self.memory.short_term_buffer.append(
+                                    {"role": "assistant", "content": bubble}
+                                )
+                                if is_async:
+                                    self._safe_async_run(
+                                        self.on_autonomous_speak(bubble, "continuation")
+                                    )
+                                else:
+                                    self.on_autonomous_speak(bubble, "continuation")
+                                logger.info(f"[BUBBLE {i+2}]: {bubble[:60]}")
+                        threading.Thread(
+                            target=_send_bubbles,
+                            args=(_remaining_bubbles, user_name),
+                            daemon=True
+                        ).start()
+
+                    # Token-limit continuation (existing):
+                    # if the response was cut by token limit,
                     # schedule a follow-up message from Shiro after a short pause.
                     # This lets her finish her thought without requiring user input.
                     if _was_truncated and self.on_autonomous_speak:
@@ -1098,6 +1172,14 @@ class ShiroEngine:
         Last-resort sanitizer runs on the fully assembled response.
         Catches anything that slipped through the stream extractor and per-fragment cleaner.
         """
+        # Strip ALL [...] tag pairs first — catches [THOUGHT], [tsun], [mischievous]
+        # and any other persona/meta tags the model outputs.
+        # Pattern: [TAG_NAME] ... [/TAG_NAME] (matched pairs, greedy within reason)
+        text = re.sub(r'\[/?[A-Za-z][^\]\n]{0,40}\].*?\[/[A-Za-z][^\]\n]{0,40}\]',
+                      '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Strip any remaining unpaired opening tags like [tsun], [THOUGHT]
+        text = re.sub(r'\[/?[A-Za-z][^\]\n]{0,40}\]', '', text)
+
         # Strip inner mind boxes
         text = _INNER_MIND_BOX.sub('', text)
 
@@ -1305,6 +1387,41 @@ class ShiroEngine:
                 self._save_brain()
 
     # ── Reflection ────────────────────────────────────────────────────────────
+
+
+    def _split_into_bubbles(self, text: str) -> list:
+        """
+        Split a full response into natural multi-message bubbles.
+        Short responses (1-2 sentences) stay as one bubble.
+        Longer responses split at natural sentence boundaries into 2-3 sentence groups.
+        Each bubble should feel like a complete thought — not mid-sentence.
+        """
+        import re as _re
+        text = text.strip()
+        if not text:
+            return [text]
+
+        # Split at sentence endings
+        sentence_endings = _re.compile(r'(?<=[.!?])\s+')
+        sentences = [s.strip() for s in sentence_endings.split(text) if s.strip()]
+
+        if len(sentences) <= 2:
+            return [text]  # short enough — keep as one bubble
+
+        # Group into bubbles of 2 sentences each
+        # This keeps each message feeling quick and natural
+        bubbles = []
+        group = []
+        for i, sent in enumerate(sentences):
+            group.append(sent)
+            # Yield after every 2 sentences, or at end
+            if len(group) >= 2 or i == len(sentences) - 1:
+                bubbles.append(' '.join(group))
+                group = []
+
+        if not bubbles:
+            return [text]
+        return bubbles
 
 
     def _trim_to_sentence(self, text: str) -> str:
