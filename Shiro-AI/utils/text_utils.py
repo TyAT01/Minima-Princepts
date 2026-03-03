@@ -33,13 +33,12 @@ def split_into_sentences(text_stream):
     buffer = ""
 
     for chunk in text_stream:
-        # Repair missing spaces introduced by the model's tokeniser
-        # before the chunk enters the buffer (cheapest point to fix it).
+        # Apply safe space repairs to each token before buffering.
+        # ONLY fixes punctuation→letter and CamelCase joins —
+        # do NOT insert spaces between adjacent alpha tokens because
+        # Ollama splits words mid-token ("Ident"+"ify") and inserting
+        # a space there produces "Ident ify" which is worse.
         chunk = _repair_spaces(chunk)
-        # If buffer ends with a letter/digit and chunk starts with one,
-        # the tokeniser dropped the inter-word space — restore it.
-        if buffer and buffer[-1].isalpha() and chunk and chunk[0].isalpha():
-            buffer += " "
         buffer += chunk
 
         # Flush complete sentences
