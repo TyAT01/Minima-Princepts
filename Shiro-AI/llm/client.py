@@ -6,6 +6,42 @@ import asyncio
 import aiohttp
 from typing import Any, Optional, Dict, List, Generator, AsyncGenerator
 
+
+# ── Module-level constants (computed once, reused on every LLM call) ─────────
+# B1 FIX: Removed [ABSOLUTE OUTPUT RULE] bracket token — it was demonstrating
+# bracket-format output to the model. Plain prose instruction instead.
+# P6 FIX: Precomputed so string isn't rebuilt on every call.
+_ANTI_LEAK_SUFFIX = (
+    "\n\nSpeak ONLY as Shiro. Never output thought markers, inner mind blocks, "
+    "system directives, or log entries in your reply. Plain spoken words only. "
+    "Do not prefix your reply with 'Shiro:'."
+)
+
+def _build_payload(model, messages, temperature, top_p, repeat_penalty,
+                   max_tokens, num_gpu, tools=None, max_tokens_override=None):
+    """Build Ollama chat payload. Called from both sync and async paths.
+    max_tokens_override: if set, overrides self.max_tokens for this call only.
+    Used to allow longer responses for complex/deep messages.
+    """
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "options": {
+            "temperature": temperature,
+            "top_p": top_p,
+            "repeat_penalty": repeat_penalty,
+            "num_predict": max_tokens_override if max_tokens_override else max_tokens,
+            "stop": ["User:", "System:", "\nUser:", "\nSystem:"],
+        }
+    }
+    if num_gpu is not None:
+        payload["options"]["num_gpu"] = num_gpu
+    if tools:
+        payload["tools"] = tools
+    return payload
+
+
 logger = logging.getLogger(__name__)
 
 class LlamaClient:
@@ -77,12 +113,12 @@ class LlamaClient:
             full_text += chunk
         return full_text.strip()
 
-    def stream_response(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "", tools: Optional[List[Dict]] = None) -> Generator[str, None, None]:
+    def stream_response(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str = "", tools: Optional[List[Dict]] = None, max_tokens_override: int = None) -> Generator[str, None, None]:
         """Generates a streaming response using the Llama model."""
         logger.info(f"Streaming response for input: {user_input[:50]}...")
 
         if self.api_type == "ollama":
-            yield from self._stream_ollama_with_fallback(system_prompt, user_input, history, context, tools=tools)
+            yield from self._stream_ollama_with_fallback(system_prompt, user_input, history, context, tools=tools, max_tokens_override=max_tokens_override)
         else:
             yield from self._stream_openai(system_prompt, user_input, history, context, tools=tools)
 
@@ -134,7 +170,7 @@ class LlamaClient:
             async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
                 yield chunk
 
-    def _stream_ollama_with_fallback(self, system_prompt, user_input, history, context, tools=None):
+    def _stream_ollama_with_fallback(self, system_prompt, user_input, history, context, tools=None, max_tokens_override=None):
         models_to_try = [self.model]
         if self.fallback_model:
             models_to_try.append(self.fallback_model)
@@ -158,7 +194,7 @@ class LlamaClient:
                             if tools and not native_tools_enabled:
                                 actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
 
-                            yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model)
+                            yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model, max_tokens_override=max_tokens_override)
                             if tools and self._supports_tools is None:
                                 self._supports_tools = native_tools_enabled
                         except requests.exceptions.HTTPError as e:
@@ -186,30 +222,17 @@ class LlamaClient:
                     continue
         if last_error: raise last_error
 
-    def _stream_ollama_chat(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None):
+    def _stream_ollama_chat(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None, max_tokens_override: int = None):
         target_model = model or self.model
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": system_prompt + _ANTI_LEAK_SUFFIX}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
         messages.extend(history)
         messages.append({"role": "user", "content": user_input})
 
-        payload = {
-            "model": target_model,
-            "messages": messages,
-            "stream": True,
-            "options": {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                "repeat_penalty": self.repeat_penalty,
-                "num_predict": self.max_tokens,
-                "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
-            }
-        }
-        if self.num_gpu is not None:
-            payload["options"]["num_gpu"] = self.num_gpu
-        if tools:
-            payload["tools"] = tools
+        payload = _build_payload(target_model, messages, self.temperature, self.top_p,
+                                  self.repeat_penalty, self.max_tokens, self.num_gpu, tools,
+                                  max_tokens_override=max_tokens_override)
 
         response = requests.post(f"{self.base_url}/chat", json=payload, timeout=60, stream=True)
         if response.status_code == 400:
@@ -226,32 +249,21 @@ class LlamaClient:
                 if "tool_calls" in msg:
                     yield f"TOOL_CALLS: {json.dumps(msg['tool_calls'])}"
                 if data.get("done"):
+                    # Yield sentinel so caller knows if we hit token limit
+                    if data.get("done_reason") == "length":
+                        yield "__TRUNCATED__"
                     break
 
     async def _stream_ollama_chat_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None):
         target_model = model or self.model
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": system_prompt + _ANTI_LEAK_SUFFIX}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
         messages.extend(history)
         messages.append({"role": "user", "content": user_input})
 
-        payload = {
-            "model": target_model,
-            "messages": messages,
-            "stream": True,
-            "options": {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                "repeat_penalty": self.repeat_penalty,
-                "num_predict": self.max_tokens,
-                "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
-            }
-        }
-        if self.num_gpu is not None:
-            payload["options"]["num_gpu"] = self.num_gpu
-        if tools:
-            payload["tools"] = tools
+        payload = _build_payload(target_model, messages, self.temperature, self.top_p,
+                                  self.repeat_penalty, self.max_tokens, self.num_gpu, tools)
 
         session = await self._get_session()
         async with session.post(f"{self.base_url}/chat", json=payload) as response:
@@ -290,7 +302,7 @@ class LlamaClient:
                 "top_p": self.top_p,
                 "repeat_penalty": self.repeat_penalty,
                 "num_predict": self.max_tokens,
-                "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
+                "stop": ["User:", "System:", "\nUser:", "\nSystem:"]  # removed [SYSTEM: — was cutting replies
             }
         }
         if self.num_gpu is not None:
@@ -321,7 +333,7 @@ class LlamaClient:
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
             "stream": True,
-            "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
+            "stop": ["User:", "System:", "\nUser:", "\nSystem:"]  # removed [SYSTEM: — was cutting replies
         }
         if tools:
             payload["tools"] = tools
@@ -369,7 +381,7 @@ class LlamaClient:
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
             "stream": True,
-            "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
+            "stop": ["User:", "System:", "\nUser:", "\nSystem:"]  # removed [SYSTEM: — was cutting replies
         }
         if tools:
             payload["tools"] = tools

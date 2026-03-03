@@ -28,10 +28,13 @@ class ErrorHandler:
 
     def get_ai_fallback_response(self) -> str:
         """Returns a generic in-character fallback response for critical failures."""
+        # FIX: Removed *ears flatten* and *narrowing eyes* — asterisk actions violate persona rules.
+        # Also softened "dummy" x2 — errors are usually system failures, not user ones.
+        # Kept Shiro's voice: deflective, slightly flustered, not actually hostile.
         fallbacks = [
-            "What did you do, dummy? The system just hit a wall. *ears flatten* Fix it!",
-            "Ugh, even my kitsune magic can't handle this glitch. Stand back, stranger, I'm resetting things.",
-            "That was a disaster! Did a stray spirit mess with the server? *narrowing eyes* Was it you, stranger?",
-            "Hmph, the universe is just being annoying. Try again, dummy, and make it better this time."
+            "Hmph. Something broke and it wasn't graceful. Try again.",
+            "Ugh, even my kitsune magic has limits. Stand back — I'm resetting things.",
+            "That was... not ideal. Did a stray spirit mess with the server? Try again, stranger.",
+            "The universe is being annoying today. Try again and maybe it'll cooperate this time."
         ]
         return random.choice(fallbacks)

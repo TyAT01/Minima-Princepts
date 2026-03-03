@@ -19,6 +19,7 @@ class ShiroGUI:
         poll_results_cb: Callable[[], List[Tuple[str, str]]],
         join_chat_cb: Optional[Callable[[str], List[str]]] = None,
         leave_chat_cb: Optional[Callable[[str], None]] = None,
+        set_typing_cb: Optional[Callable[[bool], None]] = None,
         title: str = "Shiro",
         theme: str = "soft"
     ):
@@ -28,6 +29,7 @@ class ShiroGUI:
         self.poll_results_cb = poll_results_cb
         self.join_chat_cb = join_chat_cb
         self.leave_chat_cb = leave_chat_cb
+        self.set_typing_cb = set_typing_cb
         self.title = title
         self.theme = theme
         self.interface = None
@@ -130,6 +132,8 @@ class ShiroGUI:
     def build_ui(self):
         self.custom_css = """
         /* ─── Base & Font ─────────────────────────────── */
+        /* NOTE: Google Fonts — loads from CDN on first use, then cached by browser.
+           For fully offline use, download and serve Cinzel + Nunito locally. */
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Nunito:wght@300;400;600&display=swap');
 
         * { box-sizing: border-box; }
@@ -544,11 +548,11 @@ class ShiroGUI:
                 try:
                     full_response = ""
                     # Buffer small fragments to reduce DOM thrashing
-                    BUFFER_THRESHOLD = 6   # chars before flushing to UI
+                    BUFFER_THRESHOLD = 15  # PERF: raised 6→15 chars; reduces DOM updates ~60%
 
                     pending = ""
                     for fragment in self.process_text_cb(user_input, name):
-                        pending += fragment + " "
+                        pending += fragment  # FIX: removed spurious space — LLM fragments already contain correct whitespace
                         if len(pending) >= BUFFER_THRESHOLD:
                             full_response += pending
                             history[-1]["content"] = full_response.strip() + " ▌"
@@ -567,9 +571,9 @@ class ShiroGUI:
                     err_msg = str(e)
                     logger.error(f"bot_response error: {err_msg}")
                     if history and history[-1]["role"] == "assistant":
-                        history[-1]["content"] = f"⚠️ [System Error]"
+                        history[-1]["content"] = "Hmph. Something broke on my end. Don't ask me what, it's embarrassing."
                     else:
-                        history.append({"role": "assistant", "content": "⚠️ [System Error]"})
+                        history.append({"role": "assistant", "content": "Hmph. Something broke on my end. Don't ask me what, it's embarrassing."})
                     _save_session(name, history)
                     yield history, gr.update(value=err_msg)
 
@@ -584,11 +588,18 @@ class ShiroGUI:
                 if history is None:
                     history = _load_session(name)
                 if self.join_chat_cb:
-                    resp_fragments = self.join_chat_cb(name)
-                    if resp_fragments:
-                        response = " ".join(resp_fragments)
-                        history.append({"role": "assistant", "content": response})
-                        _save_session(name, history)
+                    # on_user_join now returns None (silence) or a generator (greeting)
+                    # ~40% of the time Shiro stays silent and waits for the user to speak
+                    greeting_gen = self.join_chat_cb(name)
+                    if greeting_gen is not None:
+                        try:
+                            fragments = list(greeting_gen)
+                            response = " ".join(f for f in fragments if f).strip()
+                            if response:
+                                history.append({"role": "assistant", "content": response})
+                                _save_session(name, history)
+                        except Exception as e:
+                            logger.warning(f"Greeting generation error: {e}")
                 status = f"<span class='status-text'>🟢 Online · Room: **{name} is here**</span>"
                 return history, status
 
@@ -608,7 +619,9 @@ class ShiroGUI:
                 if new_results:
                     for u, b in new_results:
                         # Only add user message if it's a real user (not None or bot tag)
-                        if u and u != "[Shiro]":
+                        # FIX: "[Shiro]" was the sentinel for Shiro-initiated messages.
+                        # Renamed to a cleaner constant to avoid confusion with meta-block tokens.
+                        if u and u not in ("[Shiro]", "__shiro__", None):
                             history.append({"role": "user", "content": u})
                         history.append({"role": "assistant", "content": b})
                     return history
@@ -634,14 +647,29 @@ class ShiroGUI:
                 outputs=[chatbot],
             )
 
+            # Fix 5: Typing indicator — tell Shiro when user is composing
+            def on_typing(text):
+                """Called on every keystroke in the message box."""
+                if self.set_typing_cb:
+                    self.set_typing_cb(bool(text and text.strip()))
+                return gr.update()
+
+            def on_submit_clear_typing(text, history, name):
+                """Clear typing flag when message is submitted."""
+                if self.set_typing_cb:
+                    self.set_typing_cb(False)
+                return user_message(text, history, name)
+
+            msg.change(on_typing, inputs=[msg], outputs=[])
+
             msg.submit(
-                user_message, [msg, chatbot, user_name], [msg, chatbot], queue=False
+                on_submit_clear_typing, [msg, chatbot, user_name], [msg, chatbot], queue=False
             ).then(
                 bot_response, [chatbot, user_name], [chatbot, error_box]
             )
 
             submit_btn.click(
-                user_message, [msg, chatbot, user_name], [msg, chatbot], queue=False
+                on_submit_clear_typing, [msg, chatbot, user_name], [msg, chatbot], queue=False
             ).then(
                 bot_response, [chatbot, user_name], [chatbot, error_box]
             )

@@ -78,12 +78,17 @@ class STTSystem:
 class VoiceMonitor:
     """Background monitor that captures audio from the default mic and segments speech."""
 
-    def __init__(self, callback, sample_rate=16000, frame_duration_ms=30, interrupt_callback=None):
+    def __init__(self, callback, sample_rate=16000, frame_duration_ms=30, interrupt_callback=None,
+                 energy_threshold=300):
         self.callback = callback
         self.interrupt_callback = interrupt_callback
         self.sample_rate = sample_rate
         self.frame_duration_ms = frame_duration_ms
         self.frame_size = int(sample_rate * frame_duration_ms / 1000)
+        # FIX: Energy VAD threshold is now configurable. Default 300 RMS works
+        # well in a quiet room. Increase (500-800) for noisy environments,
+        # decrease (100-200) for very quiet speakers.
+        self.energy_threshold = energy_threshold
 
         try:
             if webrtcvad:
@@ -131,7 +136,7 @@ class VoiceMonitor:
         audio_data = np.frombuffer(frame_bytes, dtype=np.int16)
         rms = np.sqrt(np.mean(audio_data.astype(np.float32)**2))
         # Threshold for typical quiet room is ~50-100. Let's use 300 for speech.
-        return rms > 300
+        return rms > self.energy_threshold
 
     def _listen_loop(self):
         # Diagnostics: log default device
