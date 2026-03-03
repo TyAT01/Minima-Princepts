@@ -19,6 +19,7 @@ class ShiroGUI:
         poll_results_cb: Callable[[], List[Tuple[str, str]]],
         join_chat_cb: Optional[Callable[[str], List[str]]] = None,
         leave_chat_cb: Optional[Callable[[str], None]] = None,
+        set_typing_cb: Optional[Callable[[bool], None]] = None,
         title: str = "Shiro",
         theme: str = "soft"
     ):
@@ -28,6 +29,7 @@ class ShiroGUI:
         self.poll_results_cb = poll_results_cb
         self.join_chat_cb = join_chat_cb
         self.leave_chat_cb = leave_chat_cb
+        self.set_typing_cb = set_typing_cb
         self.title = title
         self.theme = theme
         self.interface = None
@@ -645,14 +647,29 @@ class ShiroGUI:
                 outputs=[chatbot],
             )
 
+            # Fix 5: Typing indicator — tell Shiro when user is composing
+            def on_typing(text):
+                """Called on every keystroke in the message box."""
+                if self.set_typing_cb:
+                    self.set_typing_cb(bool(text and text.strip()))
+                return gr.update()
+
+            def on_submit_clear_typing(text, history, name):
+                """Clear typing flag when message is submitted."""
+                if self.set_typing_cb:
+                    self.set_typing_cb(False)
+                return user_message(text, history, name)
+
+            msg.change(on_typing, inputs=[msg], outputs=[])
+
             msg.submit(
-                user_message, [msg, chatbot, user_name], [msg, chatbot], queue=False
+                on_submit_clear_typing, [msg, chatbot, user_name], [msg, chatbot], queue=False
             ).then(
                 bot_response, [chatbot, user_name], [chatbot, error_box]
             )
 
             submit_btn.click(
-                user_message, [msg, chatbot, user_name], [msg, chatbot], queue=False
+                on_submit_clear_typing, [msg, chatbot, user_name], [msg, chatbot], queue=False
             ).then(
                 bot_response, [chatbot, user_name], [chatbot, error_box]
             )
