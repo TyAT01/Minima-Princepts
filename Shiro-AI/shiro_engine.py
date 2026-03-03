@@ -436,26 +436,52 @@ class ShiroEngine:
         self.bus.emit("thought_fired", thought=thought.text)
 
     async def _v4_idle_loop(self):
+        """
+        Idle loop — fires when Shiro has been quiet for a while.
+        Replaced canned AutonomousVoice strings with live LLM-generated messages
+        so every autonomous message is grounded in real context, never scripted.
+        Variable timing (30-90s) so she doesn't feel like a chatbot on a timer.
+        """
         while True:
-            await asyncio.sleep(20.0 * random.uniform(0.8, 1.3))
+            # Variable wait: 30-90 seconds. Feels organic, not robotic.
+            await asyncio.sleep(random.uniform(30.0, 90.0))
             idle_s = (datetime.now(timezone.utc) - self.last_interaction_time).total_seconds()
             present = [p for p in self.awareness.users.values() if p.present]
 
-            if not present and idle_s > 120.0:
-                await self.voice.mutter_idle()
-            elif present and idle_s > 90.0:
-                target = random.choice(present)
-                recall = self.v4_memory.get_summary(target.user_id)
-                recent_topics = self.v4_memory.get_recent_topics(target.user_id)
-                if recall and recall.key_facts and random.random() < 0.3:
-                    fact = random.choice(recall.key_facts)
-                    await self.voice.speak_memory(target.user_id, fact)
-                elif recent_topics and random.random() < 0.5:
-                    top_topic = recent_topics[0]
-                    await self.voice.initiate_conversation(target.user_id, topic=top_topic)
+            if not present or idle_s < 20.0:
+                # Nobody home or just spoke — stay quiet
+                continue
+
+            # Pick a user to address (usually the most recent)
+            target = random.choice(present)
+            user_name = target.user_id
+
+            # Generate a real, contextual message instead of a canned string
+            msg = await self._generate_live_autonomous_message(user_name)
+            if not msg:
+                continue
+
+            # Store in memory BEFORE delivering — this is critical.
+            # Without this, Shiro has no recollection of saying it when the user replies.
+            self.memory.short_term_buffer.append(
+                {"role": "assistant", "content": msg}
+            )
+            if len(self.memory.short_term_buffer) > self.memory.max_short_term * 2:
+                self.memory.short_term_buffer =                     self.memory.short_term_buffer[-(self.memory.max_short_term * 2):]
+            threading.Thread(
+                target=self.memory.add_interaction_to_longterm,
+                args=("[autonomous]", msg, user_name),
+                daemon=True
+            ).start()
+
+            self.last_interaction_time = datetime.now(timezone.utc)
+
+            if self.on_autonomous_speak:
+                if asyncio.iscoroutinefunction(self.on_autonomous_speak):
+                    await self.on_autonomous_speak(msg, "autonomous")
                 else:
-                    await self.voice.initiate_conversation(target.user_id)
-                self.last_interaction_time = datetime.now(timezone.utc)
+                    self.on_autonomous_speak(msg, "autonomous")
+            logger.info(f"[AUTONOMOUS]: {msg[:80]}")
 
     # ── User join/leave ───────────────────────────────────────────────────────
 
@@ -789,12 +815,20 @@ class ShiroEngine:
 
                 response_stream = self._extract_thought_from_stream(raw_stream)
                 response_fragments = []
+                _was_truncated = False  # set True when Ollama hits token limit
 
                 for fragment in split_into_sentences(response_stream):
                     if interrupt_event and interrupt_event.is_set():
                         logger.info("Response halted by interrupt.")
                         yield "... [Interrupted]"
                         break
+
+                    # Detect token-limit sentinel from client.py
+                    if "__TRUNCATED__" in fragment:
+                        _was_truncated = True
+                        fragment = fragment.replace("__TRUNCATED__", "").strip()
+                        if not fragment:
+                            continue
 
                     if "TOOL_CALLS:" in fragment and self.session_tool_count < 2:
                         fragment = self._safe_async_run(
@@ -806,16 +840,17 @@ class ShiroEngine:
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
 
-                # B2 FIX: Use "".join instead of " ".join.
-                # split_into_sentences already preserves trailing space/punctuation
-                # on each fragment. " ".join was adding an extra space between
-                # every fragment, causing "word . word" or "word  word" gaps.
                 full_response = "".join(response_fragments)
                 full_response = self._throttle_hmph(full_response)
                 full_response = self.cadence.adapt_text(full_response, user_name)
 
                 # Final safety pass — strip any leaked meta that survived everything else
                 full_response = self._final_sanitize(full_response)
+
+                # If truncated at token limit, trim to last complete sentence
+                # so the UI sees a clean ending, not a mid-word cutoff.
+                if _was_truncated and full_response:
+                    full_response = self._trim_to_sentence(full_response)
 
                 if full_response:
                     yield full_response
@@ -869,6 +904,20 @@ class ShiroEngine:
                             logger.warning(f"Background write error: {_e}")
 
                     threading.Thread(target=_background_writes, daemon=True).start()
+
+                    # Multi-turn continuation: if the response was cut by token limit,
+                    # schedule a follow-up message from Shiro after a short pause.
+                    # This lets her finish her thought without requiring user input.
+                    if _was_truncated and self.on_autonomous_speak:
+                        def _continue_thought():
+                            import time as _t
+                            _t.sleep(0.6)  # brief pause so UI renders first message
+                            self._safe_async_run(
+                                self._continue_truncated_response(
+                                    user_name, processed_text, _resp_clean
+                                )
+                            )
+                        threading.Thread(target=_continue_thought, daemon=True).start()
 
             except Exception as e:
                 logger.error(f"Engine text processing failed: {e}. Falling back to RuleEngine.")
@@ -1208,6 +1257,217 @@ class ShiroEngine:
                 self._save_brain()
 
     # ── Reflection ────────────────────────────────────────────────────────────
+
+
+    def _trim_to_sentence(self, text: str) -> str:
+        """
+        Trim text to end at the last complete sentence (. ! ?).
+        Called when Ollama hit the token limit so the UI sees a clean stop,
+        not a dangling half-word.
+        """
+        text = text.strip()
+        # Find the last sentence-ending punctuation
+        last_end = -1
+        for i in range(len(text) - 1, -1, -1):
+            if text[i] in ('.', '!', '?') and (i + 1 >= len(text) or text[i+1] in (' ', '"')):
+                last_end = i
+                break
+        if last_end > len(text) * 0.4:  # only trim if we keep at least 40%
+            return text[:last_end + 1].strip()
+        return text  # not enough content to trim — keep as-is
+
+    async def _continue_truncated_response(
+        self, user_name: str, original_query: str, already_said: str
+    ):
+        """
+        Generate a seamless continuation when Shiro was cut off by the token limit.
+        The continuation picks up exactly where she left off — no repeated context,
+        no "as I was saying", just the next part of her thought.
+        Delivered via on_autonomous_speak so it appears as a new bubble unprompted.
+        """
+        try:
+            history = self.memory.get_history()
+            system_prompt = self.persona.get_system_prompt(
+                now=__import__('datetime').datetime.now(),
+                relationship_tier=self.legacy_mind.relationship.level.name.lower(),
+            ) + f"\n{self.outfit_block()}"
+
+            continuation_instruction = (
+                f"You were replying to: \"{original_query}\"\n"
+                f"You already said: \"{already_said}\"\n"
+                "Continue your reply naturally from where you left off. "
+                "Do NOT repeat what you already said. Do NOT add 'as I was saying' or similar. "
+                "Just continue the thought directly, as if typing the next part of the same message. "
+                "Keep it concise — finish the thought cleanly."
+            )
+
+            context = await self.memory.get_full_context_async(
+                original_query, user_id=user_name
+            )
+            continuation = await self.llm.generate_response_async(
+                system_prompt,
+                continuation_instruction,
+                history[-6:],
+                context=context
+            )
+            continuation = self._final_sanitize(continuation.strip())
+
+            if continuation and self.on_autonomous_speak:
+                # Store continuation in memory so Shiro knows she said it
+                self.memory.short_term_buffer.append(
+                    {"role": "assistant", "content": continuation}
+                )
+                threading.Thread(
+                    target=self.memory.add_interaction_to_longterm,
+                    args=(f"[continuation of: {original_query[:60]}]",
+                          continuation, user_name),
+                    daemon=True
+                ).start()
+
+                if asyncio.iscoroutinefunction(self.on_autonomous_speak):
+                    await self.on_autonomous_speak(continuation, "continuation")
+                else:
+                    self.on_autonomous_speak(continuation, "continuation")
+
+                logger.info(f"[CONTINUATION]: {continuation[:80]}...")
+        except Exception as e:
+            logger.warning(f"Continuation failed: {e}")
+
+    async def _generate_live_autonomous_message(self, user_name: str) -> str:
+        """
+        Generate a real autonomous thought/message grounded in actual conversation
+        context. Used by _v4_idle_loop instead of canned strings.
+        Returns the generated text (empty string on failure).
+        """
+        try:
+            history = self.memory.get_history()
+            if not history:
+                return ""
+
+            recent_ctx = "\n".join(
+                f"{m['role'].title()}: {m['content']}"
+                for m in history[-6:]
+            )
+            context = await self.memory.get_full_context_async(
+                "recent thoughts and conversation", user_id=user_name
+            )
+            last_thought = self.last_thought or ""
+            system_prompt = self.persona.get_system_prompt(
+                now=__import__('datetime').datetime.now(),
+                relationship_tier=self.legacy_mind.relationship.level.name.lower(),
+            ) + f"\n{self.outfit_block()}"
+
+            prompt = (
+                f"Recent conversation:\n{recent_ctx}\n\n"
+                + (f"You were just thinking: \"{last_thought}\"\n\n" if last_thought else "")
+                + "You feel like saying something — a reaction, a follow-up thought, "
+                "a question, or a tangent that genuinely occurred to you. "
+                "Speak as yourself, naturally. One or two sentences max. "
+                "Do NOT say 'I\'ve been thinking, can I share it?' or any scripted phrase. "
+                "Do NOT ask permission to speak. Just say the thing."
+            )
+
+            msg = await self.llm.generate_response_async(
+                system_prompt, prompt, history[-4:], context=context
+            )
+            return self._final_sanitize(msg.strip())
+        except Exception as e:
+            logger.warning(f"Live autonomous message failed: {e}")
+            return ""
+
+
+
+    def _trim_to_sentence(self, text):
+        """Trim to last complete sentence after token-limit cutoff."""
+        text = text.strip()
+        last_end = -1
+        for i in range(len(text) - 1, -1, -1):
+            if text[i] in '.!?' and (i + 1 >= len(text) or text[i+1] in ' \n"\''):
+                last_end = i
+                break
+        if last_end > len(text) * 0.4:
+            return text[:last_end + 1].strip()
+        return text
+
+    async def _continue_truncated_response(self, user_name, original_query, already_said):
+        """Continue a truncated response as a new unprompted message."""
+        try:
+            import datetime as _dt
+            history = self.memory.get_history()
+            system_prompt = self.persona.get_system_prompt(
+                now=_dt.datetime.now(),
+                relationship_tier=self.legacy_mind.relationship.level.name.lower(),
+            ) + "\n" + self.outfit_block()
+            continuation_instruction = (
+                "You were replying to: " + repr(original_query) + "\n"
+                + "You already said: " + repr(already_said) + "\n"
+                + "Continue your reply from where you left off. "
+                + "Do NOT repeat what you already said. No transition phrases. "
+                + "Just continue the thought and finish it cleanly."
+            )
+            context = await self.memory.get_full_context_async(
+                original_query, user_id=user_name
+            )
+            continuation = await self.llm.generate_response_async(
+                system_prompt, continuation_instruction, history[-6:], context=context
+            )
+            continuation = self._final_sanitize(continuation.strip())
+            if continuation and self.on_autonomous_speak:
+                self.memory.short_term_buffer.append(
+                    {"role": "assistant", "content": continuation}
+                )
+                threading.Thread(
+                    target=self.memory.add_interaction_to_longterm,
+                    args=("[continuation]", continuation, user_name),
+                    daemon=True
+                ).start()
+                if asyncio.iscoroutinefunction(self.on_autonomous_speak):
+                    await self.on_autonomous_speak(continuation, "continuation")
+                else:
+                    self.on_autonomous_speak(continuation, "continuation")
+                logger.info(f"[CONTINUATION]: {continuation[:80]}")
+        except Exception as e:
+            logger.warning(f"Continuation failed: {e}")
+
+    async def _generate_live_autonomous_message(self, user_name):
+        """
+        LLM-driven autonomous message grounded in real conversation context.
+        Replaces canned strings. Result is stored in memory so Shiro recalls it.
+        """
+        try:
+            import datetime as _dt
+            history = self.memory.get_history()
+            if not history:
+                return ""
+            recent_ctx = "\n".join(
+                f"{m['role'].title()}: {m['content']}" for m in history[-6:]
+            )
+            context = await self.memory.get_full_context_async(
+                "recent thoughts", user_id=user_name
+            )
+            last_thought = self.last_thought or ""
+            system_prompt = self.persona.get_system_prompt(
+                now=_dt.datetime.now(),
+                relationship_tier=self.legacy_mind.relationship.level.name.lower(),
+            ) + "\n" + self.outfit_block()
+            prompt_parts = [f"Recent conversation:\n{recent_ctx}"]
+            if last_thought:
+                prompt_parts.append(f"You were just thinking: {last_thought!r}")
+            prompt_parts.append(
+                "You feel like saying something unprompted — a reaction, follow-up, "
+                "question, or tangent that genuinely occurred to you. "
+                "Speak naturally, one or two sentences. Do NOT ask permission. "
+                "Do NOT use scripted phrases like 'I have been thinking, can I share?'. "
+                "Just say the thing directly."
+            )
+            msg = await self.llm.generate_response_async(
+                system_prompt, "\n".join(prompt_parts), history[-4:], context=context
+            )
+            return self._final_sanitize(msg.strip())
+        except Exception as e:
+            logger.warning(f"Live autonomous message failed: {e}")
+            return ""
+
 
     def reflect(self, user_id: str):
         try:
