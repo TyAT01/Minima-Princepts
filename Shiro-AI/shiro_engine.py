@@ -260,6 +260,10 @@ class ShiroEngine:
         r'(?i)\*(?:Shiro\s+)?(?:thinks?|thinking|schem\w+|plott\w+).*?\*'
     )
     _CLEAN_BOXLINE_RE = re.compile(r'^\s*[\|+]', re.MULTILINE)
+    # Fix A: CoT step-header lines from shiro:latest baked-in CoT prompting
+    _CLEAN_COT_LINE_RE = re.compile(
+        r'(?m)^(?:##\s*)?[Ss]tep\s*\d+\s*[:.-][^\n]*(?:\n(?!(?:##\s*)?[Ss]tep\s*\d)[^\n]*)*'
+    )
     # B4 FIX: Old pattern r'^[A-Z][a-z]+:\s*' matched legitimate starts like
     # "So:" or "Oh:" — stripping Shiro's own words. Narrowed to known prefixes only.
     _CLEAN_SPEAKER_BARE_RE = re.compile(
@@ -432,8 +436,11 @@ class ShiroEngine:
 
     def _on_v4_thought(self, thought):
         """Callback for v4 InnerMind thoughts — stays INTERNAL, never reaches UI."""
-        self.last_thought = thought.text
-        self.bus.emit("thought_fired", thought=thought.text)
+        # Fix D: Clean broken spaces before storing (model sometimes splits tokens
+        # mid-word producing "t he texture" style artifacts in thought text)
+        cleaned = re.sub(r'(?<=[a-z]) (?=[a-z]{1,3}(?![a-z]))', '', thought.text)
+        self.last_thought = cleaned
+        self.bus.emit("thought_fired", thought=cleaned)
 
     async def _v4_idle_loop(self):
         """
@@ -836,6 +843,16 @@ class ShiroEngine:
                         )
                         self.session_tool_count += 1
 
+                    # Fix A: Drop CoT step-header lines at the fragment level.
+                    # These come from shiro:latest baked-in chain-of-thought.
+                    # _STREAM_START_RE cannot handle them (no end marker → blackout).
+                    _frag_stripped = fragment.strip()
+                    if re.match(r'(?i)^(?:##\s*)?step\s*\d+\s*[:.-]', _frag_stripped):
+                        continue  # discard entire CoT fragment
+                    if _frag_stripped.startswith('## ') and not any(
+                        c.isalpha() and c.islower() for c in _frag_stripped[3:20]):
+                        continue  # discard ## Section headers
+
                     clean_fragment = self._clean_response(fragment, processed_text)
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
@@ -1052,6 +1069,8 @@ class ShiroEngine:
         text = self._CLEAN_OPEN_TAG_RE.sub('', text, count=1).strip()
         text = self._CLEAN_ASTERISK_RE.sub('', text).strip()
         text = self._CLEAN_BOXLINE_RE.sub('', text).strip()
+        # Fix A: Drop any remaining CoT step blocks
+        text = self._CLEAN_COT_LINE_RE.sub('', text).strip()
 
         # Echo stripping — if response starts with what the user said
         if user_query:
@@ -1115,11 +1134,40 @@ class ShiroEngine:
             r"\1 \2", text
         )
 
-        # Strip any remaining [CRITICAL PROTOCOL], [MANDATORY], [IDENTITY] echoes
+        # Strip [CRITICAL PROTOCOL], [MANDATORY], [IDENTITY] echoes
         text = re.sub(
             r'\[(?:CRITICAL PROTOCOL|MANDATORY|IDENTITY RULE|ABSOLUTE OUTPUT RULE)[^\]]*\]\s*',
             '', text, flags=re.IGNORECASE
         ).strip()
+
+        # Fix A: Strip chain-of-thought reasoning blocks the model outputs.
+        # shiro:latest has CoT baked in — it generates "## Step 1:" sections
+        # that are internal reasoning, never meant for the user.
+        # Remove any line that starts with "## Step", "Step N:", or looks like
+        # a numbered reasoning header. Also strip the content of entire CoT blocks.
+        lines = text.splitlines()
+        clean = []
+        in_cot = False
+        for line in lines:
+            stripped = line.strip()
+            # Detect CoT header lines
+            if re.match(r'(?i)^(?:##\s*)?step\s*\d+\s*[:.-]', stripped):
+                in_cot = True
+                continue  # drop the header
+            # Once inside CoT, keep dropping until we hit a blank line or non-header
+            if in_cot:
+                if not stripped:  # blank line ends CoT block
+                    in_cot = False
+                continue  # drop CoT body lines
+            clean.append(line)
+        text = '\n'.join(clean).strip()
+
+        # Fix C: Apply space repair here so ALL paths (async, autonomous,
+        # continuation) get cleaned — not just the streaming sentence path.
+        text = re.sub(r'([.!?,])([A-Za-z])', r'\1 \2', text)  # punct→letter
+        text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)        # camelCase
+        # contraction suffix directly followed by a letter
+        text = re.sub(r"('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])", r"\1 \2", text)
 
         return text
 
@@ -1333,48 +1381,6 @@ class ShiroEngine:
         except Exception as e:
             logger.warning(f"Continuation failed: {e}")
 
-    async def _generate_live_autonomous_message(self, user_name: str) -> str:
-        """
-        Generate a real autonomous thought/message grounded in actual conversation
-        context. Used by _v4_idle_loop instead of canned strings.
-        Returns the generated text (empty string on failure).
-        """
-        try:
-            history = self.memory.get_history()
-            if not history:
-                return ""
-
-            recent_ctx = "\n".join(
-                f"{m['role'].title()}: {m['content']}"
-                for m in history[-6:]
-            )
-            context = await self.memory.get_full_context_async(
-                "recent thoughts and conversation", user_id=user_name
-            )
-            last_thought = self.last_thought or ""
-            system_prompt = self.persona.get_system_prompt(
-                now=__import__('datetime').datetime.now(),
-                relationship_tier=self.legacy_mind.relationship.level.name.lower(),
-            ) + f"\n{self.outfit_block()}"
-
-            prompt = (
-                f"Recent conversation:\n{recent_ctx}\n\n"
-                + (f"You were just thinking: \"{last_thought}\"\n\n" if last_thought else "")
-                + "You feel like saying something — a reaction, a follow-up thought, "
-                "a question, or a tangent that genuinely occurred to you. "
-                "Speak as yourself, naturally. One or two sentences max. "
-                "Do NOT say 'I\'ve been thinking, can I share it?' or any scripted phrase. "
-                "Do NOT ask permission to speak. Just say the thing."
-            )
-
-            msg = await self.llm.generate_response_async(
-                system_prompt, prompt, history[-4:], context=context
-            )
-            return self._final_sanitize(msg.strip())
-        except Exception as e:
-            logger.warning(f"Live autonomous message failed: {e}")
-            return ""
-
 
 
     def _trim_to_sentence(self, text):
@@ -1450,18 +1456,17 @@ class ShiroEngine:
                 now=_dt.datetime.now(),
                 relationship_tier=self.legacy_mind.relationship.level.name.lower(),
             ) + "\n" + self.outfit_block()
-            prompt_parts = [f"Recent conversation:\n{recent_ctx}"]
+            # Move last_thought into system prompt context, not user prompt.
+            # Quoting it in the user prompt caused the LLM to echo it verbatim.
             if last_thought:
-                prompt_parts.append(f"You were just thinking: {last_thought!r}")
-            prompt_parts.append(
-                "You feel like saying something unprompted — a reaction, follow-up, "
-                "question, or tangent that genuinely occurred to you. "
-                "Speak naturally, one or two sentences. Do NOT ask permission. "
-                "Do NOT use scripted phrases like 'I have been thinking, can I share?'. "
-                "Just say the thing directly."
+                system_prompt += f"\n[Inner state: {last_thought}]"
+            prompt = (
+                f"Recent conversation:\n{recent_ctx}\n\n"
+                "Say something short and natural right now — a reaction, "
+                "follow-up, or question. One or two sentences. Just say it."
             )
             msg = await self.llm.generate_response_async(
-                system_prompt, "\n".join(prompt_parts), history[-4:], context=context
+                system_prompt, prompt, history[-4:], context=context
             )
             return self._final_sanitize(msg.strip())
         except Exception as e:
