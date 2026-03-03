@@ -1,46 +1,70 @@
 import re
 
+# Compiled once at module level — used by split_into_sentences hot path
+_DELIMITERS = re.compile(r'([.!?\n])')
+# Catches missing space after punctuation: "word.Word" → "word. Word"
+_PUNCT_NO_SPACE = re.compile(r'([.!?,])([A-Za-z])')
+# Catches tokens merged without space by the LLM tokeniser:
+# "heytyler" would need a word-list; instead catch [a-z][A-Z] (CamelCase joins)
+# and proper-noun runs after sentence terminals.
+_CAMEL_JOIN = re.compile(r'([a-z])([A-Z])')
+
+
+def _repair_spaces(text: str) -> str:
+    """
+    Repair common LLM token-merge artefacts:
+    1. Missing space after sentence punctuation: "hello.how" → "hello. how"
+    2. CamelCase merges from adjacent tokens: "heyTyler" → "hey Tyler"
+    Neither regex touches apostrophe-contractions or ellipses.
+    """
+    text = _PUNCT_NO_SPACE.sub(r'\1 \2', text)
+    text = _CAMEL_JOIN.sub(r'\1 \2', text)
+    return text
+
+
 def split_into_sentences(text_stream):
     """
-    Yields sentence fragments from a stream of text chunks.
-    Delimiters are . ! ? \n and , or after a certain word count for "instant" feel.
+    Yields sentence fragments from a streaming LLM token iterator.
+    Each yielded fragment ends at a natural sentence boundary (. ! ? \n)
+    or after ~12 words (so short responses appear immediately).
+    Trailing space is appended so callers can safely use "".join().
+    Token-merge space repairs are applied to each raw chunk before buffering.
     """
     buffer = ""
-    # Punctuation that usually ends a sentence or indicates a pause
-    # FIX: Comma removed from sentence delimiters — it was splitting mid-clause
-    # (e.g. 'Hmph, whatever.' became two fragments: 'Hmph,' and 'whatever.').
-    # Commas now only trigger a flush when the buffer is long (handled below).
-    delimiters = re.compile(r'([.!?\n])')
 
     for chunk in text_stream:
+        # Repair missing spaces introduced by the model's tokeniser
+        # before the chunk enters the buffer (cheapest point to fix it).
+        chunk = _repair_spaces(chunk)
+        # If buffer ends with a letter/digit and chunk starts with one,
+        # the tokeniser dropped the inter-word space — restore it.
+        if buffer and buffer[-1].isalpha() and chunk and chunk[0].isalpha():
+            buffer += " "
         buffer += chunk
 
-        # Check if we have any delimiters in the buffer
+        # Flush complete sentences
         while True:
-            match = delimiters.search(buffer)
+            match = _DELIMITERS.search(buffer)
             if match:
                 pos = match.end()
                 sentence = buffer[:pos].strip()
                 if sentence:
-                    # B2 FIX: Add a trailing space after sentence-ending punctuation
-                    # so "".join in process_text produces "Sentence one. Sentence two."
-                    # instead of "Sentence one.Sentence two." (no separator).
+                    # Ensure caller "".join produces "Sentence one. Sentence two."
                     if sentence[-1] in '.!?' and not sentence.endswith('...'):
                         sentence += ' '
                     yield sentence
                 buffer = buffer[pos:]
                 continue
 
-            # If no delimiter, but buffer is getting long, yield by word count for "instant" feel
+            # No delimiter yet — flush by word count for low-latency feel.
+            # 12 words keeps tsundere short-phrases intact before the . arrives.
             words = buffer.split()
-            # FIX: Raised from 6 → 12 words. At 6 words, short tsundere phrases
-            # like 'It\'s not like I wanted to help you' were flushed mid-sentence.
             if len(words) >= 12:
                 last_space = buffer.rfind(" ")
                 if last_space != -1:
                     fragment = buffer[:last_space].strip()
                     if fragment:
-                        yield fragment + " "  # B2: space separator for "".join
+                        yield fragment + " "
                     buffer = buffer[last_space:].lstrip()
                 else:
                     # Fallback if no space (unlikely with 8 words)
