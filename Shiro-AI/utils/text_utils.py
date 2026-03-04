@@ -8,6 +8,8 @@ _PUNCT_NO_SPACE = re.compile(r'([.!?,])([A-Za-z])')
 # "heytyler" would need a word-list; instead catch [a-z][A-Z] (CamelCase joins)
 # and proper-noun runs after sentence terminals.
 _CAMEL_JOIN = re.compile(r'([a-z])([A-Z])')
+# Catches missing space after apostrophe-contractions: "i'mgoing" -> "i'm going"
+_CONTRACTION_JOIN = re.compile(r"([a-zA-Z])('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])")
 
 
 def _repair_spaces(text: str) -> str:
@@ -15,10 +17,12 @@ def _repair_spaces(text: str) -> str:
     Repair common LLM token-merge artefacts:
     1. Missing space after sentence punctuation: "hello.how" → "hello. how"
     2. CamelCase merges from adjacent tokens: "heyTyler" → "hey Tyler"
-    Neither regex touches apostrophe-contractions or ellipses.
+    3. Missing space after contractions: "i'mgoing" → "i'm going"
+    Neither regex touches ellipses or standalone single-quoted words.
     """
     text = _PUNCT_NO_SPACE.sub(r'\1 \2', text)
     text = _CAMEL_JOIN.sub(r'\1 \2', text)
+    text = _CONTRACTION_JOIN.sub(r'\1\2 \3', text)
     return text
 
 
@@ -102,6 +106,8 @@ def clean_yaml_block(text: str) -> str:
     # 2b. Escape/Replace bullet points that might be confused with YAML aliases if not properly indented
     # (e.g., "* Fact" -> "Fact")
     text = re.sub(r'^\s*\* ', '  - ', text, flags=re.MULTILINE)
+    # Ensure nested list items have leading spaces to be valid YAML
+    text = re.sub(r'^-\s+', '  - ', text, flags=re.MULTILINE)
 
     # 3. Strip leading/trailing whitespace
     text = text.strip()
