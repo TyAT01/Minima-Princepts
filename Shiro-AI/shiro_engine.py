@@ -275,6 +275,13 @@ class ShiroEngine:
     _CLEAN_SPEAKER_BARE_RE = re.compile(
         r'(?i)^(?:shiro|user|system|assistant|narrator)\s*:\s*'
     )
+    # Refined metadata stripping — catches line-style leaks and inline pseudo-tags
+    _CLEAN_METADATA_LINE_RE = re.compile(
+        rf'(?i)(?:\s*\|?\s*\[(?:{_kw}|V|A|D|VAD|MOOD|TURN)[^\]]*\])'
+        rf'|(?:\s*\|?\s*\b(?:{_kw}|V|A|D|VAD|MOOD|TURN)\s*[:=][^|]*)'
+        rf'|(?:\s*\|?\s*neutral|playful|excited|confident|content|engaged|motivated|anxious|withdrawn|uncertain|fatigued|bold|curious|reflective\s*(?=\[|\|))',
+        re.IGNORECASE
+    )
     del _kw  # cleanup — not needed as instance attr
 
     def __init__(self, config: dict, on_autonomous_speak: Optional[Callable[[str, str], Any]] = None):
@@ -444,9 +451,8 @@ class ShiroEngine:
 
     def _on_v4_thought(self, thought):
         """Callback for v4 InnerMind thoughts — stays INTERNAL, never reaches UI."""
-        # Fix D: Clean broken spaces before storing (model sometimes splits tokens
-        # mid-word producing "t he texture" style artifacts in thought text)
-        cleaned = re.sub(r'(?<=[a-z]) (?=[a-z]{1,3}(?![a-z]))', '', thought.text)
+        # Removed aggressive space-removal regex that was merging valid words like "this is one"
+        cleaned = thought.text
         self.last_thought = cleaned
         self.bus.emit("thought_fired", thought=cleaned)
 
@@ -543,11 +549,11 @@ class ShiroEngine:
         if last_seen:
             days_gone = (datetime.now(timezone.utc) - last_seen).days
             if days_gone > 7:
-                mode, greet_chance = "returning_long", 0.70
+                mode, greet_chance = "returning_long", 0.50 # CHOICE: lower greet chance for long absence
             else:
-                mode, greet_chance = "returning_soon", 0.55
+                mode, greet_chance = "returning_soon", 0.35 # CHOICE: much lower greet chance for recent users
         else:
-            mode, greet_chance = "new", 0.60
+            mode, greet_chance = "new", 0.60 # New users still get 60% curiosity greeting
 
         if random.random() > greet_chance:
             # Shiro stays silent — she noticed but isn't announcing it
@@ -979,9 +985,8 @@ class ShiroEngine:
                                 _t.sleep(0.8 + i * 0.4)  # short delay between bubbles
                                 if not self.on_autonomous_speak:
                                     break
-                                self.memory.short_term_buffer.append(
-                                    {"role": "assistant", "content": bubble}
-                                )
+                                # Removed redundant short_term_buffer append here.
+                                # The full response is already added to history/buffer in the main thread.
                                 if is_async:
                                     self._safe_async_run(
                                         self.on_autonomous_speak(bubble, "continuation")
@@ -1090,7 +1095,7 @@ class ShiroEngine:
                     m = end_re.search(buffer)
                     if m:
                         self.last_thought += buffer[:m.start()]
-                        buffer = buffer[m.end():].lstrip()
+                        buffer = buffer[m.end():] # SPACE FIX: removed .lstrip()
                         in_thought = False
                         continue
                     else:
@@ -1135,16 +1140,18 @@ class ShiroEngine:
         # Remove LOG directives (should not appear in output but just in case)
         text = _LOG_DIRECTIVE.sub('', text)
 
-        # P2 FIX: Use precompiled class-level patterns (previously 5 inline re.sub
-        # calls with interpolated variables, bypassing Python's pattern cache).
+        # P2 FIX: Use precompiled class-level patterns
         text = self._CLEAN_THOUGHT_BLOCK_RE.sub('', text)
         text = self._CLEAN_PAREN_BLOCK_RE.sub('', text)
         text = re.sub(r'<THOUGHTS?>.*?</THOUGHTS?>', '', text, flags=re.IGNORECASE | re.DOTALL)
-        text = self._CLEAN_OPEN_TAG_RE.sub('', text, count=1).strip()
-        text = self._CLEAN_ASTERISK_RE.sub('', text).strip()
-        text = self._CLEAN_BOXLINE_RE.sub('', text).strip()
+
+        # SPACE FIX: Removed .strip() from internal steps to preserve intentional spacing
+        # yielded by split_into_sentences()
+        text = self._CLEAN_OPEN_TAG_RE.sub('', text, count=1)
+        text = self._CLEAN_ASTERISK_RE.sub('', text)
+        text = self._CLEAN_BOXLINE_RE.sub('', text)
         # Fix A: Drop any remaining CoT step blocks
-        text = self._CLEAN_COT_LINE_RE.sub('', text).strip()
+        text = self._CLEAN_COT_LINE_RE.sub('', text)
 
         # Echo stripping — if response starts with what the user said
         if user_query:
@@ -1153,17 +1160,17 @@ class ShiroEngine:
                 text = text[len(query_clean):].lstrip(" :,.-")
 
         # Speaker prefix stripping
-        # B4 FIX: Old r'^[A-Z][a-z]+:\s*' was too broad — matched "So:", "Oh:",
-        # "Well:" etc, stripping the first word of Shiro's replies.
-        # Now uses narrowed class-level pattern (known prefixes only).
-        text = _SPEAKER_PREFIX.sub('', text).strip()
-        text = self._CLEAN_SPEAKER_BARE_RE.sub('', text).strip()
+        text = _SPEAKER_PREFIX.sub('', text)
+        text = self._CLEAN_SPEAKER_BARE_RE.sub('', text)
+
+        # Metadata line stripping — handle inline leaks like | momentum: stable |
+        text = self._CLEAN_METADATA_LINE_RE.sub('', text)
 
         # Uppercase normalization
         lines = text.splitlines()
         text = '\n'.join(
             l.capitalize() if l.isupper() else l for l in lines
-        ).strip()
+        )
 
         return text
 
@@ -1250,6 +1257,9 @@ class ShiroEngine:
         text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)        # camelCase
         # contraction suffix directly followed by a letter
         text = re.sub(r"('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])", r"\1 \2", text)
+
+        # Fix for "I've to" -> "I have to" (Shiro sometimes over-shortens)
+        text = re.sub(r"\b([Ii])'ve\s+to\b", r"\1 have to", text)
 
         return text
 

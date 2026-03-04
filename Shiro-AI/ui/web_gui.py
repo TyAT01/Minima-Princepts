@@ -652,7 +652,7 @@ class ShiroGUI:
                 """Called on every keystroke in the message box."""
                 if self.set_typing_cb:
                     self.set_typing_cb(bool(text and text.strip()))
-                return gr.update()
+                return None
 
             def on_submit_clear_typing(text, history, name):
                 """Clear typing flag when message is submitted."""
