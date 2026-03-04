@@ -823,7 +823,10 @@ _COMMON_FILLER = frozenset({
     "lost","stuck","confused","done","really","very","also","actually","pretty",
     "currently","already","still","even","only","ever","never",
     "does","indeed","it","is","that","this","was", "new", "up", "down",
-    "coming", "from", "actually", "indeed", "unknown", "user", "stranger"
+    "coming", "from", "actually", "indeed", "unknown", "user", "stranger",
+    "always", "human", "spending", "friend", "someone", "anyone", "nothing",
+    "something", "master", "master shiro", "master_shiro", "shiro", "fox",
+    "kitsune", "yaoguai", "dummy", "silly", "stranger", "another", "everything"
 })
 
 def _extract_name(message: str) -> Optional[str]:
@@ -831,7 +834,10 @@ def _extract_name(message: str) -> Optional[str]:
         m = pat.search(message)
         if m:
             candidate = m.group(1).strip().capitalize()
-            if candidate.lower() not in _COMMON_FILLER and len(candidate) > 1:
+            # Stricter filtering: skip common filler and known stop-words
+            if candidate.lower() not in _COMMON_FILLER and \
+               candidate.lower() not in _STOP_WORDS and \
+               len(candidate) > 1:
                 return candidate
     return None
 

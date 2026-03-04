@@ -227,7 +227,9 @@ class ShiroEngine:
     THOUGHT_KEYWORDS = (
         "THOUGHT|THOUGHTS|INNER MONOLOGUE|INNER MIND|INNERMONOLOGUE|INNERMIND|"
         "SHIRO|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG|"
-        "MOMENTUM|REL:|VALENCE|STRATEGY|PERSONA|CURIOSITY|BELIEF|QUESTION|ASSOCIATION"
+        "MOMENTUM|REL:|VALENCE|STRATEGY|PERSONA|CURIOSITY|BELIEF|QUESTION|"
+        "ASSOCIATION|END THOUGHT|MASK CHECK|CRITICAL PROTOCOL|MANDATORY|"
+        "IDENTITY RULE|ABSOLUTE OUTPUT RULE|MEMORY"
     )
     # P1+P2 FIX: Precompile all hot-path regexes as class attributes.
     # _extract_thought_from_stream and _clean_response are called on every
@@ -469,8 +471,8 @@ class ShiroEngine:
             idle_s = (datetime.now(timezone.utc) - self.last_interaction_time).total_seconds()
             present = [p for p in self.awareness.users.values() if p.present]
 
-            if not present or idle_s < 20.0:
-                # Nobody home or just spoke — stay quiet
+            if not present or idle_s < 20.0 or self.processing_lock.locked():
+                # Nobody home, just spoke, or system is busy — stay quiet
                 continue
 
             # Fix 5: Respect typing indicator — don't interrupt mid-thought
@@ -933,7 +935,7 @@ class ShiroEngine:
                     # Apply space repair: punct→letter and camelCase boundaries
                     _thought = re.sub(r'([.!?,])([A-Za-z])', r'\1 \2', _raw_thought)
                     _thought = re.sub(r'([a-z])([A-Z])', r'\1 \2', _thought)
-                    _thought = re.sub(r"('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])", r"\1 \2", _thought)
+                    _thought = re.sub(r"([a-zA-Z])('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])", r"\1\2 \3", _thought)
                     self.last_thought = _thought  # update for autonomous use
                     _resp_clean = full_response.strip()  # full text for memory
 
@@ -1182,10 +1184,11 @@ class ShiroEngine:
         # Strip ALL [...] tag pairs first — catches [THOUGHT], [tsun], [mischievous]
         # and any other persona/meta tags the model outputs.
         # Pattern: [TAG_NAME] ... [/TAG_NAME] (matched pairs, greedy within reason)
-        text = re.sub(r'\[/?[A-Za-z][^\]\n]{0,40}\].*?\[/[A-Za-z][^\]\n]{0,40}\]',
+        # Updated to allow spaces and varied characters inside brackets.
+        text = re.sub(r'\[[^\]\n]{1,50}\].*?\[/[^\]\n]{1,50}\]',
                       '', text, flags=re.DOTALL | re.IGNORECASE)
-        # Strip any remaining unpaired opening tags like [tsun], [THOUGHT]
-        text = re.sub(r'\[/?[A-Za-z][^\]\n]{0,40}\]', '', text)
+        # Strip any remaining unpaired opening tags like [tsun], [THOUGHT], [Mask check]
+        text = re.sub(r'\[[^\]\n]{1,50}\]', '', text)
 
         # Strip inner mind boxes
         text = _INNER_MIND_BOX.sub('', text)
@@ -1215,12 +1218,12 @@ class ShiroEngine:
 
         # Fix 3: Missing spaces after contractions — model artifact where tokens
         # "i'd" and "choose" are emitted without a space between them.
-        # Pattern: apostrophe-contraction-suffix immediately followed by a letter.
+        # Pattern: letter followed by apostrophe-contraction-suffix immediately followed by another letter.
         # e.g. "i'dchoose" → "i'd choose", "it'snot" → "it's not"
-        # Also fix: two lowercase words run together like "tobe" or "areaction"
+        # This prevents breaking single-quoted words like 'moving on'.
         text = re.sub(
-            r"('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])",
-            r"\1 \2", text
+            r"([a-zA-Z])('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])",
+            r"\1\2 \3", text
         )
 
         # Strip [CRITICAL PROTOCOL], [MANDATORY], [IDENTITY] echoes
@@ -1256,7 +1259,7 @@ class ShiroEngine:
         text = re.sub(r'([.!?,])([A-Za-z])', r'\1 \2', text)  # punct→letter
         text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)        # camelCase
         # contraction suffix directly followed by a letter
-        text = re.sub(r"('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])", r"\1 \2", text)
+        text = re.sub(r"([a-zA-Z])('(?:d|s|t|ve|re|ll|m|nt))([a-zA-Z])", r"\1\2 \3", text)
 
         # Fix for "I've to" -> "I have to" (Shiro sometimes over-shortens)
         text = re.sub(r"\b([Ii])'ve\s+to\b", r"\1 have to", text)
@@ -1510,57 +1513,6 @@ class ShiroEngine:
 
 
 
-    def _trim_to_sentence(self, text):
-        """Trim to last complete sentence after token-limit cutoff."""
-        text = text.strip()
-        last_end = -1
-        for i in range(len(text) - 1, -1, -1):
-            if text[i] in '.!?' and (i + 1 >= len(text) or text[i+1] in ' \n"\''):
-                last_end = i
-                break
-        if last_end > len(text) * 0.4:
-            return text[:last_end + 1].strip()
-        return text
-
-    async def _continue_truncated_response(self, user_name, original_query, already_said):
-        """Continue a truncated response as a new unprompted message."""
-        try:
-            import datetime as _dt
-            history = self.memory.get_history()
-            system_prompt = self.persona.get_system_prompt(
-                now=_dt.datetime.now(),
-                relationship_tier=self.legacy_mind.relationship.level.name.lower(),
-            ) + "\n" + self.outfit_block()
-            continuation_instruction = (
-                "You were replying to: " + repr(original_query) + "\n"
-                + "You already said: " + repr(already_said) + "\n"
-                + "Continue your reply from where you left off. "
-                + "Do NOT repeat what you already said. No transition phrases. "
-                + "Just continue the thought and finish it cleanly."
-            )
-            context = await self.memory.get_full_context_async(
-                original_query, user_id=user_name
-            )
-            continuation = await self.llm.generate_response_async(
-                system_prompt, continuation_instruction, history[-6:], context=context
-            )
-            continuation = self._final_sanitize(continuation.strip())
-            if continuation and self.on_autonomous_speak:
-                self.memory.short_term_buffer.append(
-                    {"role": "assistant", "content": continuation}
-                )
-                threading.Thread(
-                    target=self.memory.add_interaction_to_longterm,
-                    args=("[continuation]", continuation, user_name),
-                    daemon=True
-                ).start()
-                if asyncio.iscoroutinefunction(self.on_autonomous_speak):
-                    await self.on_autonomous_speak(continuation, "continuation")
-                else:
-                    self.on_autonomous_speak(continuation, "continuation")
-                logger.info(f"[CONTINUATION]: {continuation[:80]}")
-        except Exception as e:
-            logger.warning(f"Continuation failed: {e}")
 
     async def _generate_live_autonomous_message(self, user_name):
         """
@@ -1590,7 +1542,9 @@ class ShiroEngine:
             prompt = (
                 f"Recent conversation:\n{recent_ctx}\n\n"
                 "Say something short and natural right now — a reaction, "
-                "follow-up, or question. One or two sentences. Just say it."
+                "follow-up, or question. One or two sentences. Just say it. "
+                "IMPORTANT: Do NOT greet them or say things like 'welcome back' or 'you just showed up' "
+                "— you are already in the middle of a conversation."
             )
             msg = await self.llm.generate_response_async(
                 system_prompt, prompt, history[-4:], context=context
