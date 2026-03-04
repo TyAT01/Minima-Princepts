@@ -1111,7 +1111,7 @@ class ShiroEngine:
                             lines = buffer.splitlines()
                             for i, line in enumerate(lines):
                                 stripped = line.strip()
-                                if len(stripped) > 20 and stripped[0].isupper() and not re.search(r'[|+=]', stripped):
+                                if len(stripped) > 20 and stripped[0].isupper() and not any(c in stripped for c in "|+="):
                                     # This looks like a leaked response.
                                     # Yield everything from this point forward.
                                     leaked = "\n".join(lines[i:])
