@@ -549,11 +549,11 @@ class ShiroEngine:
         if last_seen:
             days_gone = (datetime.now(timezone.utc) - last_seen).days
             if days_gone > 7:
-                mode, greet_chance = "returning_long", 0.70
+                mode, greet_chance = "returning_long", 0.50 # CHOICE: lower greet chance for long absence
             else:
-                mode, greet_chance = "returning_soon", 0.55
+                mode, greet_chance = "returning_soon", 0.35 # CHOICE: much lower greet chance for recent users
         else:
-            mode, greet_chance = "new", 0.60
+            mode, greet_chance = "new", 0.60 # New users still get 60% curiosity greeting
 
         if random.random() > greet_chance:
             # Shiro stays silent — she noticed but isn't announcing it
@@ -1095,7 +1095,7 @@ class ShiroEngine:
                     m = end_re.search(buffer)
                     if m:
                         self.last_thought += buffer[:m.start()]
-                        buffer = buffer[m.end():].lstrip()
+                        buffer = buffer[m.end():] # SPACE FIX: removed .lstrip()
                         in_thought = False
                         continue
                     else:

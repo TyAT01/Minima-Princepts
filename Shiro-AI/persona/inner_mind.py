@@ -575,7 +575,7 @@ def _select_strategy(
             return (ResponseStrategy.WARM,
                     "First impression — inviting and playful, not cold. Warmth first, sass later.")
         return (ResponseStrategy.TEASE,
-                "Familiar face returning — warm tease, maybe 'took you long enough'.")
+                "Familiar face returning — warm tease.")
 
     # Name or personal intro → receive warmly (strict pattern: must be near start of msg)
     name_intro_patterns = ["my name is","call me","you can call me","i go by"]
