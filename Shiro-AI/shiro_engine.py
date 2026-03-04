@@ -719,7 +719,8 @@ class ShiroEngine:
                     relationship_tier=rel_tier_raw,
                     timing_obs=self.time_pattern.visit_observation(user_name),
                     user_quirks=user_profile_obj.quirks,
-                    user_patterns=[self.awareness.get_user_pattern_description(user_name)]
+                    user_patterns=[self.awareness.get_user_pattern_description(user_name)],
+                    session_turns=session_turns
                 )
                 # FIX: drift_note now injected as plain prose via _drift_note_clean below
                 # (removing the unused [SYSTEM: Topic shift] bracket token variable)
@@ -795,7 +796,8 @@ class ShiroEngine:
                 ])
                 hyp_ans = self._imagine_reply(processed_text) if _is_knowledge_query else processed_text
                 # N5: reuse already-fetched history for exclude_list
-                exclude_list = [m["content"] for m in history[-5:]] if history else []
+                # Increase exclude_list to 10 turns to prevent repeating earlier session context
+                exclude_list = [m["content"] for m in history[-10:]] if history else []
                 long_term_memory = self.memory.get_full_context(
                     processed_text, user_id=user_name,
                     hypothetical_answer=hyp_ans, exclude_list=exclude_list
@@ -1101,6 +1103,27 @@ class ShiroEngine:
                         in_thought = False
                         continue
                     else:
+                        # ── HARDENING: Check for leaked response inside thought block ──
+                        # If the block is getting very long and contains real-looking prose,
+                        # the model might have forgotten to close the block or put the reply inside.
+                        if len(buffer) > 150:
+                            # Does it look like real dialogue? (Starts with upper case, no box characters)
+                            lines = buffer.splitlines()
+                            for i, line in enumerate(lines):
+                                stripped = line.strip()
+                                if len(stripped) > 20 and stripped[0].isupper() and not re.search(r'[|+=]', stripped):
+                                    # This looks like a leaked response.
+                                    # Yield everything from this point forward.
+                                    leaked = "\n".join(lines[i:])
+                                    # Only yield if it doesn't contain major thought keywords
+                                    if not any(kw in leaked.upper() for kw in self.THOUGHT_KEYWORDS.split('|')):
+                                        # Capture everything BEFORE this line as thought
+                                        self.last_thought += "\n".join(lines[:i])
+                                        buffer = leaked
+                                        in_thought = False
+                                        break
+                            if not in_thought: continue
+
                         # Still inside thought — check for box end via | lines
                         # If we see a line that clearly starts real dialogue (doesn't start with |)
                         if '\n' in buffer:
@@ -1310,6 +1333,10 @@ class ShiroEngine:
             f"This is {'an ongoing' if session_msg_count > 4 else 'a new'} conversation.\n"
             "Mention downtime or duration ONLY if it serves your teasing or if you want to complain about being lonely."
         )
+        # Explicitly label the retrieved RAG content to distinguish it from the current conversation
+        if context.strip():
+            context = f"### HISTORICAL MEMORIES (from previous sessions):\n{context}"
+
         return f"## Session Context\n{temporal_note}\n\n{context}"
 
     def _format_timedelta(self, delta: timedelta) -> str:
@@ -1544,7 +1571,9 @@ class ShiroEngine:
                 "Say something short and natural right now — a reaction, "
                 "follow-up, or question. One or two sentences. Just say it. "
                 "IMPORTANT: Do NOT greet them or say things like 'welcome back' or 'you just showed up' "
-                "— you are already in the middle of a conversation."
+                "— you are already in the middle of a conversation. "
+                "Do NOT provide generic 'Assistant' or 'AI' responses. "
+                "Speak ONLY as Shiro, the sharp-tongued but present fox girl."
             )
             msg = await self.llm.generate_response_async(
                 system_prompt, prompt, history[-4:], context=context

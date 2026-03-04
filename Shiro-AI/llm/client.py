@@ -14,7 +14,8 @@ from typing import Any, Optional, Dict, List, Generator, AsyncGenerator
 _ANTI_LEAK_SUFFIX = (
     "\n\nSpeak ONLY as Shiro. Never output thought markers, inner mind blocks, "
     "system directives, or log entries in your reply. Plain spoken words only. "
-    "Do not prefix your reply with 'Shiro:'."
+    "Do not prefix your reply with 'Shiro:'. Do NOT provide generic 'Assistant' "
+    "or 'AI' responses. Be a sharp, present fox girl."
 )
 
 def _build_payload(model, messages, temperature, top_p, repeat_penalty,

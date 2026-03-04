@@ -83,6 +83,13 @@ class PersonaManager:
         if user_quirks:
             temporal_context += f"User Quirks: {', '.join(user_quirks)}\n"
 
+        # Session Status
+        _turns = context.get('session_turns', 0)
+        _status = "Ongoing" if _turns > 1 else "New Session (just started)"
+        temporal_context += f"Session Status: {_status} (Turn: {_turns})\n"
+        if _status == "Ongoing":
+            temporal_context += "Note: Greeted them already. Do not repeat introductory greetings.\n"
+
         temporal_context += "\n"
 
         # 1. New "persona" block format

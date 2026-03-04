@@ -212,6 +212,9 @@ class SpeechCadence:
         Adapt Shiro's output text to match a user's register.
         Strength scales with number of samples (gradual, not jarring).
         """
+        if not text or not text.strip():
+            return text
+
         m = self.user_models.get(user_id, self.global_model)
         if m.samples < 3:
             return text
@@ -307,12 +310,16 @@ class SpeechCadence:
         add a natural follow-on bridge so it doesn't feel dismissive.
         Doesn't add information — just makes the reply feel less abrupt.
         """
+        if not text or not text.strip():
+            return text
+
         bridges = [
-            " — what do you think?",
-            " does that track?",
-            " what's your take?",
-            " i'm curious what you'd say to that",
-            " tell me more about your angle on this",
+            " — don't you think?",
+            " — if that makes sense.",
+            " — anyway...",
+            " — just saying.",
+            " — what's your take?",
+            " — you know?",
         ]
         # Only add bridge if text doesn't already end in a question
         if not text.rstrip().endswith("?"):
