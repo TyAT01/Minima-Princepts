@@ -126,30 +126,29 @@ class ShiroApp:
         self.active_users.add(user_name)
         logging.info(f"User {user_name} joined.")
 
-        # [V4 UPGRADE] Sync join to engine
-        self.engine.on_user_join(user_name)
+        # [V4 UPGRADE] Sync join to engine and get potential greeting
+        # engine.on_user_join handles timing logic and decides whether to speak or stay silent.
+        greeting_gen = self.engine.on_user_join(user_name)
 
-        # Determine greeting mode based on last interaction time
-        last_seen = self.engine.memory.get_last_interaction_time(user_name)
+        if greeting_gen is None:
+            # Engine chose silence (watchful waiting)
+            return []
 
-        if last_seen:
-            delta = datetime.now(timezone.utc) - last_seen
-            if delta.total_seconds() < 7200:  # Returned within 2 hours
-                mode = "returning_soon"
-            else:  # Long absence — guarded, slightly suspicious
-                mode = "returning_long"
-        else:
-            mode = "new"  # First time ever
-
-        # Each call picks a fresh variant from the pool — Shiro never sounds identical
-        prompt = self.engine.get_greeting_prompt(user_name, mode)
-        resp = list(self.process_text(prompt, user_name))
-
-        # Fallback: if LLM returns nothing, use a randomised in-character string
-        if not resp or not any(r.strip() for r in resp):
-            return [self.engine.get_fallback_greeting(user_name, mode)]
-
-        return resp
+        # Convert generator to list for UI return
+        try:
+            resp = list(greeting_gen)
+            if not resp or not any(r.strip() for r in resp):
+                # Fallback if generation failed
+                last_seen = self.engine.memory.get_last_interaction_time(user_name)
+                mode = "new"
+                if last_seen:
+                    delta = datetime.now(timezone.utc) - last_seen
+                    mode = "returning_soon" if delta.total_seconds() < 7200 else "returning_long"
+                return [self.engine.get_fallback_greeting(user_name, mode)]
+            return resp
+        except Exception as e:
+            logging.warning(f"Error yielding greeting: {e}")
+            return []
 
     def handle_user_leave(self, user_name: str):
         """Handles a user leaving the chat room."""
