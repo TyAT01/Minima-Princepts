@@ -313,8 +313,6 @@ class ShiroEngine:
         self.intensity = 0.5
         self._hmph_counter = 0
         self._hmph_session_count = 0
-        self._last_response_text: str = ""          # dedup guard for autonomous voice
-        self._last_response_ts: float = 0.0         # timestamp of last response
 
         # v4 Consciousness Core
         self.bus = EventBus()
@@ -373,6 +371,8 @@ class ShiroEngine:
         self._greeting_silent = False  # set True when silence chosen on join
         self._user_is_typing = False   # set by UI; suppresses autonomous messages
         self._user_typing_ts = 0.0     # timestamp when typing started
+        self._last_response_ts: float = 0.0        # for autonomous dedup guard
+        self._last_response_text: str = ""         # for autonomous similarity guard
         self._load_session_objectives()
         self.brain_file = base_path / "shiro_brain.json"
         self.core_anchors = {
@@ -465,15 +465,18 @@ class ShiroEngine:
         Idle loop — fires when Shiro has been quiet for a while.
         Replaced canned AutonomousVoice strings with live LLM-generated messages
         so every autonomous message is grounded in real context, never scripted.
-        Variable timing (30-90s) so she doesn't feel like a chatbot on a timer.
+
+        Timing: checks every 15-40s, fires when idle_s > 40s.
+        This means Shiro can speak up during natural conversation pauses (40-60s gaps)
+        without being suppressed by the 30-90s sleep that previously made it feel dead.
         """
         while True:
-            # Variable wait: 30-90 seconds. Feels organic, not robotic.
-            await asyncio.sleep(random.uniform(30.0, 90.0))
+            # Shorter check interval — 15-40s — so we don't miss a natural pause
+            await asyncio.sleep(random.uniform(15.0, 40.0))
             idle_s = (datetime.now(timezone.utc) - self.last_interaction_time).total_seconds()
             present = [p for p in self.awareness.users.values() if p.present]
 
-            if not present or idle_s < 45.0 or self.processing_lock.locked():
+            if not present or idle_s < 40.0 or self.processing_lock.locked():
                 # Nobody home, just spoke, or system is busy — stay quiet
                 continue
 
@@ -730,6 +733,7 @@ class ShiroEngine:
                 # ── FIX: Explicit anti-leak rules injected into every system prompt ──
                 # FIX: Removed [CRITICAL RULES] bracket header — plain prose is less likely
                 # to be echoed as output format. Added explicit no-fabrication rule.
+                _humor_hint = self.awareness.humor_context_hint(user_name)
                 anti_leak = (
                     "\n\nCRITICAL RULES — follow every time:\n"
                     "1. NEVER output meta-blocks in your spoken reply: no [THOUGHT], [INNER MIND],"
@@ -741,6 +745,7 @@ class ShiroEngine:
                     " said in this conversation. If you don't know something, say so.\n"
                     " Do not invent facts, events, or details about the user to fill conversation.\n"
                     "5. Match reply length to the message — brief messages deserve brief replies."
+                    + (f"\n6. HUMOR/TONE: {_humor_hint}" if _humor_hint else "")
                 )
 
                 # FIX: Removed [Current Intensity: X.XX] bracket token — intensity is
@@ -904,6 +909,12 @@ class ShiroEngine:
                 # Final safety pass — strip any leaked meta that survived everything else
                 full_response = self._final_sanitize(full_response)
 
+                # Track for autonomous voice dedup guards
+                if full_response.strip():
+                    import time as _ts_time
+                    self._last_response_ts = _ts_time.time()
+                    self._last_response_text = full_response.strip()
+
                 # If truncated at token limit, trim to last complete sentence
                 if _was_truncated and full_response:
                     full_response = self._trim_to_sentence(full_response)
@@ -921,9 +932,6 @@ class ShiroEngine:
                     else:
                         _remaining_bubbles = []
                         _resp_for_bg = full_response
-                    # Track for autonomous dedup
-                    self._last_response_text = full_response.strip()
-                    self._last_response_ts = time.time()
                 else:
                     _remaining_bubbles = []
                     _resp_for_bg = ""
@@ -985,20 +993,20 @@ class ShiroEngine:
 
                     threading.Thread(target=_background_writes, daemon=True).start()
 
-                    # Deliver remaining bubbles after typing-paced delays.
-                    # speech_type="bubble_continuation" tags these so main.py and
-                    # poll_results can handle them as chat-room follow-up messages,
-                    # not autonomous thoughts. They are NOT re-added to memory here —
+                    # Fix 2: Send remaining bubbles after a short delay
+                    # Deliver remaining bubbles with typing-speed delays.
+                    # speech_type="bubble_continuation" distinguishes these from
+                    # autonomous thoughts. They are NOT re-stored in memory —
                     # the full response was already stored above.
                     if _remaining_bubbles and self.on_autonomous_speak:
                         _is_async_speak = asyncio.iscoroutinefunction(self.on_autonomous_speak)
                         def _send_bubbles(bubbles, uname, is_async=_is_async_speak):
                             import time as _t
                             for i, bubble in enumerate(bubbles):
-                                # Typing delay: base 0.6s + ~0.04s per word (feels like typing)
+                                # Typing delay: ~0.05s per word, min 0.7s, max 2.8s
                                 word_count = len(bubble.split())
-                                delay = 0.6 + (word_count * 0.04)
-                                _t.sleep(min(delay, 2.5))  # cap at 2.5s so it never feels laggy
+                                delay = max(0.7, min(2.8, word_count * 0.055))
+                                _t.sleep(delay)
                                 if not self.on_autonomous_speak:
                                     break
                                 if is_async:
@@ -1443,48 +1451,51 @@ class ShiroEngine:
         """
         Split a full response into natural multi-message bubbles.
 
-        Short responses (1-2 sentences) stay as one bubble.
-        Longer responses split at sentence boundaries into 1-2 sentence groups,
-        mimicking how a real person types in a chat room: quick bursts, not walls.
+        Short responses (≤2 real sentences) stay as one bubble.
+        Longer responses split into 1-2 sentence groups — mimics how a real
+        person types in a chat room: quick bursts, not walls of text.
 
         Bubbles 2+ are delivered via on_autonomous_speak("bubble_continuation")
-        with inter-bubble delays that scale with length — mimicking typing time.
-        They are NOT re-stored in short_term_buffer (full response already there).
+        with typing-speed-scaled delays. They are NOT re-stored in memory
+        (the full response is already there) to prevent echo/repetition.
 
-        ARTIFACT GUARD: Filters out empty bubbles and `. .` / `…` orphans that
-        arise from Shiro's ellipsis speech patterns being split mid-ellipsis.
+        ARTIFACT GUARD: Normalises ". ." / ". …" ellipsis patterns before
+        splitting so Shiro's trailing-off speech style doesn't create
+        orphaned single-dot bubbles.
         """
         import re as _re
         text = text.strip()
         if not text:
             return [text]
 
-        # Split on sentence-ending punctuation followed by whitespace
-        # But NOT on `. .` or `. …` patterns (those are speech ellipses, not sentence ends)
-        # First normalize `. .` and `. …` to actual ellipsis so they survive splitting
-        text = _re.sub(r'\.\s+\.\s*\.?', '…', text)   # ". ." → "…"
-        text = _re.sub(r'\.\s+…', '…', text)            # ". …" → "…"
+        # Normalise ellipsis artifacts before splitting
+        # ". ." → "…"   |   ". …" → "…"   |   ".. " → "… "
+        text = _re.sub(r'\.\s+\.\s*\.?', '…', text)
+        text = _re.sub(r'\.\s+…', '…', text)
 
+        # Split ONLY where a sentence-ending char is followed by whitespace
+        # AND then an uppercase letter — avoids splitting on abbreviations,
+        # "no cap. fr" or Shiro's lowercase fragmented speech.
         sentence_endings = _re.compile(r'(?<=[.!?])\s+(?=[A-Z])')
         sentences = [s.strip() for s in sentence_endings.split(text) if s.strip()]
 
-        # Filter out anything that's just punctuation/whitespace (artifact bubbles)
+        # Filter artifact fragments (anything that's mostly punctuation)
         sentences = [s for s in sentences if len(_re.sub(r'[^\w]', '', s)) >= 2]
 
         if len(sentences) <= 2:
-            return [text] if text else []
+            return [text]  # short — keep as single bubble
 
         # Group into 1-2 sentence bubbles.
-        # Very short sentences (< 8 words) get grouped with the next one.
+        # Very short groups (< 10 words) absorb the next sentence.
         bubbles = []
         group = []
         for i, sent in enumerate(sentences):
             group.append(sent)
             word_count = sum(len(s.split()) for s in group)
             last_sent = (i == len(sentences) - 1)
-            if len(group) >= 2 or (word_count >= 12 and not last_sent) or last_sent:
+            if len(group) >= 2 or (word_count >= 10 and not last_sent) or last_sent:
                 combined = ' '.join(group)
-                if len(_re.sub(r'[^\w]', '', combined)) >= 2:  # not just punctuation
+                if len(_re.sub(r'[^\w]', '', combined)) >= 2:
                     bubbles.append(combined)
                 group = []
 
@@ -1570,61 +1581,78 @@ class ShiroEngine:
 
     async def _generate_live_autonomous_message(self, user_name):
         """
-        LLM-driven autonomous message grounded in real conversation context.
-        Replaces canned strings. Result is stored in memory so Shiro recalls it.
+        LLM-driven autonomous message — Neuro-sama association style.
 
-        DEDUP GUARD: Will return "" if:
-          - Shiro responded within the last 60 seconds (too soon to follow up)
-          - Generated message overlaps too heavily with the last response
+        Shiro can follow a thought from the current topic into a related memory,
+        observation, or tangent and surface it naturally in context.
+        Examples:
+          "speaking of snacks, I keep thinking about this one ramen..."
+          "that actually reminds me — you mentioned X earlier and I..."
+          "random but I was just thinking about..."
+
+        Guards: recency (30s), similarity dedup (0.45 threshold).
         """
         try:
+            import time as _t
             import datetime as _dt
 
-            # Guard 1: Recency — don't fire within 30s of the last response
-            elapsed = time.time() - self._last_response_ts
+            # Guard 1: Recency
+            elapsed = _t.time() - getattr(self, '_last_response_ts', 0.0)
             if elapsed < 30.0:
-                logger.debug(f"Autonomous suppressed: only {elapsed:.0f}s since last response")
                 return ""
 
             history = self.memory.get_history()
             if not history:
                 return ""
+
             recent_ctx = "\n".join(
                 f"{m['role'].title()}: {m['content']}" for m in history[-6:]
             )
             context = await self.memory.get_full_context_async(
-                "recent thoughts", user_id=user_name
+                "recent thoughts curiosity memories", user_id=user_name
             )
             last_thought = self.last_thought or ""
+            last_said = getattr(self, '_last_response_text', '')[:120]
+
             system_prompt = self.persona.get_system_prompt(
                 now=_dt.datetime.now(),
                 relationship_tier=self.legacy_mind.relationship.level.name.lower(),
             ) + "\n" + self.outfit_block()
-            # Move last_thought into system prompt context, not user prompt.
-            # Quoting it in the user prompt caused the LLM to echo it verbatim.
             if last_thought:
                 system_prompt += f"\n[Inner state: {last_thought}]"
-            last_said = self._last_response_text[:120] if self._last_response_text else ""
+
             prompt = (
                 f"Recent conversation:\n{recent_ctx}\n\n"
-                + (f"You already said this recently: \"{last_said}\" — do NOT repeat or rephrase it.\n\n" if last_said else "")
-                + "The user hasn't replied yet. You have something on your mind. "
-                "Say it — a new thought, a follow-up question, a reaction to something they said earlier, "
-                "or something you just thought of. Be proactive. Be Shiro. "
-                "One or two sentences max. No greetings. No meta-commentary. Just say it naturally."
+                + (f"You already said this — do NOT repeat or rephrase: \"{last_said}\"\n\n"
+                   if last_said else "")
+                + "You have a moment to speak freely. Options (pick the most natural):\n"
+                "  A) Follow an association from the topic into something you remember or noticed\n"
+                "  B) Share a thought sitting on your mind from earlier in the chat\n"
+                "  C) React to something they said that you didn't fully respond to\n"
+                "  D) Ask something you're genuinely curious about — real, not small talk\n\n"
+                "Rules:\n"
+                "- 1-2 sentences only. Natural, not formal.\n"
+                "- Bridge associations naturally: 'speaking of X, I was just thinking...'\n"
+                "- Do NOT greet them. Do NOT repeat yourself. Just speak.\n"
+                "- Be Shiro — proactive, genuine, a little fox-brained in the best way.\n"
+                "- Only reference things from the conversation or Shiro's own thoughts/memories.\n"
+                "- Do NOT invent facts about the user."
             )
             msg = await self.llm.generate_response_async(
                 system_prompt, prompt, history[-4:], context=context
             )
             msg = self._final_sanitize(msg.strip())
 
-            # Guard 2: Similarity — block if message echoes the last response
-            if msg and self._last_response_text:
-                from utils.text_utils import calculate_text_similarity
-                sim = calculate_text_similarity(msg, self._last_response_text)
-                if sim >= 0.45:
-                    logger.info(f"Autonomous suppressed (similarity={sim:.2f} to last response)")
-                    return ""
+            # Guard 2: Similarity — don't echo last response
+            if msg and last_said:
+                try:
+                    from text_utils import calculate_text_similarity
+                    sim = calculate_text_similarity(msg, last_said)
+                    if sim >= 0.45:
+                        logger.debug(f"Autonomous suppressed (similarity={sim:.2f})")
+                        return ""
+                except Exception:
+                    pass
 
             return msg
         except Exception as e:
