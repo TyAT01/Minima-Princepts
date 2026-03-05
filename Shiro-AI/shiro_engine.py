@@ -313,6 +313,8 @@ class ShiroEngine:
         self.intensity = 0.5
         self._hmph_counter = 0
         self._hmph_session_count = 0
+        self._last_response_text: str = ""          # dedup guard for autonomous voice
+        self._last_response_ts: float = 0.0         # timestamp of last response
 
         # v4 Consciousness Core
         self.bus = EventBus()
@@ -471,7 +473,7 @@ class ShiroEngine:
             idle_s = (datetime.now(timezone.utc) - self.last_interaction_time).total_seconds()
             present = [p for p in self.awareness.users.values() if p.present]
 
-            if not present or idle_s < 20.0 or self.processing_lock.locked():
+            if not present or idle_s < 90.0 or self.processing_lock.locked():
                 # Nobody home, just spoke, or system is busy — stay quiet
                 continue
 
@@ -919,6 +921,9 @@ class ShiroEngine:
                     else:
                         _remaining_bubbles = []
                         _resp_for_bg = full_response
+                    # Track for autonomous dedup
+                    self._last_response_text = full_response.strip()
+                    self._last_response_ts = time.time()
                 else:
                     _remaining_bubbles = []
                     _resp_for_bg = ""
@@ -1431,37 +1436,22 @@ class ShiroEngine:
 
     def _split_into_bubbles(self, text: str) -> list:
         """
-        Split a full response into natural multi-message bubbles.
-        Short responses (1-2 sentences) stay as one bubble.
-        Longer responses split at natural sentence boundaries into 2-3 sentence groups.
-        Each bubble should feel like a complete thought — not mid-sentence.
+        FIX: Bubble splitting disabled — always return as a single bubble.
+
+        Background: splitting responses into multiple bubbles caused them to be
+        delivered via on_autonomous_speak → poll_results → appended as separate
+        standalone chat messages. Because the full response was already stored in
+        short_term_buffer, bubbles 2+ would arrive as apparent echoes of what
+        Shiro just said, making it look like she was repeating herself.
+
+        Gradio's streaming chatbot updates the single assistant message in-place,
+        so multi-bubble splitting provides no UX benefit here and only causes
+        the repetition bug. Keep all responses as one message.
         """
-        import re as _re
         text = text.strip()
         if not text:
             return [text]
-
-        # Split at sentence endings
-        sentence_endings = _re.compile(r'(?<=[.!?])\s+')
-        sentences = [s.strip() for s in sentence_endings.split(text) if s.strip()]
-
-        if len(sentences) <= 2:
-            return [text]  # short enough — keep as one bubble
-
-        # Group into bubbles of 2 sentences each
-        # This keeps each message feeling quick and natural
-        bubbles = []
-        group = []
-        for i, sent in enumerate(sentences):
-            group.append(sent)
-            # Yield after every 2 sentences, or at end
-            if len(group) >= 2 or i == len(sentences) - 1:
-                bubbles.append(' '.join(group))
-                group = []
-
-        if not bubbles:
-            return [text]
-        return bubbles
+        return [text]
 
 
     def _trim_to_sentence(self, text: str) -> str:
@@ -1545,8 +1535,20 @@ class ShiroEngine:
         """
         LLM-driven autonomous message grounded in real conversation context.
         Replaces canned strings. Result is stored in memory so Shiro recalls it.
+
+        DEDUP GUARD: Will return "" if:
+          - Shiro responded within the last 60 seconds (too soon to follow up)
+          - Generated message overlaps too heavily with the last response
         """
         try:
+            import datetime as _dt
+
+            # Guard 1: Recency — don't fire within 60s of the last response
+            elapsed = time.time() - self._last_response_ts
+            if elapsed < 60.0:
+                logger.debug(f"Autonomous suppressed: only {elapsed:.0f}s since last response")
+                return ""
+
             import datetime as _dt
             history = self.memory.get_history()
             if not history:
@@ -1578,7 +1580,17 @@ class ShiroEngine:
             msg = await self.llm.generate_response_async(
                 system_prompt, prompt, history[-4:], context=context
             )
-            return self._final_sanitize(msg.strip())
+            msg = self._final_sanitize(msg.strip())
+
+            # Guard 2: Similarity — block if message echoes the last response
+            if msg and self._last_response_text:
+                from utils.text_utils import calculate_text_similarity
+                sim = calculate_text_similarity(msg, self._last_response_text)
+                if sim >= 0.45:
+                    logger.info(f"Autonomous suppressed (similarity={sim:.2f} to last response)")
+                    return ""
+
+            return msg
         except Exception as e:
             logger.warning(f"Live autonomous message failed: {e}")
             return ""
