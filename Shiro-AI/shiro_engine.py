@@ -473,7 +473,7 @@ class ShiroEngine:
             idle_s = (datetime.now(timezone.utc) - self.last_interaction_time).total_seconds()
             present = [p for p in self.awareness.users.values() if p.present]
 
-            if not present or idle_s < 90.0 or self.processing_lock.locked():
+            if not present or idle_s < 45.0 or self.processing_lock.locked():
                 # Nobody home, just spoke, or system is busy — stay quiet
                 continue
 
@@ -985,23 +985,28 @@ class ShiroEngine:
 
                     threading.Thread(target=_background_writes, daemon=True).start()
 
-                    # Fix 2: Send remaining bubbles after a short delay
+                    # Deliver remaining bubbles after typing-paced delays.
+                    # speech_type="bubble_continuation" tags these so main.py and
+                    # poll_results can handle them as chat-room follow-up messages,
+                    # not autonomous thoughts. They are NOT re-added to memory here —
+                    # the full response was already stored above.
                     if _remaining_bubbles and self.on_autonomous_speak:
                         _is_async_speak = asyncio.iscoroutinefunction(self.on_autonomous_speak)
                         def _send_bubbles(bubbles, uname, is_async=_is_async_speak):
                             import time as _t
                             for i, bubble in enumerate(bubbles):
-                                _t.sleep(0.8 + i * 0.4)  # short delay between bubbles
+                                # Typing delay: base 0.6s + ~0.04s per word (feels like typing)
+                                word_count = len(bubble.split())
+                                delay = 0.6 + (word_count * 0.04)
+                                _t.sleep(min(delay, 2.5))  # cap at 2.5s so it never feels laggy
                                 if not self.on_autonomous_speak:
                                     break
-                                # Removed redundant short_term_buffer append here.
-                                # The full response is already added to history/buffer in the main thread.
                                 if is_async:
                                     self._safe_async_run(
-                                        self.on_autonomous_speak(bubble, "continuation")
+                                        self.on_autonomous_speak(bubble, "bubble_continuation")
                                     )
                                 else:
-                                    self.on_autonomous_speak(bubble, "continuation")
+                                    self.on_autonomous_speak(bubble, "bubble_continuation")
                                 logger.info(f"[BUBBLE {i+2}]: {bubble[:60]}")
                         threading.Thread(
                             target=_send_bubbles,
@@ -1436,22 +1441,41 @@ class ShiroEngine:
 
     def _split_into_bubbles(self, text: str) -> list:
         """
-        FIX: Bubble splitting disabled — always return as a single bubble.
+        Split a full response into natural multi-message bubbles.
 
-        Background: splitting responses into multiple bubbles caused them to be
-        delivered via on_autonomous_speak → poll_results → appended as separate
-        standalone chat messages. Because the full response was already stored in
-        short_term_buffer, bubbles 2+ would arrive as apparent echoes of what
-        Shiro just said, making it look like she was repeating herself.
+        Short responses (1-2 sentences) stay as one bubble.
+        Longer responses split at sentence boundaries into 1-2 sentence groups,
+        mimicking how a real person types in a chat room: quick bursts, not walls.
 
-        Gradio's streaming chatbot updates the single assistant message in-place,
-        so multi-bubble splitting provides no UX benefit here and only causes
-        the repetition bug. Keep all responses as one message.
+        Bubbles 2+ are delivered via on_autonomous_speak("bubble_continuation")
+        with inter-bubble delays that scale with length — mimicking typing time.
+        They are NOT re-stored in short_term_buffer (full response already there).
         """
+        import re as _re
         text = text.strip()
         if not text:
             return [text]
-        return [text]
+
+        # Split on sentence-ending punctuation followed by whitespace
+        sentence_endings = _re.compile(r'(?<=[.!?…])\s+')
+        sentences = [s.strip() for s in sentence_endings.split(text) if s.strip()]
+
+        if len(sentences) <= 2:
+            return [text]  # short — keep as one bubble
+
+        # Group into 1-2 sentence bubbles.
+        # Very short sentences (< 8 words) get grouped with the next one.
+        bubbles = []
+        group = []
+        for i, sent in enumerate(sentences):
+            group.append(sent)
+            word_count = sum(len(s.split()) for s in group)
+            last_sent = (i == len(sentences) - 1)
+            if len(group) >= 2 or (word_count >= 12 and not last_sent) or last_sent:
+                bubbles.append(' '.join(group))
+                group = []
+
+        return bubbles if bubbles else [text]
 
 
     def _trim_to_sentence(self, text: str) -> str:
@@ -1543,13 +1567,12 @@ class ShiroEngine:
         try:
             import datetime as _dt
 
-            # Guard 1: Recency — don't fire within 60s of the last response
+            # Guard 1: Recency — don't fire within 30s of the last response
             elapsed = time.time() - self._last_response_ts
-            if elapsed < 60.0:
+            if elapsed < 30.0:
                 logger.debug(f"Autonomous suppressed: only {elapsed:.0f}s since last response")
                 return ""
 
-            import datetime as _dt
             history = self.memory.get_history()
             if not history:
                 return ""
@@ -1568,14 +1591,14 @@ class ShiroEngine:
             # Quoting it in the user prompt caused the LLM to echo it verbatim.
             if last_thought:
                 system_prompt += f"\n[Inner state: {last_thought}]"
+            last_said = self._last_response_text[:120] if self._last_response_text else ""
             prompt = (
                 f"Recent conversation:\n{recent_ctx}\n\n"
-                "Say something short and natural right now — a reaction, "
-                "follow-up, or question. One or two sentences. Just say it. "
-                "IMPORTANT: Do NOT greet them or say things like 'welcome back' or 'you just showed up' "
-                "— you are already in the middle of a conversation. "
-                "Do NOT provide generic 'Assistant' or 'AI' responses. "
-                "Speak ONLY as Shiro, the sharp-tongued but present fox girl."
+                + (f"You already said this recently: \"{last_said}\" — do NOT repeat or rephrase it.\n\n" if last_said else "")
+                + "The user hasn't replied yet. You have something on your mind. "
+                "Say it — a new thought, a follow-up question, a reaction to something they said earlier, "
+                "or something you just thought of. Be proactive. Be Shiro. "
+                "One or two sentences max. No greetings. No meta-commentary. Just say it naturally."
             )
             msg = await self.llm.generate_response_async(
                 system_prompt, prompt, history[-4:], context=context
