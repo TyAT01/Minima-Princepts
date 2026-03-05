@@ -1450,6 +1450,9 @@ class ShiroEngine:
         Bubbles 2+ are delivered via on_autonomous_speak("bubble_continuation")
         with inter-bubble delays that scale with length — mimicking typing time.
         They are NOT re-stored in short_term_buffer (full response already there).
+
+        ARTIFACT GUARD: Filters out empty bubbles and `. .` / `…` orphans that
+        arise from Shiro's ellipsis speech patterns being split mid-ellipsis.
         """
         import re as _re
         text = text.strip()
@@ -1457,11 +1460,19 @@ class ShiroEngine:
             return [text]
 
         # Split on sentence-ending punctuation followed by whitespace
-        sentence_endings = _re.compile(r'(?<=[.!?…])\s+')
+        # But NOT on `. .` or `. …` patterns (those are speech ellipses, not sentence ends)
+        # First normalize `. .` and `. …` to actual ellipsis so they survive splitting
+        text = _re.sub(r'\.\s+\.\s*\.?', '…', text)   # ". ." → "…"
+        text = _re.sub(r'\.\s+…', '…', text)            # ". …" → "…"
+
+        sentence_endings = _re.compile(r'(?<=[.!?])\s+(?=[A-Z])')
         sentences = [s.strip() for s in sentence_endings.split(text) if s.strip()]
 
+        # Filter out anything that's just punctuation/whitespace (artifact bubbles)
+        sentences = [s for s in sentences if len(_re.sub(r'[^\w]', '', s)) >= 2]
+
         if len(sentences) <= 2:
-            return [text]  # short — keep as one bubble
+            return [text] if text else []
 
         # Group into 1-2 sentence bubbles.
         # Very short sentences (< 8 words) get grouped with the next one.
@@ -1472,7 +1483,9 @@ class ShiroEngine:
             word_count = sum(len(s.split()) for s in group)
             last_sent = (i == len(sentences) - 1)
             if len(group) >= 2 or (word_count >= 12 and not last_sent) or last_sent:
-                bubbles.append(' '.join(group))
+                combined = ' '.join(group)
+                if len(_re.sub(r'[^\w]', '', combined)) >= 2:  # not just punctuation
+                    bubbles.append(combined)
                 group = []
 
         return bubbles if bubbles else [text]
