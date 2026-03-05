@@ -31,6 +31,22 @@ if TYPE_CHECKING:
 _EMOTION_SIGNALS: list[tuple[str, re.Pattern, float]] = [
     ("happy",     re.compile(r"\b(happy|glad|yay|woohoo|great|wonderful|love|😊|😄|🥰|❤️)\b", re.I), 1.0),
     ("humor",     re.compile(r"\b(lol|lmao|haha|hehe|😂|🤣|💀|xd|lmfao)\b", re.I), 1.0),
+    # Sarcasm: contradiction signals, "wow so helpful", "yeah right", exaggerated praise
+    ("sarcasm",   re.compile(
+        r"\b(yeah right|sure sure|oh wow|oh great|totally|sooo helpful|gee thanks|"
+        r"oh obviously|of course you did|great job|wow amazing|genius)\b"
+        r"|(\bjust kidding\b|\bjk\b|\bkidding\b|\bi'm kidding\b)"
+        r"|(/s\b)"  # reddit sarcasm marker
+        r"|(🙄|😒|😑|🤨)", re.I), 0.9),
+    # Teasing / playful ribbing — affectionate but challenging
+    ("teasing",   re.compile(
+        r"\b(goob|goober|goofy|dork|nerd|dummy|doofus|silly|you're the worst|"
+        r"smh|facepalm|oh brother|oh please|suuure|okaaay|riight|pfft|pff)\b"
+        r"|(🙃|😜|😝|😏|😤)", re.I), 0.8),
+    # Endearment — affectionate nicknames or compliments disguised as insults
+    ("endearment", re.compile(
+        r"\b(goob|goober|dummy|dork|little|sweetie|babe|buddy|pal|foxy|fox girl|"
+        r"term of endearment|not an insult|affectionate)\b", re.I), 0.7),
     ("excited",   re.compile(r"[!]{2,}|\b(omg|wow|whoa|holy|yesss|hyped)\b", re.I), 0.9),
     ("sad",       re.compile(r"\b(sad|depressed|unhappy|miserable|crying)\b|😢|😭", re.I), 1.0),
     ("angry",     re.compile(r"\b(angry|mad|furious|pissed|wtf|ugh|😤|😠|🤬)\b", re.I), 1.0),
@@ -341,6 +357,14 @@ class SelfAwareness:
         self._last_humor_ts: float = 0.0
         self._last_high_energy_ts: float = 0.0
         self._last_complex_ts: float = 0.0
+        self._last_sarcasm_ts: float = 0.0
+        self._last_teasing_ts: float = 0.0
+
+        # Per-user humor/sarcasm learning — tracks style over time so Shiro
+        # can adapt how she responds to jokes, teasing, and endearment.
+        # Stored as: { user_id: { "sarcasm_count": int, "teasing_count": int,
+        #   "endearment_words": set, "humor_style": str, "learned_nicknames": set } }
+        self._humor_profiles: dict[str, dict] = {}
 
         # Cross-session behavioral profiles
         self.behavior_profiles: dict[str, "BehaviorProfile"] = {}
@@ -427,10 +451,50 @@ class SelfAwareness:
 
         if "humor" in emotions:
             self._last_humor_ts = now
+        if "sarcasm" in emotions:
+            self._last_sarcasm_ts = now
+        if "teasing" in emotions:
+            self._last_teasing_ts = now
         if is_high:
             self._last_high_energy_ts = now
         if is_complex:
             self._last_complex_ts = now
+
+        # ── Update per-user humor/sarcasm learning profile ───────────────
+        hp = self._humor_profiles.setdefault(user_id, {
+            "sarcasm_count": 0, "teasing_count": 0, "humor_count": 0,
+            "endearment_words": [], "learned_nicknames": [], "humor_style": "unknown"
+        })
+        if "sarcasm" in emotions:
+            hp["sarcasm_count"] += 1
+        if "teasing" in emotions:
+            hp["teasing_count"] += 1
+        if "humor" in emotions:
+            hp["humor_count"] += 1
+        if "endearment" in emotions:
+            # Extract specific endearment words used so Shiro learns them
+            import re as _re
+            endearment_re = _re.compile(
+                r"\b(goob|goober|dummy|dork|foxy|buddy|pal|babe|sweetie|silly)\b", _re.I)
+            found = endearment_re.findall(text)
+            for w in found:
+                w_lower = w.lower()
+                if w_lower not in hp["endearment_words"]:
+                    hp["endearment_words"].append(w_lower)
+                if w_lower not in hp["learned_nicknames"]:
+                    hp["learned_nicknames"].append(w_lower)
+
+        # Infer dominant humor style after enough samples
+        total_humor = hp["sarcasm_count"] + hp["teasing_count"] + hp["humor_count"]
+        if total_humor >= 3:
+            if hp["sarcasm_count"] > hp["teasing_count"] and hp["sarcasm_count"] > hp["humor_count"]:
+                hp["humor_style"] = "sarcastic"
+            elif hp["teasing_count"] > hp["sarcasm_count"]:
+                hp["humor_style"] = "teasing"
+            elif hp["humor_count"] > hp["sarcasm_count"]:
+                hp["humor_style"] = "playful"
+            else:
+                hp["humor_style"] = "mixed"
 
         old_tier = p.relationship_tier()
         p.relationship_score = min(100.0, p.relationship_score + 0.4)
@@ -547,6 +611,42 @@ class SelfAwareness:
 
     def is_humor_detected(self) -> bool:
         return (time.time() - self._last_humor_ts) < 30.0
+
+    def is_sarcasm_detected(self) -> bool:
+        return (time.time() - self._last_sarcasm_ts) < 20.0
+
+    def is_teasing_detected(self) -> bool:
+        return (time.time() - self._last_teasing_ts) < 20.0
+
+    def get_humor_profile(self, user_id: str) -> dict:
+        """Return the learned humor/sarcasm style for a user."""
+        return self._humor_profiles.get(user_id, {
+            "sarcasm_count": 0, "teasing_count": 0, "humor_count": 0,
+            "endearment_words": [], "learned_nicknames": [], "humor_style": "unknown"
+        })
+
+    def humor_context_hint(self, user_id: str) -> str:
+        """Return a natural-language hint for the LLM about this user's humor style.
+        Injected into the system prompt so Shiro can respond appropriately."""
+        hp = self.get_humor_profile(user_id)
+        style = hp.get("humor_style", "unknown")
+        nicknames = hp.get("learned_nicknames", [])
+        parts = []
+        if style == "sarcastic":
+            parts.append("Tyler often uses sarcasm — take it with a grain of salt, match the dry wit")
+        elif style == "teasing":
+            parts.append("Tyler likes to tease affectionately — give it right back, don't be defensive")
+        elif style == "playful":
+            parts.append("Tyler has a playful sense of humor — be loose and fun in return")
+        elif style == "mixed":
+            parts.append("Tyler mixes sarcasm and playful teasing — read the room each time")
+        if nicknames:
+            parts.append(f"Tyler uses these as terms of affection, not insults: {', '.join(nicknames)}")
+        if self.is_sarcasm_detected():
+            parts.append("Tyler was JUST being sarcastic — respond to the actual meaning, not the surface words")
+        if self.is_teasing_detected():
+            parts.append("Tyler is teasing right now — play along, don't take it literally")
+        return ". ".join(parts) if parts else ""
 
     def is_high_energy(self) -> bool:
         return (time.time() - self._last_high_energy_ts) < 20.0
