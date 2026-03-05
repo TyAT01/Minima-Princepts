@@ -1790,7 +1790,28 @@ class ShiroInnerMind:
         return top
 
     def _memorize(self, user_message: str, response: str):
-        """Store episodic memory, skip if near-duplicate exists."""
+        """Store episodic memory, skip if near-duplicate exists.
+
+        CONTAMINATION GUARD: Reject messages that are system directives,
+        inner mind blocks, or greeting prompts — these should never be stored
+        as memories because they'd get recalled and re-injected as behavioral
+        instructions, causing Shiro to repeat stale greetings and fabricate context.
+        """
+        import re as _re
+        _DIRECTIVE_PATTERNS = [
+            r'^\(LOG:',
+            r'^\[SHIRO',
+            r'^\[SYSTEM',
+            r'^SYSTEM DIRECTIVE',
+            r'Reply as Shiro speaking',
+            r'Shiro, be cautious',
+            r'Shiro, say a simple',
+            r'Tyler just arrived',
+        ]
+        for pat in _DIRECTIVE_PATTERNS:
+            if _re.search(pat, user_message.strip(), _re.IGNORECASE):
+                return  # reject — this is a system directive, not a real user message
+
         topic    = self._top_interest() or "general"
         tokens   = _tokenize(user_message + " " + response)
         tf_raw   = _build_tfidf(tokens)
@@ -1838,9 +1859,24 @@ class ShiroInnerMind:
             mem.apply_importance_decay()
 
     def _rebuild_hot_cache(self):
-        """Rebuild the fast-path cache from top-recalled memories."""
+        """Rebuild the fast-path cache from top-recalled memories.
+
+        CONTAMINATION GUARD: Even if bad memories exist in memory_bank
+        (from before this fix), filter them out before they enter hot_cache
+        and get injected into LLM context.
+        """
+        import re as _re
+        _BAD_PATTERNS = [
+            r'^\(LOG:', r'^\[SHIRO', r'^\[SYSTEM', r'^SYSTEM DIRECTIVE',
+            r'Reply as Shiro', r'Tyler just arrived',
+        ]
+        def _is_clean(m):
+            s = str(m.summary)
+            return not any(_re.search(p, s, _re.IGNORECASE) for p in _BAD_PATTERNS)
+
         self._hot_cache = sorted(
-            self.memory_bank, key=lambda m: m.recall_count, reverse=True
+            [m for m in self.memory_bank if _is_clean(m)],
+            key=lambda m: m.recall_count, reverse=True
         )[:8]
 
     def _synthesize_session_summary(self):
