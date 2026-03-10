@@ -20,7 +20,9 @@ class LlamaClient:
         temperature: float = 0.6,
         top_p: float = 0.9,
         repeat_penalty: float = 1.2,
-        max_tokens: int = 512
+        max_tokens: int = 512,
+        use_native_tools: bool = True,
+        num_gpu: Optional[int] = None
     ):
         """
         Args:
@@ -32,6 +34,8 @@ class LlamaClient:
             top_p: Top-p sampling.
             repeat_penalty: Penalty for repeating tokens.
             max_tokens: Maximum tokens to generate.
+            use_native_tools: Whether to use native tool calling if supported.
+            num_gpu: Number of layers to offload to GPU (Ollama).
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -41,10 +45,12 @@ class LlamaClient:
         self.top_p = top_p
         self.repeat_penalty = repeat_penalty
         self.max_tokens = max_tokens
+        self.use_native_tools = use_native_tools
+        self.num_gpu = num_gpu
         self._endpoint_type = "chat" # Default to chat
         self._session: Optional[aiohttp.ClientSession] = None
         self._supports_tools: Optional[bool] = None # Cache for tool support
-        logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model} (fallback: {self.fallback_model})")
+        logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model} (fallback: {self.fallback_model}, native_tools: {self.use_native_tools}, num_gpu: {self.num_gpu})")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Returns the active aiohttp session, creating it if necessary."""
@@ -94,15 +100,16 @@ class LlamaClient:
                 try:
                     try:
                         # Use cached tool support
-                        effective_tools = tools if self._supports_tools is not False else None
+                        native_tools_enabled = self.use_native_tools and self._supports_tools is not False
+                        effective_tools = tools if native_tools_enabled else None
                         actual_system_prompt = system_prompt
-                        if tools and self._supports_tools is False:
+                        if tools and not native_tools_enabled:
                              actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
 
                         async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model):
                             yield chunk
                         if tools and self._supports_tools is None:
-                            self._supports_tools = True
+                            self._supports_tools = native_tools_enabled
                         return # Success
                     except aiohttp.ClientResponseError as e:
                         if e.status == 400 and tools:
@@ -145,14 +152,15 @@ class LlamaClient:
                     if etype == "chat":
                         try:
                             # Use cached tool support
-                            effective_tools = tools if self._supports_tools is not False else None
+                            native_tools_enabled = self.use_native_tools and self._supports_tools is not False
+                            effective_tools = tools if native_tools_enabled else None
                             actual_system_prompt = system_prompt
-                            if tools and self._supports_tools is False:
+                            if tools and not native_tools_enabled:
                                  actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
 
                             yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model)
                             if tools and self._supports_tools is None:
-                                self._supports_tools = True
+                                self._supports_tools = native_tools_enabled
                         except requests.exceptions.HTTPError as e:
                             if e.response.status_code == 400 and tools:
                                 logger.warning(f"Ollama model {current_model} does not support native tools. Switching to prompt-based tools.")
@@ -198,6 +206,8 @@ class LlamaClient:
                 "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
             }
         }
+        if self.num_gpu is not None:
+            payload["options"]["num_gpu"] = self.num_gpu
         if tools:
             payload["tools"] = tools
 
@@ -238,6 +248,8 @@ class LlamaClient:
                 "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
             }
         }
+        if self.num_gpu is not None:
+            payload["options"]["num_gpu"] = self.num_gpu
         if tools:
             payload["tools"] = tools
 
@@ -281,6 +293,8 @@ class LlamaClient:
                 "stop": ["User:", "System:", "\nUser:", "\nSystem:", "[SYSTEM:"]
             }
         }
+        if self.num_gpu is not None:
+            payload["options"]["num_gpu"] = self.num_gpu
         response = requests.post(f"{self.base_url}/generate", json=payload, timeout=60, stream=True)
         response.raise_for_status()
         for line in response.iter_lines():
