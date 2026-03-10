@@ -1,0 +1,28 @@
+# Shiro-AI Configuration
+
+llm:
+  api_type: "ollama"  # 'ollama' or 'openai'
+  base_url: "http://localhost:11434/api"
+  model: "llama3.1:8b-instruct-q4_K_M"
+  temperature: 0.6
+  top_p: 0.9
+  repeat_penalty: 1.2
+  max_tokens: 512
+
+stt:
+  model_size: "base"
+  device: null  # 'cuda' or 'cpu', null for auto-detect
+  compute_type: "float16"
+
+memory:
+  db_path: "./shiro_memory"
+  collection_name: "shiro_ai_memories"
+  max_short_term: 10
+
+ui:
+  title: "🦊 Shiro: The Sly Kitsune Yaoguai"
+  theme: "soft"
+  share: false
+
+persona:
+  sheet_path: "shiro_sheet.yaml"
