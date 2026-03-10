@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class LokiEngine:
     """Core logic engine for Loki AI, shared between UI and Server."""
     # Unified keywords for various thought/meta tags to ensure consistency across filtering methods
-    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE"
+    THOUGHT_KEYWORDS = "THOUGHTS?|INNER MONOLOGUE|THINKING|PLOT|SCHEME|SCHEEM|META|SYSTEM|ACTION|SCENE|LOG"
 
     def __init__(self, config: dict):
         self.config = config
@@ -153,6 +153,7 @@ class LokiEngine:
                 full_response = " ".join(response_fragments)
                 if not (interrupt_event and interrupt_event.is_set()):
                     if self.last_thought:
+                        logger.info(f"Loki's Internal Thought: {self.last_thought.strip()}")
                         self.memory.store_insight(f"Thought: {self.last_thought.strip()}", source="inner_monologue")
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
@@ -225,8 +226,23 @@ class LokiEngine:
                     if match:
                         pre_tag = buffer[:match.start()]
                         if pre_tag: yield pre_tag
+                        tag_content = match.group(0)
                         buffer = buffer[match.end():].lstrip()
-                        in_thought = True
+
+                        # Check if it's a block-start (like [THOUGHT]) or a self-contained tag (like [SYSTEM: ...])
+                        # A block-start is typically just the keyword itself inside delimiters.
+                        is_block_start = False
+                        inner_text = re.sub(r'[\[\]\(\)\<\>\*]', '', tag_content).strip()
+
+                        if any(re.fullmatch(k, inner_text, re.IGNORECASE) for k in self.THOUGHT_KEYWORDS.split('|')):
+                            is_block_start = True
+
+                        if is_block_start:
+                            in_thought = True
+                        else:
+                            # Self-contained tags are recorded as thoughts immediately
+                            self.last_thought += tag_content + " "
+
                         continue
                     else:
                         if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
@@ -268,11 +284,16 @@ class LokiEngine:
                         break
         if buffer:
             if in_thought:
-                # If stream ends while in thought, try one last time to find a speech transition
-                transition_match = re.search(r'\n\s*([A-Z])', buffer)
+                # If stream ends while in thought, try to find where speech might have started
+                # Heuristic: a capitalized letter following punctuation and space, or just a newline
+                transition_match = re.search(r'([\.\!\?]\s+|\n\s*)([A-Z])', buffer)
                 if transition_match:
-                    self.last_thought += buffer[:transition_match.start()]
-                    yield buffer[transition_match.start():]
+                    self.last_thought += buffer[:transition_match.start(2)]
+                    yield buffer[transition_match.start(2):]
+                elif len(buffer.strip()) > 30 and not any(kw in buffer.upper() for kw in self.THOUGHT_KEYWORDS.split('|')):
+                    # If it's long and doesn't look like meta-tags, it's likely speech with a forgotten closing tag
+                    self.last_thought += " [Unclosed]"
+                    yield buffer
                 else:
                     self.last_thought += buffer
             else:
@@ -294,7 +315,8 @@ class LokiEngine:
 
         # 2. Remove loose THOUGHT: prefixes and their content that might have leaked
         # Targeted at catching things like "Thought: I am a bot. Hello!" -> "Hello!"
-        clean = re.sub(rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*.*?(?:\.|\!|\?|\n|$)', '', clean, count=1).strip()
+        # [REFINED] Only remove the prefix/tag itself to avoid swallowing the following sentence
+        clean = re.sub(rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*', '', clean, count=1).strip()
 
         # 3. Targeted asterisk thought removal (e.g. *thinks to self* I am a bot.)
         # Only removes if it specifically contains thinking/scheming keywords to avoid removing actions like *winks*
