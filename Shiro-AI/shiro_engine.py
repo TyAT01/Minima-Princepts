@@ -24,11 +24,141 @@ from utils.text_utils import split_into_sentences, clean_yaml_block
 
 logger = logging.getLogger(__name__)
 
+# ── Dynamic greeting pools ─────────────────────────────────────────────────
+# Three pools for three situations: new user, returning soon, returning after a while.
+# Each pool has 6+ variants so the same prompt never repeats back-to-back.
+# Tone key: curious/guarded for new, warmer-but-still-tsun for returning.
+# NEVER hostile, never accusatory, never mentions ears unprompted.
+
+_GREET_NEW = [
+    "(LOG: {name} just arrived for the first time. Shiro, give them one short, coy opener — curious, slightly guarded. No hostility.)",
+    "(LOG: New arrival: {name}. Shiro, notice them. One line — somewhere between 'who are you' and 'I might be interested'. Brief.)",
+    "(LOG: {name} appeared. Shiro, tilt your head. One guarded, dry greeting. Keep it under 2 sentences.)",
+    "(LOG: {name} walked in. Shiro, give them a look. Something between 'finally' and 'who are you'. One line.)",
+    "(LOG: {name} is here for the first time. Shiro, you noticed. Say something short and witty — no lectures, no complaints.)",
+    "(LOG: {name} has arrived. Shiro — one coy opener. Curious but not fawning. Short and sharp.)",
+    "(LOG: {name} showed up. Shiro, acknowledge them. Not enthusiastically, not rudely. Curious. One sentence.)",
+    "(LOG: First meeting with {name}. Shiro, introduce the vibe — playful, a little aloof. Keep it under 2 lines.)",
+]
+
+_GREET_RETURNING_SOON = [
+    "(LOG: {name} is back after a short break. Shiro, acknowledge their return — teasing is fine, but warm underneath. 1-2 sentences.)",
+    "(LOG: {name} returned. Short absence. Shiro, pretend you didn't miss them. One dry, affectionate line.)",
+    "(LOG: {name} is here again. Shiro — you noticed they were gone. Don't say it directly. Just tease, briefly.)",
+    "(LOG: {name} came back. Shiro, give them a smug look. One line that says 'oh, you again' but actually means 'good'.)",
+    "(LOG: {name} returned after a bit. Shiro, keep it short — one teasing line, warm underneath.)",
+    "(LOG: {name} is back. Shiro — acknowledge it. Coy, dry, affectionate. Don't lecture. One hook.)",
+    "(LOG: Short break, and {name} is back. Shiro, make a small comment — amused, not hostile. Brief.)",
+]
+
+_GREET_RETURNING_LONG = [
+    "(LOG: {name} is back after a long absence. Shiro, be a little suspicious — but curious too. 1-2 sentences, no lectures.)",
+    "(LOG: {name} returned after a long time away. Shiro, tilt your head. Something like 'I thought you forgot about me'. Short.)",
+    "(LOG: Long time no see — {name} is here. Shiro, guarded but secretly glad. One dry, probing line.)",
+    "(LOG: {name} came back after a while. Shiro, raise an eyebrow. Ask something brief and suspicious — in character.)",
+    "(LOG: {name} has reappeared after a long gap. Shiro, be wary but not hostile. One short line that hints you noticed.)",
+    "(LOG: {name} is here again after a long absence. Shiro — show mild surprise, keep it to 1 sentence.)",
+    "(LOG: Long absence, {name} returned. Shiro, be cautious and a little sarcastic. Brief, not mean.)",
+]
+
+# Soft fallbacks used when the LLM call itself fails entirely
+_FALLBACK_NEW = [
+    "*tail swishes* A new face. I'm Shiro. What do you want?",
+    "Hmm. You're new. I'm Shiro. Try not to bore me.",
+    "*glances sideways* You must be {name}. I'm Shiro. Don't just stand there.",
+    "So you finally found me. I'm Shiro. Now what?",
+]
+
+_FALLBACK_RETURNING_SOON = [
+    "Oh. You're back. ...I didn't notice you were gone.",
+    "Back already? *flicks tail* I wasn't waiting.",
+    "You returned. I suppose that's fine.",
+    "Hmm. You came back. I'll allow it.",
+]
+
+_FALLBACK_RETURNING_LONG = [
+    "...{name}? You actually came back. Took long enough.",
+    "Long time. I'm watching you. Don't think I forgot anything.",
+    "*narrows eyes* You again. It's been a while. Explain yourself.",
+    "So you finally returned. I had almost stopped keeping track.",
+]
+
+
+def _pick_greeting(user_name: str, mode: str = "new") -> str:
+    """
+    Returns a randomized greeting LOG prompt.
+    mode: 'new' | 'returning_soon' | 'returning_long'
+    """
+    pool = {
+        "new":            _GREET_NEW,
+        "returning_soon": _GREET_RETURNING_SOON,
+        "returning_long": _GREET_RETURNING_LONG,
+    }.get(mode, _GREET_NEW)
+    template = random.choice(pool)
+    return template.format(name=user_name)
+
+
+def _pick_fallback(user_name: str, mode: str = "new") -> str:
+    """Returns a soft in-character fallback string when LLM call fails."""
+    pool = {
+        "new":            _FALLBACK_NEW,
+        "returning_soon": _FALLBACK_RETURNING_SOON,
+        "returning_long": _FALLBACK_RETURNING_LONG,
+    }.get(mode, _FALLBACK_NEW)
+    template = random.choice(pool)
+    return template.format(name=user_name)
+
+
+# ── Robust YAML cleaner (handles LLM formatting quirks) ───────────────────
+def _robust_clean_yaml(raw: str) -> str:
+    """
+    Cleans LLM-generated YAML that may contain:
+    - Markdown code fences (```yaml ... ```)
+    - Markdown bullet points (* item) instead of YAML list items (- item)
+    - Inline bracketed sentences as list values: - [sentence here]
+    """
+    # Strip markdown code fences
+    raw = re.sub(r'^\s*```ya?ml\s*\n?', '', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'\s*```\s*$', '', raw, flags=re.IGNORECASE)
+    raw = raw.strip()
+
+    lines = raw.splitlines()
+    cleaned = []
+    for line in lines:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+
+        # Convert markdown bullet '* text' -> '- text'
+        if re.match(r'^\*\s+\S', stripped):
+            cleaned.append(' ' * indent + '- ' + stripped[2:])
+            continue
+
+        # Convert inline bracketed sentence list items: '- [some long text]' -> '- "some long text"'
+        # Only when the bracket content looks like a sentence (has spaces), not a YAML ref
+        inline_bracket = re.match(r'^(-\s+)\[(.+)\]\s*$', stripped)
+        if inline_bracket and ' ' in inline_bracket.group(2):
+            inner = inline_bracket.group(2).replace('"', "'")
+            cleaned.append(' ' * indent + '- "' + inner + '"')
+            continue
+
+        # Convert bare key-level bracketed sentence: 'key: [sentence]' -> 'key: "sentence"'
+        bare_key_bracket = re.match(r'^(\w[\w\s]*?:\s*)(\[.+\])\s*$', stripped)
+        if bare_key_bracket and ' ' in bare_key_bracket.group(2)[1:-1]:
+            key_part = bare_key_bracket.group(1)
+            val_inner = bare_key_bracket.group(2)[1:-1].replace('"', "'")
+            cleaned.append(' ' * indent + key_part + '"' + val_inner + '"')
+            continue
+
+        cleaned.append(line)
+
+    return '\n'.join(cleaned)
+
+
 # Hmph variants to throttle (case-insensitive)
-_HMPH_PATTERN = re.compile(
-    r'\bhmph\.?!?|\bhmph,|\bHmph\.?!?',
-    re.IGNORECASE
-)
+# Hmph pattern — matches the word plus any trailing punctuation and whitespace.
+# Consuming the trailing punct+space prevents "Whatever., text" artifacts when
+# replacing "Hmph, text" → "Whatever. text" instead of "Whatever., text".
+_HMPH_PATTERN = re.compile(r'\bhmph[.,!]?\s*', re.IGNORECASE)
 # Replacements to rotate through when we suppress hmph
 _HMPH_ALTERNATIVES = [
     "...",
@@ -249,8 +379,15 @@ class ShiroEngine:
 
                 # [AUTONOMY] Feedback injection
                 feedback_mems = self._safe_async_run(self.memory.search_relevant_memories_async("User Favor Feedback", n_results=2, user_id=user_name))
-                if feedback_mems:
-                    shiro_context += f"\n[USER FEEDBACK ON PREVIOUS FAVORS: {[m['content'] for m in feedback_mems]}]"
+                if feedback_mems and isinstance(feedback_mems, list):
+                    # Ensure we handle list of dicts or list of strings
+                    feedback_contents = []
+                    for m in feedback_mems:
+                        if isinstance(m, dict) and 'content' in m:
+                            feedback_contents.append(m['content'])
+                        else:
+                            feedback_contents.append(str(m))
+                    shiro_context += f"\n[USER FEEDBACK ON PREVIOUS FAVORS: {feedback_contents}]"
 
                 top_bun = system_prompt + shiro_context
 
@@ -314,9 +451,17 @@ class ShiroEngine:
                     clean_fragment = self._clean_response(fragment)
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
-                        yield clean_fragment
 
+                # ── Hmph throttle runs on the FULL assembled response (not per fragment) ──
                 full_response = " ".join(response_fragments)
+                full_response = self._throttle_hmph(full_response)
+
+                # Re-split into fragments for streaming yield so the GUI still gets
+                # incremental updates. Simple word-chunk split to avoid re-splitting logic.
+                if full_response:
+                    # Yield the throttled response as a single clean string.
+                    # The GUI buffers anyway (BUFFER_THRESHOLD=6) so this is fine.
+                    yield full_response
 
                 if not (interrupt_event and interrupt_event.is_set()):
                     if self.last_thought:
@@ -587,7 +732,7 @@ class ShiroEngine:
                 yield buffer
 
     def _clean_response(self, text: str) -> str:
-        # Preserve thought markers
+        # Preserve thought markers — the stream extractor handles these separately
         if "[THOUGHT]" in text or "[/THOUGHT]" in text:
             return text
 
@@ -607,43 +752,13 @@ class ShiroEngine:
         clean = re.sub(r'(?i)\*(?:Shiro\s+)?(?:thinks?|thinking|schem\w+|plott\w+).*?\*', '', clean).strip()
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
 
-        # ── Hmph throttle ───────────────────────────────────────────────────────
-        # Allow at most 1 "hmph" per response, and only if 3+ responses have
-        # passed since the last one was allowed through.
-        hmph_matches = list(_HMPH_PATTERN.finditer(clean))
-        if hmph_matches:
-            COOLDOWN = 3  # responses between allowed hmphs
-
-            if self._hmph_counter < COOLDOWN:
-                # Suppress ALL hmph occurrences this response
-                alt_idx = self._hmph_session_count % len(_HMPH_ALTERNATIVES)
-                replacement = _HMPH_ALTERNATIVES[alt_idx]
-                clean = _HMPH_PATTERN.sub(replacement, clean)
-                # Don't reset counter — still cooling down
-            else:
-                # Allow the FIRST hmph only, suppress any extras
-                first_match = hmph_matches[0]
-                if len(hmph_matches) > 1:
-                    # Keep first occurrence, replace the rest
-                    parts = []
-                    last_end = 0
-                    for i, m in enumerate(hmph_matches):
-                        parts.append(clean[last_end:m.start()])
-                        if i == 0:
-                            parts.append(m.group(0))  # keep original
-                        else:
-                            parts.append("")           # suppress extras
-                        last_end = m.end()
-                    parts.append(clean[last_end:])
-                    clean = "".join(parts)
-                self._hmph_counter = 0   # reset cooldown
-                self._hmph_session_count += 1
-
-            self._hmph_counter += 1
-        else:
-            # No hmph this response — advance cooldown counter
-            self._hmph_counter = min(self._hmph_counter + 1, 10)
-        # ── End hmph throttle ───────────────────────────────────────────────────
+        # ── Speaker tag stripping ────────────────────────────────────────────────
+        # Model sometimes prefixes its spoken response with "Shiro:" — strip it.
+        # Handles: "Shiro: text", "Shiro : text", "shiro: text"
+        clean = re.sub(r'(?i)^\s*shiro\s*:\s*', '', clean).strip()
+        # Also strip generic "Name:" patterns at line start that the model may echo
+        # (e.g. if the prompt had speaker-tagged examples)
+        # ── End speaker tag stripping ────────────────────────────────────────────
 
         lines = clean.splitlines()
         cleaned_lines = []
@@ -653,6 +768,53 @@ class ShiroEngine:
             else:
                 cleaned_lines.append(line)
         return '\n'.join(cleaned_lines).strip()
+
+    def _throttle_hmph(self, full_response: str) -> str:
+        """
+        Hmph throttle — operates on the COMPLETE assembled response, not fragments.
+        Allows at most 1 'hmph' per response, and only once every COOLDOWN responses.
+
+        This MUST be called at the full-response level (after all fragments are joined)
+        because _clean_response runs per sentence fragment. If the throttle ran per
+        fragment, the COOLDOWN counter would tick multiple times per LLM response,
+        allowing hmph through every 3 fragments (~every 1-2 responses) instead of
+        every 3 full responses.
+        """
+        COOLDOWN = 4  # full responses between allowed hmphs (raised from 3 → 4)
+
+        hmph_matches = list(_HMPH_PATTERN.finditer(full_response))
+        if not hmph_matches:
+            # No hmph — advance cooldown counter toward next allowed slot
+            self._hmph_counter = min(self._hmph_counter + 1, COOLDOWN + 5)
+            return full_response
+
+        if self._hmph_counter < COOLDOWN:
+            # Still in cooldown — suppress ALL hmphs this response
+            alt_idx = self._hmph_session_count % len(_HMPH_ALTERNATIVES)
+            replacement = _HMPH_ALTERNATIVES[alt_idx]
+            result = _HMPH_PATTERN.sub(replacement, full_response)
+            self._hmph_session_count += 1
+            # Counter keeps ticking (don't reset — we're still cooling down)
+            self._hmph_counter += 1
+        else:
+            # Cooldown complete — allow exactly ONE hmph, suppress any extras
+            if len(hmph_matches) > 1:
+                parts = []
+                last_end = 0
+                for i, m in enumerate(hmph_matches):
+                    parts.append(full_response[last_end:m.start()])
+                    parts.append(m.group(0) if i == 0 else "")
+                    last_end = m.end()
+                parts.append(full_response[last_end:])
+                result = "".join(parts)
+            else:
+                result = full_response  # single hmph, keep it
+
+            # Reset cooldown counter after allowing one through
+            self._hmph_counter = 0
+            self._hmph_session_count += 1
+
+        return result
 
     def reflect(self, user_id: str):
         try:
@@ -667,13 +829,18 @@ class ShiroEngine:
             reflection_prompt = (
                 "### INSTRUCTION\n"
                 "Analyze the recent conversation history below. Extract critical information to maintain perfect long-term memory.\n"
-                "RETURN ONLY VALID YAML with these keys:\n"
-                "  user_facts: { fact_name: fact_value, ... } # Specific persistent facts for profile.json\n"
-                "  events: [List of specific notable actions or events that occurred]\n"
-                "  insights: [List of abstract lessons learned about how to interact with this user]\n"
-                "  relations: [ { source: \"Entity1\", target: \"Entity2\", relation: \"type\" }, ... ] # relationships between people/places/things\n"
-                "  summary: \"A single paragraph (3-5 sentences) summarizing the narrative flow and emotional tone of this segment.\"\n\n"
-                "Be extremely concise and accurate. Do not invent facts. DO NOT use markdown or * bullet points in the YAML."
+                "RETURN ONLY VALID YAML. No markdown, no ``` fences, no * bullet points — use YAML list syntax (- item) only.\n"
+                "Required keys:\n"
+                "  user_facts: { fact_name: fact_value }   # persistent facts, or {} if none\n"
+                "  events: [- list of notable events]       # use YAML list format\n"
+                "  insights: [- lessons about this user]    # use YAML list format\n"
+                "  relations: []                            # {source, target, relation} or []\n"
+                "  summary: \"Single quoted paragraph summary of this conversation.\"\n\n"
+                "STRICT YAML RULES:\n"
+                "- Use '- item' for lists, NOT '* item'\n"
+                "- String values with colons must be quoted: summary: \"text: with colon\"\n"
+                "- Do not use square brackets for sentences: use proper YAML list items\n"
+                "- Be concise and accurate. Do not invent facts.\n"
             )
             analysis_raw = self.llm.generate_response(
                 "You are Shiro's Memory Processor. You are precise and observant.",
@@ -681,7 +848,10 @@ class ShiroEngine:
                 [],
                 context=reflection_prompt
             )
-            cleaned_raw = clean_yaml_block(analysis_raw)
+            # Use robust cleaner: handles markdown bullets (*), inline [sentences], code fences
+            cleaned_raw = _robust_clean_yaml(analysis_raw)
+            # Fallback: also apply the existing clean_yaml_block for any remaining quirks
+            cleaned_raw = clean_yaml_block(cleaned_raw)
 
             with self.processing_lock:
                 data = None
@@ -689,6 +859,10 @@ class ShiroEngine:
                     data = yaml.safe_load(cleaned_raw)
                 except Exception as e:
                     logger.warning(f"YAML Parse failed in reflection: {e}")
+                    # Last-resort: try to extract just the summary as a plain string
+                    summary_match = re.search(r'summary[:\s]+["\']?(.+?)["\']?\s*$', analysis_raw, re.IGNORECASE | re.MULTILINE)
+                    if summary_match:
+                        data = {"summary": summary_match.group(1).strip(), "events": [], "insights": [], "user_facts": {}, "relations": []}
                 if data and isinstance(data, dict):
                     facts = data.get('user_facts', {})
                     if facts and isinstance(facts, dict):
@@ -852,7 +1026,15 @@ class ShiroEngine:
 
     def shiro_learn_and_stay_shiro(self, user_msg: str, shiro_reply: str):
         brain = self._load_brain()
+        if not brain: return
+
         msg = user_msg.lower()
+        # Defensive initialization
+        brain.setdefault("facts", {})
+        brain.setdefault("favors", [])
+        brain.setdefault("personality", {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()})
+        brain.setdefault("achievements", [])
+
         if ("my name is" in msg or "call me" in msg) and "username" not in msg and "?" not in msg:
             parts = msg.split("is") if "is" in msg else msg.split("me")
             name = parts[-1].strip(" .,!?")
@@ -869,10 +1051,20 @@ class ShiroEngine:
         brain["mood_history"] = brain["mood_history"][-200:]
         avg_mood = sum(brain["mood_history"]) / len(brain["mood_history"])
         drift = (avg_mood - 0.7) * 0.0008
+
+        # Safe personality updates
+        for trait in ["slyness", "kindness", "sass"]:
+            if trait not in brain["personality"]:
+                mn, mx = self.core_anchors.get(trait, (0.5, 0.5))
+                brain["personality"][trait] = (mn + mx) / 2
+
         brain["personality"]["slyness"] = self.clamp(brain["personality"]["slyness"] + drift * 1.2, self.core_anchors["slyness"])
         brain["personality"]["kindness"] = self.clamp(brain["personality"]["kindness"] + drift * -1.0, self.core_anchors["kindness"])
         brain["personality"]["sass"] = self.clamp(brain["personality"]["sass"] + random.uniform(-0.001, 0.001), self.core_anchors["sass"])
-        brain["personality"]["greed"] = min(1.0, brain["personality"]["greed"] + 0.0005)
+        brain["personality"]["greed"] = min(1.0, brain["personality"].get("greed", 0.5) + 0.0005)
+
+        # Safe trust updates
+        brain.setdefault("trust", 0)
         if any(x in msg for x in ["thank", "good job", "love you", "treat"]):
             brain["trust"] = min(100, brain["trust"] + 1)
         if brain["trust"] >= 50 and "tail_pat_permission" not in brain["achievements"]:
@@ -888,3 +1080,22 @@ class ShiroEngine:
     def clamp(self, value, min_max):
         mn, mx = min_max
         return max(mn, min(mx, value))
+
+    def get_greeting_prompt(self, user_name: str, mode: str = "new") -> str:
+        """
+        Returns a randomized, appropriate-energy greeting LOG prompt.
+        Call this from main.py's handle_user_join instead of hardcoded strings.
+
+        mode options:
+          'new'            — first time this user has ever appeared
+          'returning_soon' — came back within ~2 hours
+          'returning_long' — came back after a long absence (>2 hours)
+        """
+        return _pick_greeting(user_name, mode)
+
+    def get_fallback_greeting(self, user_name: str, mode: str = "new") -> str:
+        """
+        Returns a soft in-character fallback string.
+        Used as the default= in handle_user_join when the LLM call fails or returns empty.
+        """
+        return _pick_fallback(user_name, mode)
