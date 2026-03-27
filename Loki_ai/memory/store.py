@@ -57,9 +57,12 @@ class MemoryStore:
                 for m in meta_records["metadatas"]:
                     if not m: continue
                     uid = m.get("user_id")
-                    ts_str = m.get("timestamp")
-                    if uid and ts_str:
-                        self._last_seen[uid] = datetime.fromisoformat(ts_str)
+                    ts_val = m.get("timestamp_unix") or m.get("timestamp")
+                    if uid and ts_val:
+                        if isinstance(ts_val, (int, float)):
+                            self._last_seen[uid] = datetime.fromtimestamp(ts_val, tz=timezone.utc)
+                        else:
+                            self._last_seen[uid] = datetime.fromisoformat(ts_val)
                 logger.info(f"Loaded last seen times for {len(self._last_seen)} users from metadata.")
                 return
 
@@ -70,9 +73,12 @@ class MemoryStore:
                 for m in all_meta["metadatas"]:
                     if not m: continue
                     uid = m.get("user_id", "default_user")
-                    ts_str = m.get("timestamp")
-                    if ts_str:
-                        ts = datetime.fromisoformat(ts_str)
+                    ts_val = m.get("timestamp_unix") or m.get("timestamp")
+                    if ts_val:
+                        if isinstance(ts_val, (int, float)):
+                            ts = datetime.fromtimestamp(ts_val, tz=timezone.utc)
+                        else:
+                            ts = datetime.fromisoformat(ts_val)
                         if uid not in self._last_seen or ts > self._last_seen[uid]:
                             self._last_seen[uid] = ts
         except Exception as e:
@@ -116,6 +122,7 @@ class MemoryStore:
                 "user_text": user_text,
                 "bot_text": bot_text,
                 "timestamp": timestamp_str,
+                "timestamp_unix": now.timestamp(),
                 "type": "interaction"
             }]
         )
@@ -127,6 +134,7 @@ class MemoryStore:
             metadatas=[{
                 "user_id": user_id,
                 "timestamp": timestamp_str,
+                "timestamp_unix": now.timestamp(),
                 "type": "system_metadata"
             }]
         )
@@ -157,6 +165,7 @@ class MemoryStore:
             "insight": insight,
             "source": source,
             "timestamp": now.isoformat(),
+            "timestamp_unix": now.timestamp(),
             "type": "insight"
         }
 
@@ -185,6 +194,7 @@ class MemoryStore:
                 "description": event_description,
                 "importance": importance,
                 "timestamp": now.isoformat(),
+                "timestamp_unix": now.timestamp(),
                 "type": "episodic"
             }]
         )
@@ -207,6 +217,7 @@ class MemoryStore:
                 "user_id": user_id,
                 "summary": summary,
                 "timestamp": now.isoformat(),
+                "timestamp_unix": now.timestamp(),
                 "type": "summary",
                 "is_global": is_global
             }]
@@ -226,6 +237,7 @@ class MemoryStore:
                 "user_id": user_id,
                 "fact": fact,
                 "timestamp": now.isoformat(),
+                "timestamp_unix": now.timestamp(),
                 "type": "profile_fact"
             }]
         )
@@ -615,49 +627,82 @@ class MemoryStore:
         """
         now = datetime.now(timezone.utc)
         threshold = now - timedelta(days=days)
+        threshold_ts = threshold.timestamp()
         threshold_str = threshold.isoformat()
 
-        logger.info(f"Starting adaptive pruning (Threshold: {threshold_str})...")
+        logger.info(f"Starting adaptive pruning (Threshold TS: {threshold_ts})...")
 
         try:
             # 1. Prune old interactions
-            # Chroma doesn't support complex date math in 'where' easily,
-            # so we fetch IDs of old items first.
-            old_interactions = self._collection.get(
-                where={"$and": [
-                    {"type": "interaction"},
-                    {"timestamp": {"$lt": threshold_str}}
-                ]},
-                include=["metadatas"]
-            )
+            try:
+                old_interactions = self._collection.get(
+                    where={"$and": [
+                        {"type": "interaction"},
+                        {"timestamp_unix": {"$lt": threshold_ts}}
+                    ]},
+                    include=["metadatas"]
+                )
+            except Exception as e:
+                logger.warning(f"Numeric pruning failed, falling back to string check for interactions: {e}")
+                # Fallback: get all and filter in Python (only if small enough or as a last resort)
+                all_interactions = self._collection.get(where={"type": "interaction"}, include=["metadatas"])
+                old_ids = []
+                if all_interactions and all_interactions["metadatas"]:
+                    for i, meta in enumerate(all_interactions["metadatas"]):
+                        ts = meta.get("timestamp_unix") or meta.get("timestamp")
+                        if ts:
+                            try:
+                                ts_dt = datetime.fromtimestamp(ts, tz=timezone.utc) if isinstance(ts, (int, float)) else datetime.fromisoformat(ts)
+                                if ts_dt < threshold: old_ids.append(all_interactions["ids"][i])
+                            except: continue
+                old_interactions = {"ids": old_ids}
 
-            if old_interactions and old_interactions["ids"]:
+            if old_interactions and old_interactions.get("ids"):
                 logger.info(f"Pruning {len(old_interactions['ids'])} old interactions.")
                 self._collection.delete(ids=old_interactions["ids"])
 
             # 2. Prune low-importance episodic memories
-            old_episodic = self._collection.get(
-                where={"$and": [
-                    {"type": "episodic"},
-                    {"timestamp": {"$lt": threshold_str}},
-                    {"importance": {"$lt": min_importance}}
-                ]},
-                include=["metadatas"]
-            )
+            try:
+                old_episodic = self._collection.get(
+                    where={"$and": [
+                        {"type": "episodic"},
+                        {"timestamp_unix": {"$lt": threshold_ts}},
+                        {"importance": {"$lt": min_importance}}
+                    ]},
+                    include=["metadatas"]
+                )
+            except Exception as e:
+                logger.warning(f"Numeric pruning failed, falling back to string check for episodic: {e}")
+                all_episodic = self._collection.get(where={"type": "episodic"}, include=["metadatas"])
+                old_ids = []
+                if all_episodic and all_episodic["metadatas"]:
+                    for i, meta in enumerate(all_episodic["metadatas"]):
+                        ts = meta.get("timestamp_unix") or meta.get("timestamp")
+                        imp = meta.get("importance", 5)
+                        if ts and imp < min_importance:
+                            try:
+                                ts_dt = datetime.fromtimestamp(ts, tz=timezone.utc) if isinstance(ts, (int, float)) else datetime.fromisoformat(ts)
+                                if ts_dt < threshold: old_ids.append(all_episodic["ids"][i])
+                            except: continue
+                old_episodic = {"ids": old_ids}
 
-            if old_episodic and old_episodic["ids"]:
+            if old_episodic and old_episodic.get("ids"):
                 logger.info(f"Pruning {len(old_episodic['ids'])} low-importance episodic memories.")
                 self._collection.delete(ids=old_episodic["ids"])
 
             # 3. Prune very old summaries (e.g. older than 2x threshold)
-            very_old_threshold = (now - timedelta(days=days * 2)).isoformat()
-            old_summaries = self._collection.get(
-                where={"$and": [
-                    {"type": "summary"},
-                    {"timestamp": {"$lt": very_old_threshold}}
-                ]},
-                include=["metadatas"]
-            )
+            very_old_threshold_ts = (now - timedelta(days=days * 2)).timestamp()
+            try:
+                old_summaries = self._collection.get(
+                    where={"$and": [
+                        {"type": "summary"},
+                        {"timestamp_unix": {"$lt": very_old_threshold_ts}}
+                    ]},
+                    include=["metadatas"]
+                )
+            except Exception as e:
+                logger.warning(f"Numeric pruning failed, falling back for summaries: {e}")
+                old_summaries = {"ids": []} # Skip legacy summary pruning for safety
 
             # Keep global summaries
             if old_summaries and old_summaries["ids"]:

@@ -82,8 +82,16 @@ class LlamaClient:
 
         if self.api_type == "ollama":
             try:
-                async for chunk in self._stream_ollama_chat_async(system_prompt, user_input, history, context, tools=tools):
-                    yield chunk
+                try:
+                    async for chunk in self._stream_ollama_chat_async(system_prompt, user_input, history, context, tools=tools):
+                        yield chunk
+                except aiohttp.ClientResponseError as e:
+                    if e.status == 400 and tools:
+                        logger.warning("Async Ollama chat 400 error with tools. Retrying without tools...")
+                        async for chunk in self._stream_ollama_chat_async(system_prompt, user_input, history, context, tools=None):
+                            yield chunk
+                    else:
+                        raise
             except Exception as e:
                 logger.warning(f"Async Ollama chat failed, falling back: {e}")
                 async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
@@ -103,7 +111,14 @@ class LlamaClient:
         for etype in endpoints:
             try:
                 if etype == "chat":
-                    yield from self._stream_ollama_chat(system_prompt, user_input, history, context, tools=tools)
+                    try:
+                        yield from self._stream_ollama_chat(system_prompt, user_input, history, context, tools=tools)
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code == 400 and tools:
+                            logger.warning("Ollama chat 400 error with tools. Retrying without tools...")
+                            yield from self._stream_ollama_chat(system_prompt, user_input, history, context, tools=None)
+                        else:
+                            raise
                 elif etype == "generate":
                     yield from self._stream_ollama_generate(system_prompt, user_input, history, context)
                 else:
@@ -113,7 +128,7 @@ class LlamaClient:
                 return
             except requests.exceptions.HTTPError as e:
                 last_error = e
-                if e.response.status_code == 404:
+                if e.response.status_code in [400, 404]:
                     continue
                 raise
             except Exception as e:
@@ -143,6 +158,8 @@ class LlamaClient:
             payload["tools"] = tools
 
         response = requests.post(f"{self.base_url}/chat", json=payload, timeout=60, stream=True)
+        if response.status_code == 400:
+            logger.error(f"Ollama Chat 400 Bad Request: {response.text}")
         response.raise_for_status()
 
         for line in response.iter_lines():
@@ -180,6 +197,9 @@ class LlamaClient:
 
         session = await self._get_session()
         async with session.post(f"{self.base_url}/chat", json=payload) as response:
+            if response.status == 400:
+                resp_text = await response.text()
+                logger.error(f"Ollama Chat Async 400 Bad Request: {resp_text}")
             response.raise_for_status()
             async for line in response.content:
                 if line:
