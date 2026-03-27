@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from time import monotonic
 
-from princess_ai.audio.pipeline import AudioFrame
+from princess_ai.audio.schemas import AudioFrame
 
 
 @dataclass(slots=True)

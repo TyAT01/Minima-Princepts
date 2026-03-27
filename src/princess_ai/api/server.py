@@ -12,7 +12,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from princess_ai.logging.telemetry import (
+from princess_ai.app_logging.telemetry import (
     InMemoryLogStore,
     LogEntry,
     attach_error_log_handler,

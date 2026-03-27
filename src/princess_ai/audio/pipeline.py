@@ -6,14 +6,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, List, Protocol
 
+from princess_ai.audio.schemas import AudioFrame
 from princess_ai.audio.vad import VoiceActivityDetector, VADConfig
-
-
-@dataclass(slots=True)
-class AudioFrame:
-    data: bytes
-    sample_rate: int
-    channels: int
 
 
 @dataclass(slots=True)

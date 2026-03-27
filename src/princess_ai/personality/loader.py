@@ -84,15 +84,14 @@ class PersonalityLoader:
         appearance = character.get("appearance", {}) or {}
         distinct_traits = self._safe_text(appearance.get("distinct_traits"))
         outfit_style = self._safe_text(appearance.get("outfit_style"))
-        personality_traits = character.get("personality_traits", []) or []
+        personality_traits = character.get("personality_traits", {}) or {}
         trait_lines = []
-        for item in personality_traits:
-            trait = self._safe_text(item.get("trait") if isinstance(item, dict) else "")
-            description = self._safe_text(
-                item.get("description") if isinstance(item, dict) else ""
-            )
-            if trait and description:
-                trait_lines.append(f"{trait}: {description}")
+        if isinstance(personality_traits, dict):
+            for trait, details in personality_traits.items():
+                if isinstance(details, dict):
+                    description = self._safe_text(details.get("description"))
+                    if description:
+                        trait_lines.append(f"{self._safe_text(trait)}: {description}")
         speech_patterns = character.get("speech_patterns", {}) or {}
         speech_style = self._safe_text(speech_patterns.get("style"))
         speech_examples = speech_patterns.get("examples", []) or []
