@@ -393,10 +393,10 @@ class MikaApp:
 
                 temporal_note = (
                     f"The current time is {current_time_str} on {current_date_str}.\n"
-                    f"- [TIME SINCE LAST SEEN]: It has been {duration_str} since you last spoke with {user_name}. "
-                    "This is the absolute real-world time that has passed.\n"
+                    f"- [TIME SINCE LAST SEEN]: It has been {duration_str} since you last spoke with {user_name}.\n"
                     f"- [SESSION UPTIME]: You have been powered on/active for {uptime_str} in this specific session.\n"
-                    "If the [TIME SINCE LAST SEEN] is significant (over an hour), you MUST acknowledge it in your response as if you're greeting them after a break."
+                    "You are aware of the passage of time for your own context and thoughts. "
+                    "ONLY mention the current time, date, or specific duration in your spoken response if the user directly asks for it."
                 )
 
                 context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
