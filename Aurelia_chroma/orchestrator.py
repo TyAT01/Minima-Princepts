@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import random
+import re
 from typing import Optional, List, Dict, Any
 
 from llm.chroma_client import ChromaClient
@@ -13,6 +14,7 @@ from learning.evolve import Reflector
 from adapters.twitch import TwitchChatAdapter
 from adapters.youtube import YouTubeChatAdapter
 from adapters.schemas import Event
+from cadence_controller import AureliaCadenceController, StreamSignals, ChatMessage, clamp
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,9 @@ class AureliaOrchestrator:
         self.twitch_adapter = twitch_adapter
         self.youtube_adapter = youtube_adapter
         self.local_audio_player = local_audio_player
+
+        self.cadence_controller = AureliaCadenceController()
+        self.current_hype = 0.0
 
         self.last_interaction_time = time.time()
         self.autonomous_task = None
@@ -109,11 +114,15 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Detect and apply autonomous cadence adjustments, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
+
             # Store in memory
             self.memory_store.store_memory(text, response_text)
 
             # Handle outputs
             await self.dispatch_response(response_text, audio_data, source)
+            self.cadence_controller.last_spoke_ts = time.time()
 
         return response_text
 
@@ -140,8 +149,12 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Detect and apply autonomous cadence adjustments, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
+
             self.memory_store.store_memory(user_text, response_text)
             await self.dispatch_response(response_text, audio_data, source)
+            self.cadence_controller.last_spoke_ts = time.time()
 
         return response_text
 
@@ -170,8 +183,54 @@ class AureliaOrchestrator:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+    def _detect_hype(self, events: List[Event]) -> float:
+        """Calculates current hype based on message volume, keywords, and intensity markers."""
+        if not events:
+            return clamp(self.current_hype - 0.05) # decay
+
+        hype_keywords = {
+            "lfg", "pog", "hype", "omg", "wow", "love", "cracked", "legendary", "gg",
+            "fire", "lit", "huge", "goat", "clutch", "poggers", "pogchamp", "ez"
+        }
+
+        count = len(events)
+        intensity_sum = 0.0
+
+        for e in events:
+            msg_intensity = 0.0
+            text = e.text
+            text_lower = text.lower()
+
+            # 1. Keywords
+            if any(k in text_lower for k in hype_keywords):
+                msg_intensity += 0.4
+
+            # 2. Capitalization (Caps lock hype)
+            if len(text) > 3 and text.isupper():
+                msg_intensity += 0.3
+
+            # 3. Repeated punctuation (!!!, ???)
+            if "!!" in text or "??" in text:
+                msg_intensity += 0.2
+
+            # 4. Elongated words (e.g. POGGGGG, NOOOOO)
+            if re.search(r"(.)\1{2,}", text): # Changed to 2+ repeats (3 total chars)
+                msg_intensity += 0.2
+
+            intensity_sum += clamp(msg_intensity)
+
+        # Average intensity per message
+        avg_msg_intensity = intensity_sum / count
+
+        # Density score (volume)
+        density = clamp(count / 5.0)
+
+        # Combined score: 40% density, 60% intensity
+        score = (density * 0.4) + (avg_msg_intensity * 0.6)
+        return clamp(score)
+
     async def chat_polling_loop(self):
-        """Polls Twitch and YouTube for new messages."""
+        """Polls Twitch and YouTube for new messages and handles cadence."""
         logger.info("Chat polling loop started.")
         while self.is_running:
             events = []
@@ -181,41 +240,66 @@ class AureliaOrchestrator:
             if self.youtube_adapter:
                 events.extend(self.youtube_adapter.poll())
 
-            # Process all gathered events sequentially to maintain conversation context
-            for event in events:
-                await self.process_text_input(event.text, event.username, event.source)
+            self.current_hype = self._detect_hype(events)
 
-            await asyncio.sleep(1)
+            chat_msgs = [
+                ChatMessage(user=e.username, text=e.text, ts=time.time(),
+                            source=e.source,
+                            is_high_signal=(len(e.text) > 40 or "?" in e.text))
+                for e in events
+            ]
+
+            signals = StreamSignals(
+                now=time.time(),
+                chat_messages=chat_msgs,
+                event_intensity=self.current_hype,
+                focus_level=0.0 # Default
+            )
+
+            self.cadence_controller.update(signals)
+            intent = self.cadence_controller.maybe_emit_intent(signals)
+
+            if intent:
+                await self.process_intent(intent)
+
+            await asyncio.sleep(0.5)
+
+    async def process_intent(self, intent: Any):
+        """Processes a SpeechIntent from the cadence controller."""
+        logger.info(f"Processing speech intent: {intent.kind} (urgency: {intent.urgency:.2f})")
+
+        if intent.kind == "REPLY" and intent.target_message:
+            await self.process_text_input(
+                intent.target_message.text,
+                intent.target_message.user,
+                intent.target_message.source
+            )
+            self.cadence_controller.pop_consumed_message(intent.target_message)
+
+        elif intent.kind in ("RIFF", "REACT", "FILLER"):
+            style = intent.meta.get("style", "default")
+            await self.think_and_act(style=style, intent=intent)
+            if intent.kind == "RIFF" and intent.target_message:
+                self.cadence_controller.pop_consumed_message(intent.target_message)
 
     async def autonomous_loop(self):
-        """Background loop for proactive behavior and learning."""
-        logger.info("Autonomous loop started.")
+        """Background loop for periodic tasks like reflection and simulation."""
+        logger.info("Autonomous task loop started.")
         while self.is_running:
-            await asyncio.sleep(20) # Check more frequently for better responsiveness
+            await asyncio.sleep(60)
             self.cycle_count += 1
 
             now = time.time()
             idle_time = now - self.last_interaction_time
 
-            # 1. Periodic Reflection (every 30 cycles ~ 10 mins at 20s intervals)
-            if self.cycle_count % 30 == 0:
+            # 1. Periodic Reflection (every 10 mins)
+            if self.cycle_count % 10 == 0:
                 await self.reflector.reflect_on_recent_interactions()
 
-            # 2. Tiered Idle behaviors (Aurelia hates dead air!)
-            if 60 <= idle_time < 120:
-                # 15% chance for light filler every 20s
-                if random.random() < 0.15:
-                    await self.think_and_act(style="filler")
-            elif 120 <= idle_time < 300:
-                # 25% chance to drive conversation every 20s
-                if random.random() < 0.25:
-                    await self.think_and_act(style="conversation_driver")
-            elif idle_time >= 300:
-                # Original deep idle logic
+            # 2. Deep idle logic (Simulations)
+            if idle_time >= 300:
                 if random.random() < 0.3:
                     await self.run_autonomous_simulation()
-                else:
-                    await self.think_and_act(style="deep_thought")
 
     async def run_autonomous_simulation(self):
         """Runs a simulation during idle time to improve skills."""
@@ -223,9 +307,33 @@ class AureliaOrchestrator:
         await self.simulation_manager.run_simulation(self.chroma_client, self.memory_store)
         self.last_interaction_time = time.time() # Reset idle timer after 'thinking'
 
-    async def think_and_act(self, style: str = "default"):
-        """Aurelia decides to speak or act on her own."""
-        logger.info(f"Aurelia is thinking autonomously (style: {style})...")
+    def _extract_and_apply_cadence_commands(self, text: str) -> str:
+        """Scans for [CADENCE: key=value] tags, updates the controller, and returns cleaned text."""
+        pattern = r"\[CADENCE:\s*(.*?)\]"
+        matches = re.findall(pattern, text, re.IGNORECASE)
+
+        for match in matches:
+            # match is like "min_gap_s=2.5, max_silence_s=30"
+            parts = [p.strip() for p in match.split(",")]
+            updates = {}
+            for p in parts:
+                if "=" in p:
+                    k, v = p.split("=", 1)
+                    try:
+                        updates[k.strip()] = float(v.strip())
+                    except ValueError:
+                        continue
+            if updates:
+                self.cadence_controller.update_config(**updates)
+
+        # Strip tags from output and normalize spaces
+        cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
+
+    async def think_and_act(self, style: str = "default", intent: Optional[Any] = None):
+        """Aurelia decides to speak or act on her own, optionally guided by an intent."""
+        logger.info(f"Aurelia is thinking (style: {style})...")
 
         is_alone = len(self.current_members) == 0
 
@@ -241,14 +349,31 @@ class AureliaOrchestrator:
 
         state_context = f"Status: {'Alone' if is_alone else 'Idle'}. {silence_context}"
 
-        if style == "filler":
-            prompt = "It's a bit quiet. Share a brief inner monologue or a small 'filler' comment about what you're doing or thinking. Keep it short and natural."
-        elif style == "conversation_driver":
-            prompt = "The silence is starting to bother you. As a streamer who hates dead air, try to start a conversation. Ask a question to those present or share an interesting thought to get people talking."
-        elif style == "deep_thought":
-            prompt = "You've been quiet for a while. Share a deeper existential thought or reflect on your journey to become human. Don't let the dead air win."
+        if intent:
+            prompt = f"Intent: {intent.kind}. Style: {style}. Energy: {intent.energy:.2f}. "
+            if intent.kind == "REACT":
+                prompt += "Give a very short, high-energy hype reaction to the current stream vibe. Keep it under 5 words."
+            elif intent.kind == "FILLER":
+                if "armor" in style or "cape" in style or "pouch" in style or "gear" in style:
+                    prompt += f"Perform a brief squire-like action: {style.replace('_', ' ')}. Narrate it naturally as you do it."
+                else:
+                    prompt += "Share a brief inner monologue or small filler comment. Keep it short and natural."
+            elif intent.kind == "RIFF":
+                if intent.target_message:
+                    prompt += f"A message from {intent.target_message.user} caught your eye: '{intent.target_message.text}'. Use this as a seed to riff or tell a mini-story (15-30s) while staying in character."
+                else:
+                    prompt += "Riff on your current journey or the stream's vibe for 15-30s. Be engaging!"
+            else:
+                prompt += "Share an interesting thought or observation."
         else:
-            prompt = "You've been quiet. What's on your mind? Share a thought with your friends or chat."
+            if style == "filler":
+                prompt = "It's a bit quiet. Share a brief inner monologue or a small 'filler' comment about what you're doing or thinking. Keep it short and natural."
+            elif style == "conversation_driver":
+                prompt = "The silence is starting to bother you. As a streamer who hates dead air, try to start a conversation. Ask a question to those present or share an interesting thought to get people talking."
+            elif style == "deep_thought":
+                prompt = "You've been quiet for a while. Share a deeper existential thought or reflect on your journey to become human. Don't let the dead air win."
+            else:
+                prompt = "You've been quiet. What's on your mind? Share a thought with your friends or chat."
 
         prompt += " Remember: You hate dead air, but don't be annoying."
 
@@ -262,10 +387,14 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Apply cadence commands even from autonomous thoughts, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
+
             logger.info(f"Autonomous action ({style}): {response_text}")
             # Broadcast autonomous actions to all platforms
             await self.dispatch_response(response_text, audio_data, "autonomous", broadcast=True)
             self.last_interaction_time = time.time()
+            self.cadence_controller.last_spoke_ts = time.time()
 
     async def handle_event(self, event_type: str, data: Dict[str, Any]):
         """Handles platform-specific events (e.g. member joined)."""
@@ -288,7 +417,12 @@ class AureliaOrchestrator:
         )
 
         if response_text:
+            # Detect and apply autonomous cadence adjustments, then clean response
+            response_text = self._extract_and_apply_cadence_commands(response_text)
+
             await self.dispatch_response(response_text, audio_data, source, broadcast=(source != "discord"))
+            self.last_interaction_time = time.time()
+            self.cadence_controller.last_spoke_ts = time.time()
 
     async def report_error(self, error_message: str):
         """Reports an error in natural language."""
