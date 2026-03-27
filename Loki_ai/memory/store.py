@@ -1,12 +1,16 @@
 from __future__ import annotations
 import logging
+import re
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, List, Dict, Optional
 
 import chromadb
+import networkx as nx
+import json
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +34,17 @@ class MemoryStore:
         self._last_seen: Dict[str, datetime] = {}
         self._last_user: Optional[str] = None
         self.session_objectives: List[str] = []
+
+        # Optimization: In-memory LRU cache for search results
+        self._search_cache = TTLCache(maxsize=100, ttl=300) # 5 min TTL
+
+        # Optimization: Cache for message embeddings to avoid re-embedding
+        self._embedding_cache = TTLCache(maxsize=200, ttl=600) # 10 min TTL
+
+        # Entity-Centric Memory Graph
+        self.graph_path = self.db_path / "entity_graph.json"
+        self._entity_graph = self._load_graph()
+
         self._load_last_seen_times()
 
     def _load_last_seen_times(self):
@@ -65,6 +80,15 @@ class MemoryStore:
     def count(self) -> int:
         """Returns the total number of items in the long-term collection."""
         return self._collection.count()
+
+    def get_embedding(self, text: str) -> List[float]:
+        """Generates an embedding for the given text, utilizing a cache."""
+        if text in self._embedding_cache:
+            return self._embedding_cache[text]
+
+        emb = self._embedding_function([text])[0]
+        self._embedding_cache[text] = emb
+        return emb
 
     def add_interaction(self, user_text: str, bot_text: str, user_id: str = "default_user"):
         """Adds a new interaction to both short-term and long-term memory."""
@@ -110,6 +134,9 @@ class MemoryStore:
         self.short_term_buffer.append({"role": "user", "content": f"[{timestamp_human}] {user_text}"})
         self.short_term_buffer.append({"role": "assistant", "content": bot_text})
 
+        # Invalidate search cache on new interaction
+        self._search_cache.clear()
+
         # Keep buffer within limits (pairs of user/assistant)
         while len(self.short_term_buffer) > self.max_short_term * 2:
             self.short_term_buffer.pop(0)
@@ -133,6 +160,7 @@ class MemoryStore:
             documents=[insight],
             metadatas=[metadata]
         )
+        self._search_cache.clear() # Invalidate cache
         logger.info(f"Stored insight for {user_id}: {insight_id}")
 
     def store_episodic_memory(self, event_description: str, user_id: str, importance: int = 5):
@@ -151,6 +179,7 @@ class MemoryStore:
                 "type": "episodic"
             }]
         )
+        self._search_cache.clear() # Invalidate cache
         logger.info(f"Stored episodic memory for {user_id}: {event_id}")
 
     def store_summary(self, user_id: str, summary: str, is_global: bool = False):
@@ -169,6 +198,7 @@ class MemoryStore:
                 "is_global": is_global
             }]
         )
+        self._search_cache.clear() # Invalidate cache
         logger.info(f"Stored summary for {user_id}: {summary_id}")
 
     def update_user_profile(self, user_id: str, fact: str):
@@ -186,6 +216,7 @@ class MemoryStore:
                 "type": "profile_fact"
             }]
         )
+        self._search_cache.clear() # Invalidate cache
         logger.info(f"Updated profile for {user_id}")
 
     def search_relevant_memories(
@@ -200,9 +231,16 @@ class MemoryStore:
     ) -> List[Dict[str, Any]]:
         """
         Searches memory with optional MMR for diversity and HyDE support.
+        Utilizes an LRU cache to minimize database hits.
         """
         if n_results <= 0:
             return []
+
+        # 1. Check Cache
+        cache_key = (query, n_results, filter_type, user_id, use_mmr, mmr_lambda, hypothetical_answer)
+        if cache_key in self._search_cache:
+            logger.debug(f"Cache hit for query: {query[:30]}...")
+            return self._search_cache[cache_key]
 
         search_query = hypothetical_answer if hypothetical_answer else query
 
@@ -215,6 +253,11 @@ class MemoryStore:
             else:
                 where = {"user_id": user_id}
 
+        # 2. Hybrid Search: Combine Keyword + Vector
+        # A. Keyword Search (for exact matches)
+        kw_results = self._keyword_search(query, n_results=n_results // 2, where=where if where else None)
+
+        # B. Vector Search
         # If using MMR, fetch more candidates than requested
         fetch_k = n_results * 3 if use_mmr else n_results
 
@@ -225,18 +268,30 @@ class MemoryStore:
             include=["documents", "metadatas", "embeddings", "distances"]
         )
 
-        if not results or not results.get("metadatas") or not results["metadatas"][0]:
-            return []
-
         candidates = []
-        for i in range(len(results["ids"][0])):
-            candidates.append({
-                "id": results["ids"][0][i],
-                "content": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-                "embedding": results["embeddings"][0][i],
-                "distance": results["distances"][0][i]
-            })
+        seen_ids = set()
+
+        # Add keyword results first (high priority for hybrid)
+        for res in kw_results:
+            candidates.append(res)
+            seen_ids.add(res["id"])
+
+        if results and results.get("metadatas") and results["metadatas"][0]:
+            for i in range(len(results["ids"][0])):
+                rid = results["ids"][0][i]
+                if rid not in seen_ids:
+                    candidates.append({
+                        "id": rid,
+                        "content": results["documents"][0][i],
+                        "metadata": results["metadatas"][0][i],
+                        "embedding": results["embeddings"][0][i],
+                        "distance": results["distances"][0][i],
+                        "source": "vector"
+                    })
+                    seen_ids.add(rid)
+
+        if not candidates:
+            return []
 
         if use_mmr and len(candidates) > n_results:
             selected_indices = self._perform_mmr(
@@ -245,9 +300,51 @@ class MemoryStore:
                 n_results,
                 mmr_lambda
             )
-            return [candidates[i] for i in selected_indices]
+            final_results = [candidates[i] for i in selected_indices]
+        else:
+            final_results = candidates[:n_results]
 
-        return candidates[:n_results]
+        # 4. Update Cache
+        self._search_cache[cache_key] = final_results
+        return final_results
+
+    def _keyword_search(self, query: str, n_results: int = 5, where: Optional[Dict] = None) -> List[Dict[str, Any]]:
+        """Performs a simple keyword-based search using Chroma's where_document filter."""
+        # Extract potential keywords (quoted text or capitalized words)
+        keywords = re.findall(r'"([^"]*)"', query)
+        if not keywords:
+            # Fallback to important-looking words
+            keywords = [w for w in query.split() if len(w) > 4 and w[0].isupper()]
+
+        if not keywords:
+            return []
+
+        # Chroma's $contains only supports a single string usually, or we can use multiple queries
+        all_keyword_results = []
+        seen_ids = set()
+
+        for kw in keywords[:3]: # Limit to top 3 keywords
+            results = self._collection.get(
+                where_document={"$contains": kw},
+                where=where,
+                limit=n_results,
+                include=["documents", "metadatas", "embeddings"]
+            )
+            if results and results["ids"]:
+                for i in range(len(results["ids"])):
+                    rid = results["ids"][i]
+                    if rid not in seen_ids:
+                        all_keyword_results.append({
+                            "id": rid,
+                            "content": results["documents"][i],
+                            "metadata": results["metadatas"][i],
+                            "embedding": results["embeddings"][i],
+                            "distance": 0.0, # Keyword matches are considered highly relevant
+                            "source": "keyword"
+                        })
+                        seen_ids.add(rid)
+
+        return all_keyword_results[:n_results]
 
     def _perform_mmr(self, embeddings: List[List[float]], similarities: List[float], k: int, lambda_param: float) -> List[int]:
         """Simple MMR implementation for diversity."""
@@ -366,7 +463,19 @@ class MemoryStore:
         if self.session_objectives:
             add_to_context("CURRENT SESSION OBJECTIVES", self.session_objectives)
 
-        # Priority 2: User Profile
+        # Priority 2: Entity Graph (Context Hops)
+        # Check if query contains known entities
+        graph_context = []
+        for node in self._entity_graph.nodes():
+            if str(node).lower() in query.lower():
+                related = self.get_related_entities(node, depth=1)
+                for rel in related:
+                    graph_context.append(f"{rel['source']} {rel['relation']} {rel['entity']}")
+
+        if graph_context:
+            add_to_context("RELATED ENTITIES & KNOWLEDGE", list(set(graph_context))[:10])
+
+        # Priority 3: User Profile
         profile_texts = list(set([m["content"] for m in categories["profile"]]))
         if user_id:
             profile_title = f"USER PROFILE: {user_id}"
@@ -376,10 +485,10 @@ class MemoryStore:
         elif profile_texts:
             add_to_context("RELEVANT PEOPLE & PROFILES", profile_texts[:5])
 
-        # Priority 3: High Importance Episodic (e.g., Session Start)
+        # Priority 4: High Importance Episodic (e.g., Session Start)
         add_to_context("CRITICAL PAST EVENTS", [m["content"] for m in categories["episodic_high"]])
 
-        # Priority 4: Summaries (The 'believable' long-term narrative)
+        # Priority 5: Summaries (The 'believable' long-term narrative)
         # Prioritize Global Summaries for high-level continuity, then recent segment summaries
         global_sums = [m["content"] for m in categories["summary"] if m["metadata"].get("is_global")]
         local_sums = [m["content"] for m in categories["summary"] if not m["metadata"].get("is_global")]
@@ -391,13 +500,13 @@ class MemoryStore:
         balanced_summaries = global_sums[:2] + local_sums[:3]
         add_to_context("CONVERSATION SUMMARIES", balanced_summaries)
 
-        # Priority 5: Insights & Lessons
+        # Priority 6: Insights & Lessons
         add_to_context("CORE INSIGHTS", [m["content"] for m in categories["insight"][:8]])
 
-        # Priority 6: Normal Episodic
+        # Priority 7: Normal Episodic
         add_to_context("NOTABLE EXPERIENCES", [m["content"] for m in categories["episodic_normal"][:5]])
 
-        # Priority 7: Relevant Interactions (Raw history)
+        # Priority 8: Relevant Interactions (Raw history)
         interaction_texts = [m["content"] for m in categories["interaction"]]
         add_to_context("RECENT RELEVANT INTERACTIONS", interaction_texts[:5], prefix="", joiner="\n---\n")
 
@@ -414,3 +523,122 @@ class MemoryStore:
     def get_last_interaction_time(self, user_id: str = "default_user") -> Optional[datetime]:
         """Retrieves the timestamp of the last interaction for a specific user (using cache)."""
         return self._last_seen.get(user_id)
+
+    # --- Entity Graph Methods ---
+
+    def _load_graph(self) -> nx.Graph:
+        """Loads the entity graph from a JSON file."""
+        if self.graph_path.exists():
+            try:
+                with open(self.graph_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return nx.node_link_graph(data)
+            except Exception as e:
+                logger.warning(f"Failed to load entity graph: {e}")
+        return nx.Graph()
+
+    def _save_graph(self):
+        """Saves the entity graph to a JSON file."""
+        try:
+            with open(self.graph_path, 'w', encoding='utf-8') as f:
+                data = nx.node_link_data(self._entity_graph)
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save entity graph: {e}")
+
+    def add_entity_relation(self, source: str, target: str, relation: str):
+        """Adds or updates a relationship between two entities in the graph."""
+        self._entity_graph.add_edge(source, target, relation=relation, timestamp=datetime.now(timezone.utc).isoformat())
+        self._save_graph()
+        logger.debug(f"Graph edge added: {source} --({relation})--> {target}")
+
+    def get_related_entities(self, entity: str, depth: int = 1) -> List[Dict[str, Any]]:
+        """Retrieves entities related to the given entity up to a certain depth."""
+        if entity not in self._entity_graph:
+            return []
+
+        related = []
+        try:
+            # Simple BFS for neighbors at depth
+            edges = nx.bfs_edges(self._entity_graph, entity, depth_limit=depth)
+            for u, v in edges:
+                data = self._entity_graph.get_edge_data(u, v)
+                related.append({
+                    "entity": v,
+                    "relation": data.get("relation", "connected"),
+                    "source": u
+                })
+        except Exception as e:
+            logger.warning(f"Error traversing graph: {e}")
+
+        return related
+
+    def prune_old_memories(self, days: int = 30, min_importance: int = 7):
+        """
+        Removes old, low-importance memories to keep the database lean.
+        - Interactions older than `days` are removed.
+        - Episodic memories older than `days` with importance < `min_importance` are removed.
+        - Profiles and Insights are generally preserved unless very old (e.g., 3x days).
+        """
+        now = datetime.now(timezone.utc)
+        threshold = now - timedelta(days=days)
+        threshold_str = threshold.isoformat()
+
+        logger.info(f"Starting adaptive pruning (Threshold: {threshold_str})...")
+
+        try:
+            # 1. Prune old interactions
+            # Chroma doesn't support complex date math in 'where' easily,
+            # so we fetch IDs of old items first.
+            old_interactions = self._collection.get(
+                where={"$and": [
+                    {"type": "interaction"},
+                    {"timestamp": {"$lt": threshold_str}}
+                ]},
+                include=["metadatas"]
+            )
+
+            if old_interactions and old_interactions["ids"]:
+                logger.info(f"Pruning {len(old_interactions['ids'])} old interactions.")
+                self._collection.delete(ids=old_interactions["ids"])
+
+            # 2. Prune low-importance episodic memories
+            old_episodic = self._collection.get(
+                where={"$and": [
+                    {"type": "episodic"},
+                    {"timestamp": {"$lt": threshold_str}},
+                    {"importance": {"$lt": min_importance}}
+                ]},
+                include=["metadatas"]
+            )
+
+            if old_episodic and old_episodic["ids"]:
+                logger.info(f"Pruning {len(old_episodic['ids'])} low-importance episodic memories.")
+                self._collection.delete(ids=old_episodic["ids"])
+
+            # 3. Prune very old summaries (e.g. older than 2x threshold)
+            very_old_threshold = (now - timedelta(days=days * 2)).isoformat()
+            old_summaries = self._collection.get(
+                where={"$and": [
+                    {"type": "summary"},
+                    {"timestamp": {"$lt": very_old_threshold}}
+                ]},
+                include=["metadatas"]
+            )
+
+            # Keep global summaries
+            if old_summaries and old_summaries["ids"]:
+                ids_to_delete = []
+                for i, meta in enumerate(old_summaries["metadatas"]):
+                    if not meta.get("is_global"):
+                        ids_to_delete.append(old_summaries["ids"][i])
+
+                if ids_to_delete:
+                    logger.info(f"Pruning {len(ids_to_delete)} old non-global summaries.")
+                    self._collection.delete(ids=ids_to_delete)
+
+            self._search_cache.clear()
+            logger.info("Adaptive pruning complete.")
+
+        except Exception as e:
+            logger.error(f"Pruning failed: {e}")
