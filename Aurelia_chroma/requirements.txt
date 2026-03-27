@@ -18,6 +18,7 @@ chromadb
 sentence-transformers
 
 # Other
+webrtcvad
 pydantic
 pydantic-settings
 PyYAML

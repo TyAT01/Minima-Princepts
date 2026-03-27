@@ -4,7 +4,7 @@
 # and then it will run the Discord bot.
 #
 # Make sure to set the following environment variables:
-# - DISCORD_BOT_TOKEN
+# - AURELIA_CHROMA_DISCORD_TOKEN
 # - AURELIA_CHROMA_DISCORD_GUILD_ID
 # - AURELIA_CHROMA_DISCORD_VOICE_CHANNEL_ID
 

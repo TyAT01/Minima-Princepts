@@ -4,7 +4,7 @@ rem It will first install the required dependencies,
 rem and then it will run the Discord bot.
 rem
 rem Make sure to set the following environment variables:
-rem - DISCORD_BOT_TOKEN
+rem - AURELIA_CHROMA_DISCORD_TOKEN
 rem - AURELIA_CHROMA_DISCORD_GUILD_ID
 rem - AURELIA_CHROMA_DISCORD_VOICE_CHANNEL_ID
 

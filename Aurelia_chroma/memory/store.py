@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ class ChromaMemoryStore:
         )
 
     def store_memory(self, user_text: str, bot_text: str) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         memory_id = f"memory-{now.timestamp()}"
         self._collection.add(
             ids=[memory_id],
