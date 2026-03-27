@@ -11,6 +11,10 @@ import asyncio
 import os
 from pathlib import Path
 import yaml
+from dotenv import load_dotenv
+
+# Explicitly load .env from the current directory to avoid "blindness"
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from config import settings
 from discord_ui.always_listen_bot import AlwaysListenBot, DiscordVoiceConfig
