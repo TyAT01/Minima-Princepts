@@ -61,7 +61,7 @@ class PersonaManager:
             logger.error(f"Error loading persona from {found_path}: {e}")
             self.system_prompt = "You are Aurelia Vale, a helpful AI companion."
 
-    def _build_system_prompt(self):
+    def _build_system_prompt(self, now: datetime = None):
         """Constructs the system prompt from the persona data."""
         if not self.persona_data:
             self.system_prompt = "You are Aurelia Vale, a helpful AI companion."
@@ -73,11 +73,14 @@ class PersonaManager:
         goals = char.get('goals', [])
         identity = char.get('core_identity', {}).get('self_awareness', '')
         traits = char.get('personality_traits', {})
+        appearance = char.get('appearance', {})
         speech = char.get('speech_patterns', {})
         constraints = char.get('llm_logic_constraints', {}).get('chroma_4b', '')
 
         # Add Real-time Temporal Awareness
-        now = datetime.now()
+        if not now:
+            now = datetime.now()
+
         prompt = f"### SYSTEM CONTEXT\n"
         prompt += f"Current Date & Time: {now.strftime('%A, %B %d, %Y - %I:%M %p')}\n\n"
 
@@ -85,6 +88,16 @@ class PersonaManager:
         prompt += f"Name: {name}\n"
         prompt += f"Role: {role}\n"
         prompt += f"Background: {identity}\n\n"
+
+        prompt += "### APPEARANCE\n"
+        if appearance:
+            prompt += f"- Physique: {appearance.get('physique', '')}\n"
+            prompt += f"- Traits: {appearance.get('distinct_traits', '')}\n"
+            hair = appearance.get('hair', {})
+            if hair:
+                prompt += f"- Hair: {hair.get('style', '')} ({hair.get('details', '')})\n"
+            prompt += f"- Outfit: {appearance.get('outfit_style', '')}\n"
+        prompt += "\n"
 
         prompt += "### GOALS\n"
         if goals:
@@ -102,11 +115,16 @@ class PersonaManager:
 
         prompt += "### SPEECH PATTERNS\n"
         prompt += f"Style: {speech.get('style', 'Natural')}\n"
+        prompt += "IMPORTANT: Your 'Olde English' is a light accent, not a thick dialect. Sprinkle in archaisms (thou, hark, betwixt) naturally. Do NOT use heavy archaic sentence structures. Mix it with modern Gen-Z/Streamer slang.\n"
         prompt += "Examples:\n"
         if isinstance(speech.get('examples'), list):
             for example in speech.get('examples', []):
                 prompt += f"  - \"{example}\"\n"
         prompt += "\n"
+
+        prompt += "### RESPONSE FORMAT (MANDATORY)\n"
+        prompt += "You must format every response as follows:\n"
+        prompt += "[THOUGHT] (Your brief internal monologue, ~20 words. What are you thinking before you speak?) [/THOUGHT] (Your actual response to the user)\n\n"
 
         prompt += "### LOGIC CONSTRAINTS\n"
         prompt += f"{constraints}\n\n"
@@ -136,8 +154,14 @@ class PersonaManager:
 
         self.system_prompt = prompt
 
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(self, now: datetime = None) -> str:
         """Returns the constructed system prompt."""
-        if not self.system_prompt:
+        if not self.persona_data:
             self.load_persona()
+
+        if now:
+            self._build_system_prompt(now=now)
+        elif not self.system_prompt:
+            self._build_system_prompt()
+
         return self.system_prompt

@@ -134,23 +134,42 @@ class AureliaApp:
             logging.info("!!! Interrupt received !!!")
             self.interrupt_event.set()
 
-    def _generate_thought(self, user_input: str, history: list, context: str) -> str:
-        """Generates an inner monologue entry before responding."""
-        try:
-            thought_prompt = (
-                "You are Aurelia Vale. Before responding to the user, record your private internal thoughts. "
-                "What do you really think about what they said? How does it make you feel? "
-                "What is your current state of mind? (Keep this concise, ~20 words)."
-            )
-            # Use full response for thought to avoid complex streaming here
-            thought = self.llm.generate_response(thought_prompt, f"User said: {user_input}", history, context)
-            return thought.strip()
-        except Exception as e:
-            logging.warning(f"Failed to generate thought: {e}")
-            return "Processing..."
+    def _extract_thought_from_stream(self, stream):
+        """Helper to extract [THOUGHT] content and yield the remaining response."""
+        buffer = ""
+        thought_extracted = False
+        self.last_thought = ""
+
+        for chunk in stream:
+            if not thought_extracted:
+                buffer += chunk
+                if "[/THOUGHT]" in buffer:
+                    parts = buffer.split("[/THOUGHT]", 1)
+                    thought_part = parts[0]
+                    if "[THOUGHT]" in thought_part:
+                        self.last_thought = thought_part.split("[THOUGHT]", 1)[1].strip()
+                    else:
+                        self.last_thought = thought_part.strip()
+
+                    remaining = parts[1]
+                    thought_extracted = True
+                    if remaining.strip():
+                        yield remaining
+                continue
+            else:
+                yield chunk
+
+        if not thought_extracted:
+            # Fallback if tags were missing or model didn't follow format
+            if "[THOUGHT]" in buffer:
+                self.last_thought = buffer.split("[THOUGHT]", 1)[1].strip()
+                yield "" # No response parsed
+            else:
+                self.last_thought = "Thinking..."
+                yield buffer
 
     def process_text(self, text: Any, user_name: str = None):
-        """Generator that yields sentence fragments from the LLM with inner monologue and interrupt checks."""
+        """Generator that yields sentence fragments from the LLM with combined thought/response and interrupt checks."""
         if user_name:
             self.current_user_name = user_name
         else:
@@ -173,8 +192,10 @@ class AureliaApp:
         with self.processing_lock:
             self.is_responding = True
             self.interrupt_event.clear()
+            self.last_thought = ""
             try:
-                system_prompt = self.persona.get_system_prompt()
+                # Refresh system prompt with current time
+                system_prompt = self.persona.get_system_prompt(now=datetime.now())
                 history = self.memory.get_history()
                 context = self.memory.get_full_context(text, user_id=user_name)
 
@@ -197,19 +218,12 @@ class AureliaApp:
                 if temporal_note:
                     context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
 
-                # 1. Inner Monologue Phase
-                thought = self._generate_thought(text, history, context)
-                logging.info(f"Aurelia's Thought: {thought}")
-                self.memory.store_insight(f"Thought: {thought}", source="inner_monologue")
-
-                # Prepend thought to system prompt for the actual response
-                augmented_system = f"{system_prompt}\n\nYour current internal thought: {thought}\nUse this thought to guide your response but don't repeat it verbatim."
-
-                # 2. Response Phase
+                # Combined Phase (Thought + Response in one stream)
                 full_response = ""
-                stream = self.llm.stream_response(augmented_system, text, history, context)
+                raw_stream = self.llm.stream_response(system_prompt, text, history, context)
+                response_stream = self._extract_thought_from_stream(raw_stream)
 
-                for fragment in split_into_sentences(stream):
+                for fragment in split_into_sentences(response_stream):
                     if self.interrupt_event.is_set():
                         logging.info("Response halted by interrupt.")
                         yield "... [Interrupted]"
@@ -219,6 +233,11 @@ class AureliaApp:
                     yield fragment
 
                 if not self.interrupt_event.is_set():
+                    # Save both thought and interaction
+                    if self.last_thought:
+                        logging.info(f"Aurelia's Thought: {self.last_thought}")
+                        self.memory.store_insight(f"Thought: {self.last_thought}", source="inner_monologue")
+
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     logging.info(f"Successfully processed message. Response length: {len(full_response)}")
 
