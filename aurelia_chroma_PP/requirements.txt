@@ -1,0 +1,41 @@
+# Discord
+nextcord==2.6.0
+nextcord-ext-listening==0.0.3
+PyNaCl>=1.5.0
+
+# Chroma 1.0 - Voice Model
+# Using a compatible torch version is critical
+numpy<2.0
+torch>=2.1.0
+transformers>=4.38.0
+accelerate
+soundfile
+sounddevice
+librosa
+faster-whisper
+bitsandbytes
+scipy
+
+# ChromaDB - Memory Store
+chromadb
+sentence-transformers
+
+# Web Dashboard
+fastapi
+uvicorn
+jinja2
+
+# Other
+webrtcvad
+pydantic
+pydantic-settings
+PyYAML
+psutil
+
+# NVIDIA PersonaPlex (Moshi architecture)
+moshi
+sentencepiece
+huggingface_hub
+librosa
+soundfile
+pyopus
