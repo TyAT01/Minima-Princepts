@@ -20,6 +20,7 @@ from llm.client import LlamaClient
 from memory.store import MemoryStore
 from persona.manager import PersonaManager
 from utils.text_utils import split_into_sentences, clean_yaml_block
+from autonomy_v3 import TrueAutonomy
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class LokiEngine:
             "softness": (0.10, 0.60)
         }
         self.brain = self._load_brain()
+        self.autonomy = TrueAutonomy(name="Loki", brain_dict=self.brain)
         self.profile_file = base_path / "profile.json"
         self.user_profiles = self._load_profiles()
 
@@ -168,7 +170,11 @@ class LokiEngine:
         """Core text processing logic."""
         self.last_thought = ""
         current_time = datetime.now(timezone.utc)
+        elapsed = (current_time - self.last_interaction_time).total_seconds()
         processed_text = text
+
+        # Update Autonomy State
+        self.autonomy.update_state(processed_text, elapsed_seconds=elapsed)
         # Handle outfit changes
         if processed_text.lower().startswith("loki change to"):
             yield self.change_outfit(processed_text[14:])
@@ -629,6 +635,7 @@ class LokiEngine:
         """Performs reflective shutdown and session consolidation."""
         logger.info("Engine initiating Reflective Shutdown...")
         try:
+            self.autonomy.sync_to_brain()
             self.reflect(self.current_user_name)
             loop_prompt = (
                 "Identify any 'Open Loops' from the recent conversation. \n"
@@ -646,6 +653,8 @@ class LokiEngine:
                 if open_loops_raw and len(open_loops_raw) > 10:
                     self.memory.store_episodic_memory(f"OPEN LOOPS at session end: {open_loops_raw}", user_id=self.current_user_name, importance=7)
             self._save_profiles()
+            # Final Brain Save
+            self.brain_file.write_text(json.dumps(self.brain, indent=2))
             self.memory.prune_old_memories()
 
             # Close LLM Session
@@ -710,7 +719,14 @@ class LokiEngine:
         recent_chill = sum(1 for m in history_list[-10:] if any(w in m["content"].lower() for w in ["tired","cozy","zzz","soft"]))
         base = 0.5 + 0.15*hype - 0.18*chill + 0.20*caps
         if recent_chill >= 6 and "raid" in user_msg.lower(): base = min(base, 0.65)
-        return max(0.25, min(1.0, base))
+
+        # Autonomy Mood Mapping
+        mood_map = {"chaos_mode": 1.0, "hyper": 0.8, "soft": 0.4, "sleepy": 0.25}
+        base_mood = mood_map.get(self.autonomy.mood, 0.5)
+
+        # Blend current logic with autonomy mood (weighted)
+        final_intensity = (base * 0.6) + (base_mood * 0.4)
+        return max(0.25, min(1.0, final_intensity))
 
     def outfit_block(self) -> str:
         outfit = self.wardrobe[self.current_outfit]
