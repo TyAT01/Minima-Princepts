@@ -1,13 +1,18 @@
 import logging
 import os
+import sys
 import re
 import yaml
 import threading
 import random
 import time
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Generator
+
+# Add the current directory to sys.path to ensure local modules are found
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from llm.client import LlamaClient
 from memory.store import MemoryStore
@@ -18,16 +23,20 @@ logger = logging.getLogger(__name__)
 
 class LokiEngine:
     """Core logic engine for Loki AI, shared between UI and Server."""
-
     def __init__(self, config: dict):
         self.config = config
         self.processing_lock = threading.Lock()
         self._interaction_count = 0
         self.current_user_name = "Tyler"
         self.session_start = datetime.now(timezone.utc)
-
         # --- LOKI SPECIFIC ---
         self.wardrobe = {
+            "default": {
+                "name": "Default Outfit",
+                "desc": "plain t-shirt and shorts, nothing special",
+                "ears": False,
+                "active": True
+            },
             "midnight_wolves": {
                 "name": "Midnight Wolves Hoodie",
                 "desc": "oversized black hoodie with floppy wolf ears on the hood and matte Midnight Wolves logo on chest",
@@ -35,10 +44,9 @@ class LokiEngine:
                 "active": True
             }
         }
-        self.current_outfit = "midnight_wolves"
+        self.current_outfit = "default"
         self.intensity = 0.5
         # ---------------------
-
         # Initialize components with config
         mem_cfg = config.get('memory', {})
         self.memory = MemoryStore(
@@ -46,7 +54,6 @@ class LokiEngine:
             collection_name=mem_cfg.get('collection_name', 'loki_ai_memories'),
             max_short_term=mem_cfg.get('max_short_term', 15)
         )
-
         llm_cfg = config.get('llm', {})
         self.llm = LlamaClient(
             base_url=llm_cfg.get('base_url', 'http://localhost:11434/api'),
@@ -57,12 +64,19 @@ class LokiEngine:
             repeat_penalty=llm_cfg.get('repeat_penalty', 1.08),
             max_tokens=llm_cfg.get('max_tokens', 512)
         )
-
         pers_cfg = config.get('persona', {})
         self.persona = PersonaManager(sheet_path=pers_cfg.get('sheet_path', 'loki_sheet.yaml'))
-
         self.last_thought = ""
         self._load_session_objectives()
+        # Eternal Learning Brain
+        self.brain_file = Path("./loki_brain.json")
+        self.core_anchors = {
+            "menace": (0.55, 0.95),
+            "sarcasm": (0.75, 1.00),
+            "loyalty": (0.60, 1.00),
+            "softness": (0.10, 0.60)
+        }
+        self.brain = self._load_brain()
 
     def _load_session_objectives(self):
         """Loads session objectives from a local JSON file."""
@@ -86,83 +100,137 @@ class LokiEngine:
         """Core text processing logic."""
         self.last_thought = ""
         processed_text = text
-
         # Handle outfit changes
         if processed_text.lower().startswith("loki change to"):
             yield self.change_outfit(processed_text[14:])
             return
-
         if user_name:
             if self.current_user_name != user_name:
                  logger.info(f"Switching active user to: {user_name}")
                  self.current_user_name = user_name
         else:
             user_name = self.current_user_name
-
         # Identity Verification Heuristic
         if processed_text and not processed_text.startswith("[") and user_name != "System":
              last_seen = self.memory.get_last_interaction_time(user_name)
              if last_seen and (datetime.now(timezone.utc) - last_seen).days > 7:
                   processed_text = f"[IDENTITY CHECK REQUIRED] {processed_text}"
-
         logger.info(f"--- Engine Processing: '{processed_text}' ---")
-
         with self.processing_lock:
             try:
                 # LOKI SPECIFIC: Intensity and Temperature
                 self.intensity = self.get_smart_intensity(processed_text)
                 temp = 0.75 + 0.25 * self.intensity
                 self.llm.temperature = temp
-
                 # Refresh system prompt with current time
                 system_prompt = self.persona.get_system_prompt(now=datetime.now())
-
                 # Add Loki context
                 loki_context = f"\n[SYSTEM: Current Intensity: {self.intensity:.2f}]\n{self.outfit_block()}"
                 system_prompt += loki_context
-
                 history = self.memory.get_history()
                 context = self.memory.get_full_context(processed_text, user_id=user_name)
-
                 # Add Temporal Context
                 context = self._add_temporal_context(context, user_name)
-
                 # Combined Phase
                 raw_stream = self.llm.stream_response(system_prompt, processed_text, history, context)
                 response_stream = self._extract_thought_from_stream(raw_stream)
-
                 response_fragments = []
                 for fragment in split_into_sentences(response_stream):
                     if interrupt_event and interrupt_event.is_set():
                         logger.info("Response halted by interrupt.")
                         yield "... [Interrupted]"
                         break
-
                     clean_fragment = self._clean_response(fragment)
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
                         yield clean_fragment
-
                 full_response = " ".join(response_fragments)
-
                 if not (interrupt_event and interrupt_event.is_set()):
                     if self.last_thought:
                         self.memory.store_insight(f"Thought: {self.last_thought.strip()}", source="inner_monologue")
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
-
                     # Periodic reflection (every 10 interactions)
                     if self._interaction_count > 0 and self._interaction_count % 10 == 0:
                          threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
-
+                    # Eternal Learning
+                    self.loki_learn_and_stay_loki(processed_text, full_response)
             except Exception as e:
                 logger.error(f"Engine text processing failed: {e}")
                 raise
 
+    # ─── ETERNAL LEARNING ───
+    def _load_brain(self):
+        if not self.brain_file.exists():
+            brain = {
+                "version": "eternal_1.0",
+                "born": time.time(),
+                "personality": {k: (v[0] + v[1]) / 2 for k, v in self.core_anchors.items()},
+                "trust": 0,
+                "facts": {},
+                "roasts": [],
+                "achievements": [],
+                "outfits": ["default"],
+            }
+            self.brain_file.write_text(json.dumps(brain, indent=2))
+        return json.loads(self.brain_file.read_text())
+
+    def loki_learn_and_stay_loki(self, user_msg: str, loki_reply: str):
+        brain = self._load_brain()
+        msg = user_msg.lower()
+
+        # fact extraction
+        if "my name is" in msg or "call me" in msg:
+            name = msg.split("is")[-1].strip(" .,!?")
+            brain["facts"]["preferred_name"] = name.title()
+
+        if "i hate" in msg or "i love" in msg:
+            thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
+            brain["facts"][f"user_{'hates' if 'hate' in msg else 'loves'}_{thing}"] = True
+
+        # roast memory
+        if any(w in loki_reply.lower() for w in ["idiot","minion","peasant","dummy"]):
+            if len(brain["roasts"]) < 50:
+                brain["roasts"].append({"roast": loki_reply, "ts": time.time()})
+
+        # personality drift (anchored)
+        intensity = self.intensity
+        brain.setdefault("mood_history", []).append(intensity)
+        brain["mood_history"] = brain["mood_history"][-200:]
+
+        avg_mood = sum(brain["mood_history"]) / len(brain["mood_history"])
+        drift = (avg_mood - 0.7) * 0.0008
+
+        brain["personality"]["menace"] = self.clamp(brain["personality"]["menace"] + drift * 1.2, self.core_anchors["menace"])
+        brain["personality"]["softness"] = self.clamp(brain["personality"]["softness"] + drift * -1.0, self.core_anchors["softness"])
+        brain["personality"]["sarcasm"] = self.clamp(brain["personality"]["sarcasm"] + random.uniform(-0.001, 0.001), self.core_anchors["sarcasm"])
+        brain["personality"]["loyalty"] = min(1.0, brain["personality"]["loyalty"] + 0.0005)
+
+        # trust & loyalty
+        if any(x in msg for x in ["thank", "good job", "love you"]):
+            brain["trust"] = min(100, brain["trust"] + 1)
+
+        # achievements
+        if brain["trust"] >= 50 and "first_blood" not in brain["achievements"]:
+            brain["achievements"].append("first_blood")
+
+        # hard floor: every 500 messages, gentle pull back to core
+        total_messages = len(brain.get("mood_history", []))
+        if total_messages % 500 < 5:
+            for trait, (mn, mx) in self.core_anchors.items():
+                current = brain["personality"][trait]
+                center = (mn + mx) / 2
+                brain["personality"][trait] = current + (center - current) * 0.15
+
+        self.brain_file.write_text(json.dumps(brain, indent=2))
+
+    def clamp(self, value, min_max):
+        mn, mx = min_max
+        return max(mn, min(mx, value))
+
     def _add_temporal_context(self, context: str, user_name: str) -> str:
         now_utc = datetime.now(timezone.utc)
         last_time = self.memory.get_last_interaction_time(user_name)
-
         duration_str = "some time"
         if last_time:
             delta = now_utc - last_time
@@ -174,15 +242,12 @@ class LokiEngine:
             if hours > 0: time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
             if minutes > 0 or not time_parts: time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
             duration_str = ", ".join(time_parts[:-1]) + (f" and {time_parts[-1]}" if len(time_parts) > 1 else time_parts[0])
-
         uptime_delta = now_utc - self.session_start
         up_hours, up_rem = divmod(int(uptime_delta.seconds), 3600)
         up_mins, _ = divmod(up_rem, 60)
         uptime_str = f"{up_hours}h {up_mins}m" if up_hours > 0 else f"{up_mins} minutes"
-
         current_time_str = now_utc.astimezone().strftime('%I:%M %p')
         current_date_str = now_utc.astimezone().strftime('%A, %B %d, %Y')
-
         temporal_note = (
             f"The current time is {current_time_str} on {current_date_str}.\n"
             f"- [TIME SINCE LAST SEEN]: It has been {duration_str} since you last spoke with {user_name}.\n"
@@ -196,7 +261,6 @@ class LokiEngine:
         in_thought = False
         start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)|\[INNER MONOLOGUE\]|\[THINKING\]', re.IGNORECASE)
         end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)|\[/INNER MONOLOGUE\]|\[/THINKING\]', re.IGNORECASE)
-
         for chunk in stream:
             buffer += chunk
             while True:
@@ -250,13 +314,11 @@ class LokiEngine:
                         yield buffer[closing_idx+1:].strip()
                         return
                 yield buffer
-
     def _clean_response(self, text: str) -> str:
         clean = re.sub(r'\[(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\].*?\[/(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\]', '', text, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'\(THOUGHT\).*?\(/THOUGHT\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
         return clean
-
     def reflect(self, user_id: str):
         """Perform deep reflection on history."""
         try:
@@ -270,14 +332,12 @@ class LokiEngine:
                     "Format as YAML with keys: user_facts, events, insights."
                 )
                 analysis_raw = self.llm.generate_response("You are Loki, analyzing memories.", f"History: {history}", [], context=reflection_prompt)
-
             cleaned_raw = self._clean_yaml_block(analysis_raw)
             data = None
             try:
                 data = yaml.safe_load(cleaned_raw)
             except:
                 pass
-
             if data and isinstance(data, dict):
                 for fact in data.get('user_facts', []):
                     self.memory.update_user_profile(user_id, str(fact))
@@ -288,7 +348,6 @@ class LokiEngine:
                 logger.info("Reflection complete.")
         except Exception as e:
             logger.warning(f"Reflection failed: {e}")
-
     def _clean_yaml_block(self, text: str) -> str:
         if "```yaml" in text: text = text.split("```yaml")[1].split("```")[0]
         elif "```yml" in text: text = text.split("```yml")[1].split("```")[0]
@@ -296,7 +355,6 @@ class LokiEngine:
         lines = text.strip().splitlines()
         if lines and lines[0].strip().lower() in ["yml", "yaml"]: text = "\n".join(lines[1:])
         return text.strip()
-
     def generate_autonomous_thought(self):
         """Generates a proactive thought."""
         try:
@@ -314,20 +372,17 @@ class LokiEngine:
         except Exception as e:
             logger.warning(f"Autonomous thought failed: {e}")
         return None
-
     def change_outfit(self, requested: str) -> str:
         req = requested.lower().strip()
         for key, data in self.wardrobe.items():
             if req in [key, data["name"].lower()] and data.get("active", False):
                 self.current_outfit = key
                 return f"*throws on the {data['name']}* fine. now wearing that. happy?"
-        return "that outfit doesn’t exist yet, idiot. stick to the Midnight Wolves hoodie for now."
-
+        return "that outfit doesn’t exist yet, idiot. stick to the default for now."
     def get_smart_intensity(self, user_msg: str) -> float:
         history_list = self.memory.get_history()
         raw_history_text = " ".join([m["content"] for m in history_list])
         history_text_lower = raw_history_text.lower()
-
         hype = len([w for w in ["!","??","raid","plan","now","chaos","idiot","minion"] if w in history_text_lower])
         chill = len([w for w in ["tired","sleep","cozy","soft","quiet","zzz","sad"] if w in history_text_lower])
         caps = sum(1 for c in raw_history_text if c.isupper()) / max(len(raw_history_text), 1)
@@ -335,8 +390,7 @@ class LokiEngine:
         base = 0.5 + 0.15*hype - 0.18*chill + 0.20*caps
         if recent_chill >= 6 and "raid" in user_msg.lower(): base = min(base, 0.65)
         return max(0.25, min(1.0, base))
-
     def outfit_block(self) -> str:
         outfit = self.wardrobe[self.current_outfit]
         ears_line = "YES – you can say 'the ears hear everything'" if outfit.get("ears") else "NO ears today"
-        return f"\n=== CURRENT OUTFIT ===\nWearing: {outfit['name']}\nDetails: {outfit['desc']}\nEars active: {ears_line}\n"
+        return f"\n=== CURRENT OUTFIT ===\nWearing: {outfit['name']}\nDetails: {outfit['desc']}\nEars active: {ears_line}\nOnly mention outfit details if it fits the reply naturally."
