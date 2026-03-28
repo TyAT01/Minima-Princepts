@@ -89,11 +89,17 @@ class MemoryStore:
         if cache_key in self._search_cache:
              return self._search_cache[cache_key]
 
-        where_clause = {}
+        filters = []
         if filter_type:
-            where_clause["type"] = filter_type
+            filters.append({"type": filter_type})
         if user_id:
-            where_clause["user_id"] = user_id
+            filters.append({"user_id": user_id})
+
+        where_clause = None
+        if len(filters) > 1:
+            where_clause = {"$and": filters}
+        elif len(filters) == 1:
+            where_clause = filters[0]
 
         # Use MMR for diverse results (Hybrid Search)
         results = self.collection.query(
@@ -130,7 +136,7 @@ class MemoryStore:
 
     def _mmr(self, query: str, candidate_embs: List[List[float]], n_results: int, lambda_param: float = 0.5) -> List[int]:
         """Maximal Marginal Relevance selection."""
-        if not candidate_embs: return []
+        if candidate_embs is None or len(candidate_embs) == 0: return []
         query_emb = np.array(self.get_embedding(query))
         candidates = [np.array(e) for e in candidate_embs]
 
@@ -297,7 +303,7 @@ class MemoryStore:
             results = self.collection.query(
                 query_texts=[""],
                 n_results=1,
-                where={"user_id": user_id, "type": "interaction"},
+                where={"$and": [{"user_id": user_id}, {"type": "interaction"}]},
                 include=["metadatas"]
             )
 

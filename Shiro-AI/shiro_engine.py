@@ -67,6 +67,7 @@ class ShiroEngine:
         self.llm = LlamaClient(
             base_url=llm_cfg.get('base_url', 'http://localhost:11434/api'),
             model=llm_cfg.get('model', 'llama3.1:8b-instruct-q4_K_M'),
+            fallback_model=llm_cfg.get('fallback_model'),
             api_type=llm_cfg.get('api_type', 'ollama'),
             temperature=llm_cfg.get('temperature', 0.6),
             top_p=llm_cfg.get('top_p', 0.9),
@@ -149,14 +150,11 @@ class ShiroEngine:
     def _safe_async_run(self, coro):
         """Safely runs an async coroutine from a synchronous context."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're already in an event loop, create a task
-                return asyncio.run_coroutine_threadsafe(coro, loop).result()
-            else:
-                return loop.run_until_complete(coro)
+            # Try to get the running loop (preferred in Python 3.7+)
+            loop = asyncio.get_running_loop()
+            return asyncio.run_coroutine_threadsafe(coro, loop).result()
         except RuntimeError:
-            # No event loop in this thread, use asyncio.run
+            # No running event loop in this thread, use asyncio.run to create one
             return asyncio.run(coro)
 
     def process_text(self, text: str, user_name: str = None, interrupt_event: threading.Event = None) -> Generator[str, None, None]:

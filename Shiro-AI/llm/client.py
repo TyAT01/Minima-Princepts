@@ -15,6 +15,7 @@ class LlamaClient:
         self,
         base_url: str = "http://localhost:11434/api",
         model: str = "llama3.1:8b-instruct-q4_K_M",
+        fallback_model: Optional[str] = None,
         api_type: str = "ollama",
         temperature: float = 0.6,
         top_p: float = 0.9,
@@ -25,6 +26,7 @@ class LlamaClient:
         Args:
             base_url: The base URL of the local model server.
             model: The model name to use.
+            fallback_model: Optional fallback model if the primary model fails.
             api_type: 'ollama' or 'openai' (for llama.cpp or other OpenAI compatible servers).
             temperature: Sampling temperature.
             top_p: Top-p sampling.
@@ -33,6 +35,7 @@ class LlamaClient:
         """
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.fallback_model = fallback_model
         self.api_type = api_type.lower()
         self.temperature = temperature
         self.top_p = top_p
@@ -41,7 +44,7 @@ class LlamaClient:
         self._endpoint_type = "chat" # Default to chat
         self._session: Optional[aiohttp.ClientSession] = None
         self._supports_tools: Optional[bool] = None # Cache for tool support
-        logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model}")
+        logger.info(f"Initialized LlamaClient ({self.api_type}) at {self.base_url} with model {self.model} (fallback: {self.fallback_model})")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Returns the active aiohttp session, creating it if necessary."""
@@ -82,46 +85,13 @@ class LlamaClient:
         logger.info(f"Streaming async response for input: {user_input[:50]}...")
 
         if self.api_type == "ollama":
-            try:
+            models_to_try = [self.model]
+            if self.fallback_model:
+                models_to_try.append(self.fallback_model)
+
+            last_exception = None
+            for current_model in models_to_try:
                 try:
-                    # Use cached tool support
-                    effective_tools = tools if self._supports_tools is not False else None
-                    actual_system_prompt = system_prompt
-                    if tools and self._supports_tools is False:
-                         actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
-
-                    async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=effective_tools):
-                        yield chunk
-                    if tools and self._supports_tools is None:
-                        self._supports_tools = True
-                except aiohttp.ClientResponseError as e:
-                    if e.status == 400 and tools:
-                        logger.warning(f"Async Ollama model {self.model} does not support native tools. Switching to prompt-based tools.")
-                        self._supports_tools = False
-                        actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
-                        async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=None):
-                            yield chunk
-                    else:
-                        raise
-            except Exception as e:
-                logger.warning(f"Async Ollama chat failed, falling back: {e}")
-                async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
-                    yield chunk
-        else:
-            async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
-                yield chunk
-
-    def _stream_ollama_with_fallback(self, system_prompt, user_input, history, context, tools=None):
-        endpoints = ["chat", "generate", "openai"]
-        if self._endpoint_type != "chat":
-            if self._endpoint_type in endpoints:
-                endpoints.remove(self._endpoint_type)
-                endpoints.insert(0, self._endpoint_type)
-
-        last_error = None
-        for etype in endpoints:
-            try:
-                if etype == "chat":
                     try:
                         # Use cached tool support
                         effective_tools = tools if self._supports_tools is not False else None
@@ -129,35 +99,87 @@ class LlamaClient:
                         if tools and self._supports_tools is False:
                              actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
 
-                        yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=effective_tools)
+                        async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model):
+                            yield chunk
                         if tools and self._supports_tools is None:
                             self._supports_tools = True
-                    except requests.exceptions.HTTPError as e:
-                        if e.response.status_code == 400 and tools:
-                            logger.warning(f"Ollama model {self.model} does not support native tools. Switching to prompt-based tools.")
+                        return # Success
+                    except aiohttp.ClientResponseError as e:
+                        if e.status == 400 and tools:
+                            logger.warning(f"Async Ollama model {current_model} does not support native tools. Switching to prompt-based tools.")
                             self._supports_tools = False
                             actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
-                            yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=None)
+                            async for chunk in self._stream_ollama_chat_async(actual_system_prompt, user_input, history, context, tools=None, model=current_model):
+                                yield chunk
+                            return # Success
                         else:
                             raise
-                elif etype == "generate":
-                    yield from self._stream_ollama_generate(system_prompt, user_input, history, context)
-                else:
-                    yield from self._stream_openai(system_prompt, user_input, history, context, tools=tools)
-
-                self._endpoint_type = etype
-                return
-            except requests.exceptions.HTTPError as e:
-                last_error = e
-                if e.response.status_code in [400, 404]:
+                except Exception as e:
+                    logger.warning(f"Async Ollama chat failed with model {current_model}: {e}")
+                    last_exception = e
                     continue
-                raise
-            except Exception as e:
-                last_error = e
-                continue
+
+            # If all Ollama models failed, try OpenAI as last resort
+            logger.warning(f"All Ollama models failed, falling back to OpenAI: {last_exception}")
+            async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
+                yield chunk
+        else:
+            async for chunk in self._stream_openai_async(system_prompt, user_input, history, context, tools=tools):
+                yield chunk
+
+    def _stream_ollama_with_fallback(self, system_prompt, user_input, history, context, tools=None):
+        models_to_try = [self.model]
+        if self.fallback_model:
+            models_to_try.append(self.fallback_model)
+
+        endpoints = ["chat", "generate", "openai"]
+        if self._endpoint_type != "chat":
+            if self._endpoint_type in endpoints:
+                endpoints.remove(self._endpoint_type)
+                endpoints.insert(0, self._endpoint_type)
+
+        last_error = None
+        for current_model in models_to_try:
+            for etype in endpoints:
+                try:
+                    if etype == "chat":
+                        try:
+                            # Use cached tool support
+                            effective_tools = tools if self._supports_tools is not False else None
+                            actual_system_prompt = system_prompt
+                            if tools and self._supports_tools is False:
+                                 actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+
+                            yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=effective_tools, model=current_model)
+                            if tools and self._supports_tools is None:
+                                self._supports_tools = True
+                        except requests.exceptions.HTTPError as e:
+                            if e.response.status_code == 400 and tools:
+                                logger.warning(f"Ollama model {current_model} does not support native tools. Switching to prompt-based tools.")
+                                self._supports_tools = False
+                                actual_system_prompt = self._inject_tool_instructions(system_prompt, tools)
+                                yield from self._stream_ollama_chat(actual_system_prompt, user_input, history, context, tools=None, model=current_model)
+                            else:
+                                raise
+                    elif etype == "generate":
+                        yield from self._stream_ollama_generate(system_prompt, user_input, history, context, model=current_model)
+                    else:
+                        yield from self._stream_openai(system_prompt, user_input, history, context, tools=tools, model=current_model)
+
+                    self._endpoint_type = etype
+                    return
+                except requests.exceptions.HTTPError as e:
+                    last_error = e
+                    if e.response.status_code in [400, 404]:
+                        continue
+                    raise
+                except Exception as e:
+                    last_error = e
+                    continue
         if last_error: raise last_error
 
-    def _stream_ollama_chat(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
+    def _stream_ollama_chat(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None):
+        target_model = model or self.model
         messages = [{"role": "system", "content": system_prompt}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
@@ -165,7 +187,7 @@ class LlamaClient:
         messages.append({"role": "user", "content": user_input})
 
         payload = {
-            "model": self.model,
+            "model": target_model,
             "messages": messages,
             "stream": True,
             "options": {
@@ -196,7 +218,8 @@ class LlamaClient:
                 if data.get("done"):
                     break
 
-    async def _stream_ollama_chat_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
+    async def _stream_ollama_chat_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None):
+        target_model = model or self.model
         messages = [{"role": "system", "content": system_prompt}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
@@ -204,7 +227,7 @@ class LlamaClient:
         messages.append({"role": "user", "content": user_input})
 
         payload = {
-            "model": self.model,
+            "model": target_model,
             "messages": messages,
             "stream": True,
             "options": {
@@ -236,7 +259,8 @@ class LlamaClient:
                     if data.get("done"):
                         break
 
-    def _stream_ollama_generate(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str):
+    def _stream_ollama_generate(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, model: Optional[str] = None):
+        target_model = model or self.model
         full_prompt = f"{system_prompt}\n\n"
         if context:
             full_prompt += f"Relevant Context:\n{context}\n\n"
@@ -246,7 +270,7 @@ class LlamaClient:
         full_prompt += f"User: {user_input}\nShiro:"
 
         payload = {
-            "model": self.model,
+            "model": target_model,
             "prompt": full_prompt,
             "stream": True,
             "options": {
@@ -268,7 +292,8 @@ class LlamaClient:
                 if data.get("done"):
                     break
 
-    def _stream_openai(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
+    def _stream_openai(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None):
+        target_model = model or self.model
         messages = [{"role": "system", "content": system_prompt}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
@@ -276,7 +301,7 @@ class LlamaClient:
         messages.append({"role": "user", "content": user_input})
 
         payload = {
-            "model": self.model,
+            "model": target_model,
             "messages": messages,
             "temperature": self.temperature,
             "top_p": self.top_p,
@@ -291,6 +316,7 @@ class LlamaClient:
         if base.endswith("/api"): base = base[:-4]
         endpoints = [f"{base}/v1/chat/completions", f"{self.base_url}/chat/completions"]
 
+        last_exception = None
         for ep in endpoints:
             try:
                 response = requests.post(ep, json=payload, timeout=60, stream=True)
@@ -308,10 +334,14 @@ class LlamaClient:
                             if "tool_calls" in delta:
                                 yield f"TOOL_CALLS: {json.dumps(delta['tool_calls'])}"
                 return
-            except Exception:
+            except Exception as e:
+                last_exception = e
                 continue
+        if last_exception:
+            raise last_exception
 
-    async def _stream_openai_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None):
+    async def _stream_openai_async(self, system_prompt: str, user_input: str, history: List[Dict[str, str]], context: str, tools=None, model: Optional[str] = None):
+        target_model = model or self.model
         messages = [{"role": "system", "content": system_prompt}]
         if context:
             messages[0]["content"] += f"\n\nRelevant Context from Memory:\n{context}"
@@ -319,7 +349,7 @@ class LlamaClient:
         messages.append({"role": "user", "content": user_input})
 
         payload = {
-            "model": self.model,
+            "model": target_model,
             "messages": messages,
             "temperature": self.temperature,
             "top_p": self.top_p,
@@ -352,6 +382,7 @@ class LlamaClient:
                                 yield f"TOOL_CALLS: {json.dumps(delta['tool_calls'])}"
         except Exception as e:
             logger.error(f"Async OpenAI stream failed: {e}")
+            raise
 
     def _inject_tool_instructions(self, system_prompt: str, tools: List[Dict]) -> str:
         """Injects tool definitions and calling instructions into the system prompt."""
@@ -376,7 +407,7 @@ class LlamaClient:
     def perform_diagnostics(self) -> str:
         base = self.base_url
         if base.endswith("/api"): base = base[:-4]
-        report = f"--- OLLAMA DIAGNOSTIC REPORT ---\nTarget Server: {base}\nTarget Model: {self.model}\n\n"
+        report = f"--- OLLAMA DIAGNOSTIC REPORT ---\nTarget Server: {base}\nTarget Model: {self.model} (fallback: {self.fallback_model})\n\n"
         try:
             r = requests.get(base, timeout=5)
             report += f"1. Root Server Check: SUCCESS (Status {r.status_code})\n"
