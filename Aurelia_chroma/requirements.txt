@@ -31,3 +31,6 @@ pydantic
 pydantic-settings
 PyYAML
 psutil
+gradio
+plotly
+pandas
