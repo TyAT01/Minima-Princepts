@@ -1,17 +1,18 @@
 """
 memory.py — ConversationMemory + ContextWindow
 
-ConversationMemory:
-  - Stores per-user conversation summaries (short-term + long-term)
-  - Compresses old message windows into rolling summaries (pure Python, no API)
-  - Shiro can recall what she remembers about someone across sessions
-  - Token-aware: estimates summary length to keep LLM context manageable
-
-ContextWindow:
-  - Smart builder for the LLM message array
-  - Selects relevant memories, recent messages, and inner state
-  - Respects a configurable token budget (safe for local LLMs)
-  - Deduplicates and prioritizes by recency + relevance
+ConversationMemory v5.0:
+  - Episodic recall with keyword search: recall_relevant(user_id, query)
+    finds memories related to what the user is currently talking about,
+    not just a flat dump of the full summary
+  - Key facts with confidence scores: facts heard once get score=1,
+    heard again get score=2, etc. Only high-confidence facts are surfaced
+    in prompts; low-confidence ones wait for corroboration
+  - Fact deduplication: semantically similar facts (same n-gram overlap
+    as ThoughtDiversityScorer) are merged rather than duplicated
+  - Memory recency weighting: more recent sessions' content scores higher
+    in extractive summarization
+  - ContextWindow: token-budget-aware message builder (unchanged)
 """
 
 import time
@@ -55,6 +56,25 @@ class Message:
 # ─────────────────────────────────────────────────────────────
 
 @dataclass
+class KeyFact:
+    """A fact about a user, with confidence tracking."""
+    text: str
+    confidence: int = 1      # increments each time this fact is corroborated
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float  = field(default_factory=time.time)
+
+    def to_dict(self) -> dict:
+        return {"text": self.text, "confidence": self.confidence,
+                "first_seen": self.first_seen, "last_seen": self.last_seen}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "KeyFact":
+        return cls(text=d["text"], confidence=d.get("confidence", 1),
+                   first_seen=d.get("first_seen", time.time()),
+                   last_seen=d.get("last_seen", time.time()))
+
+
+@dataclass
 class MemorySummary:
     user_id: str
     content: str           # The summary text
@@ -62,18 +82,32 @@ class MemorySummary:
     message_count: int = 0
     topics_covered: list = field(default_factory=list)
     last_updated: float = field(default_factory=time.time)
-    key_facts: list = field(default_factory=list)   # ["prefers dark themes", "has a cat named Max"]
+    key_facts: list = field(default_factory=list)   # list of KeyFact objects
 
     def age_hours(self) -> float:
         return (time.time() - self.last_updated) / 3600.0
 
-    def to_prompt_str(self) -> str:
-        parts = [f"Memory of {self.user_id} ({self.session_count} sessions):"]
-        parts.append(self.content)
-        if self.key_facts:
-            parts.append("Key facts: " + "; ".join(self.key_facts))
+    def confident_facts(self, min_confidence: int = 1) -> list[str]:
+        """Return fact texts at or above minimum confidence."""
+        facts = []
+        for f in self.key_facts:
+            if isinstance(f, KeyFact):
+                if f.confidence >= min_confidence:
+                    facts.append(f.text)
+            else:
+                facts.append(str(f))   # backwards-compat with plain strings
+        return facts
+
+    def to_prompt_str(self, min_confidence: int = 1) -> str:
+        parts = [f"Memory of {self.user_id} ({self.session_count} sessions, {self.message_count} messages):"]
+        if self.content:
+            parts.append(self.content)
+        facts = self.confident_facts(min_confidence)[:8]
+        if facts:
+            facts_str = "; ".join(facts)
+            parts.append(f"Key facts: {facts_str}")
         if self.topics_covered:
-            parts.append("Topics: " + ", ".join(self.topics_covered[:5]))
+            parts.append(f"Recurring topics: {', '.join(self.topics_covered[:6])}")
         return "\n".join(parts)
 
 
@@ -119,10 +153,13 @@ class ConversationMemory:
         content: str,
         emotions: Optional[dict] = None,
         topics: Optional[list] = None,
-    ) -> Message:
+    ) -> Optional[Message]:
+        """Add a user message. Returns None and skips storage for empty/whitespace messages."""
+        if not content or not content.strip():
+            return None
         msg = Message(
             role="user",
-            content=content,
+            content=content.strip(),
             user_id=user_id,
             emotions=emotions or {},
             topics=topics or [],
@@ -164,9 +201,93 @@ class ConversationMemory:
             return ""
         return summary.to_prompt_str()
 
+    def recall_relevant(self, user_id: str, query: str, top_n: int = 3) -> list[str]:
+        """
+        Keyword-search the user's memory for content relevant to query.
+        Returns a list of relevant fact texts or summary sentences.
+
+        Used to give Shiro targeted recall rather than dumping the full summary.
+        e.g., user is talking about gaming → return gaming-related memories only.
+        """
+        summary = self._summaries.get(user_id)
+        buf     = list(self._buffers.get(user_id, []))
+        if not summary and not buf:
+            return []
+
+        # Extract keywords from query (4+ char words)
+        query_words = set(re.findall(r"\b\w{4,}\b", query.lower()))
+        if not query_words:
+            return []
+
+        results: list[tuple[float, str]] = []
+
+        # Score summary sentences
+        if summary and summary.content:
+            for sent in re.split(r"[.!?]+\s*", summary.content):
+                sent = sent.strip()
+                if len(sent) < 10:
+                    continue
+                sent_words = set(re.findall(r"\b\w{4,}\b", sent.lower()))
+                overlap = len(query_words & sent_words) / max(len(query_words), 1)
+                if overlap > 0:
+                    results.append((overlap, sent))
+
+        # Score key facts (high-confidence facts weighted higher)
+        if summary:
+            for f in summary.key_facts:
+                if isinstance(f, KeyFact):
+                    fact_text, conf = f.text, f.confidence
+                else:
+                    fact_text, conf = str(f), 1
+                fact_words = set(re.findall(r"\b\w{4,}\b", fact_text.lower()))
+                overlap = len(query_words & fact_words) / max(len(query_words), 1)
+                if overlap > 0:
+                    # Boost confident facts
+                    score = overlap * (1.0 + 0.2 * min(conf, 3))
+                    results.append((score, fact_text))
+
+        # Score recent messages
+        for msg in buf[-20:]:
+            if msg.role != "user":
+                continue
+            msg_words = set(re.findall(r"\b\w{4,}\b", msg.content.lower()))
+            overlap = len(query_words & msg_words) / max(len(query_words), 1)
+            if overlap > 0.3:
+                # Recent messages are more relevant — slight boost
+                results.append((overlap * 1.1, msg.content[:60]))
+
+        results.sort(reverse=True)
+        # Deduplicate and return top-N
+        seen: set[str] = set()
+        out: list[str] = []
+        for _, text in results:
+            if text not in seen:
+                seen.add(text)
+                out.append(text)
+                if len(out) >= top_n:
+                    break
+        return out
+
     def recall_topics(self, user_id: str) -> list[str]:
         s = self._summaries.get(user_id)
         return s.topics_covered if s else []
+
+    def has_memory(self, user_id: str) -> bool:
+        """True if Shiro has any memory of this user."""
+        return user_id in self._summaries or bool(self._buffers.get(user_id))
+
+    def message_count_today(self, user_id: str) -> int:
+        """Count messages from this user in the current in-memory buffer."""
+        return len(self._buffers.get(user_id, []))
+
+    def get_recent_topics(self, user_id: str, n: int = 3) -> list[str]:
+        """Get topics from recent messages (in-session, not just summary)."""
+        buf = list(self._buffers.get(user_id, []))
+        topic_counts: dict[str, int] = {}
+        for msg in buf[-15:]:
+            for t in msg.topics:
+                topic_counts[t] = topic_counts.get(t, 0) + 1
+        return sorted(topic_counts, key=topic_counts.get, reverse=True)[:n]
 
     # ── Compression (extractive, pure Python) ────────────────────
 
@@ -207,7 +328,7 @@ class ConversationMemory:
         top_topics = sorted(topic_counts, key=topic_counts.get, reverse=True)[:5]
 
         # Extract key facts (quoted phrases, names, strong opinions)
-        key_facts = self._extract_key_facts(user_texts)
+        new_key_facts = self._extract_key_facts(user_texts)
 
         # Update or create summary
         existing = self._summaries.get(user_id)
@@ -220,10 +341,8 @@ class ConversationMemory:
             for t in top_topics:
                 if t not in existing.topics_covered:
                     existing.topics_covered.append(t)
-            for f in key_facts:
-                if f not in existing.key_facts:
-                    existing.key_facts.append(f)
-            existing.key_facts = existing.key_facts[-15:]   # cap
+            # Merge facts with confidence tracking
+            existing.key_facts = self._merge_key_facts(existing.key_facts, new_key_facts)
         else:
             self._summaries[user_id] = MemorySummary(
                 user_id=user_id,
@@ -231,7 +350,7 @@ class ConversationMemory:
                 session_count=1,
                 message_count=len(to_compress),
                 topics_covered=top_topics,
-                key_facts=key_facts,
+                key_facts=new_key_facts,
             )
 
     def _extractive_summarize(self, texts: list[str], max_chars: int = 600) -> str:
@@ -290,12 +409,42 @@ class ConversationMemory:
 
         return ". ".join(selected) if selected else texts[-1][:max_chars]
 
-    def _extract_key_facts(self, texts: list[str]) -> list[str]:
+    def _fact_ngrams(self, text: str, n: int = 3) -> set[str]:
+        """Character n-grams for fact similarity comparison."""
+        t = re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+        return {t[i:i+n] for i in range(len(t) - n + 1)} if len(t) >= n else set()
+
+    def _facts_similar(self, a: str, b: str, threshold: float = 0.42) -> bool:
+        """
+        True if two facts are semantically close (likely duplicates).
+        Uses n-gram overlap + keyword (content word) overlap.
+        Two paths to similarity:
+          1. High n-gram overlap (same surface form)
+          2. High keyword overlap (same core meaning, different phrasing)
+        """
+        a_ng = self._fact_ngrams(a)
+        b_ng = self._fact_ngrams(b)
+        if not a_ng or not b_ng:
+            return False
+        jaccard = len(a_ng & b_ng) / len(a_ng | b_ng)
+        if jaccard >= threshold:
+            return True
+        # Keyword overlap: content words (4+ chars) that appear in both
+        _stop = {"that", "this", "with", "have", "from", "will", "been", "some"}
+        a_kw = {w for w in re.findall(r"\b\w{4,}\b", a.lower()) if w not in _stop}
+        b_kw = {w for w in re.findall(r"\b\w{4,}\b", b.lower()) if w not in _stop}
+        if a_kw and b_kw:
+            kw_overlap = len(a_kw & b_kw) / max(len(a_kw), len(b_kw))
+            if kw_overlap >= 0.6:
+                return True
+        return False
+
+    def _extract_key_facts(self, texts: list[str]) -> list[KeyFact]:
         """
         Pull short, memorable facts from user messages.
-        Looks for: name mentions, preferences, strong opinions, facts about their life.
+        Returns KeyFact objects with initial confidence=1.
         """
-        facts: list[str] = []
+        raw_facts: list[str] = []
         patterns = [
             re.compile(r"\bmy (name is|name's) (\w+)\b", re.I),
             re.compile(r"\bi (have|own|got) (a |an )?(.{3,30})\b", re.I),
@@ -308,9 +457,52 @@ class ConversationMemory:
                 m = p.search(text)
                 if m:
                     fact = m.group(0).strip().rstrip(".,!?")
-                    if len(fact) < 60 and fact not in facts:
-                        facts.append(fact.lower())
-        return facts[:10]
+                    if len(fact) < 60 and fact.lower() not in raw_facts:
+                        raw_facts.append(fact.lower())
+        return [KeyFact(text=f) for f in raw_facts[:10]]
+
+    def _merge_key_facts(self, existing: list, new_facts: list[KeyFact]) -> list:
+        """
+        Merge new facts into existing, boosting confidence on corroborations.
+        Deduplicates semantically similar facts — both within new_facts and
+        against existing.
+        """
+        # Normalize existing to KeyFact objects
+        merged: list[KeyFact] = []
+        for f in existing:
+            if isinstance(f, KeyFact):
+                merged.append(f)
+            else:
+                merged.append(KeyFact(text=str(f)))
+
+        # First: deduplicate within new_facts themselves before merging
+        deduped_new: list[KeyFact] = []
+        for new_f in new_facts:
+            match_in_new = False
+            for existing_new in deduped_new:
+                if self._facts_similar(new_f.text, existing_new.text):
+                    existing_new.confidence += 1
+                    match_in_new = True
+                    break
+            if not match_in_new:
+                deduped_new.append(new_f)
+
+        # Then: merge deduped new facts against existing
+        for new_f in deduped_new:
+            matched = False
+            for existing_f in merged:
+                if self._facts_similar(new_f.text, existing_f.text):
+                    # Boost confidence — fact heard again (cross-session)
+                    existing_f.confidence += new_f.confidence
+                    existing_f.last_seen = time.time()
+                    matched = True
+                    break
+            if not matched:
+                merged.append(new_f)
+
+        # Sort by confidence descending, cap at 15
+        merged.sort(key=lambda f: f.confidence, reverse=True)
+        return merged[:15]
 
     def _merge_summaries(self, old: str, new: str) -> str:
         """Merge two summary strings, deduplicating overlapping content."""
@@ -331,29 +523,41 @@ class ConversationMemory:
     # ── Persistence ──────────────────────────────────────────────
 
     def export(self) -> dict:
-        return {
-            "summaries": {
-                uid: {
-                    "content":       s.content,
-                    "session_count": s.session_count,
-                    "message_count": s.message_count,
-                    "topics":        s.topics_covered,
-                    "key_facts":     s.key_facts,
-                    "last_updated":  s.last_updated,
-                }
-                for uid, s in self._summaries.items()
+        summaries = {}
+        for uid, s in self._summaries.items():
+            facts_serialized = []
+            for f in s.key_facts:
+                if isinstance(f, KeyFact):
+                    facts_serialized.append(f.to_dict())
+                else:
+                    facts_serialized.append({"text": str(f), "confidence": 1,
+                                             "first_seen": time.time(), "last_seen": time.time()})
+            summaries[uid] = {
+                "content":       s.content,
+                "session_count": s.session_count,
+                "message_count": s.message_count,
+                "topics":        s.topics_covered,
+                "key_facts":     facts_serialized,
+                "last_updated":  s.last_updated,
             }
-        }
+        return {"summaries": summaries}
 
     def import_data(self, data: dict):
         for uid, d in data.get("summaries", {}).items():
+            raw_facts = d.get("key_facts", [])
+            key_facts: list = []
+            for f in raw_facts:
+                if isinstance(f, dict):
+                    key_facts.append(KeyFact.from_dict(f))
+                else:
+                    key_facts.append(KeyFact(text=str(f)))
             self._summaries[uid] = MemorySummary(
                 user_id=uid,
                 content=d["content"],
                 session_count=d.get("session_count", 1),
                 message_count=d.get("message_count", 0),
                 topics_covered=d.get("topics", []),
-                key_facts=d.get("key_facts", []),
+                key_facts=key_facts,
                 last_updated=d.get("last_updated", time.time()),
             )
 

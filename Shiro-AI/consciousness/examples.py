@@ -1,5 +1,5 @@
 """
-Shiro Consciousness Engine v4.0 — Examples
+Shiro Consciousness Engine v5.0 — Examples
 
 Run the terminal demo:
     python examples.py
@@ -43,7 +43,7 @@ async def run_terminal_demo():
     RST   = "\033[0m"
 
     print(f"\n{'═'*62}")
-    print(f"  SHIRO CONSCIOUSNESS ENGINE v3.0")
+    print(f"  SHIRO CONSCIOUSNESS ENGINE v5.0")
     print(f"{'═'*62}")
     print(f"  {GREY}thoughts shown in grey{RST}")
     print(f"  {CYAN}speech shown in cyan{RST}")

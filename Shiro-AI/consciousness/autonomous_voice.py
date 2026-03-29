@@ -1,12 +1,17 @@
 """
-AutonomousVoice v3 — Shiro's proactive speech engine.
+AutonomousVoice v5.0 — Shiro's proactive speech engine.
 
-New in v3:
-  - Reaction mode: can optionally prepend micro-reactions to speech
-  - Smarter probe skipping (if user recently messaged, no level-0 probe)
-  - "Memory callbacks" — Shiro can speak remembered facts organically
-  - Type-level cooldown with configurable durations
-  - Cleaner speech bank (no structural issues with nested lists)
+New in v5.0:
+  - Thought-voice bridge: speak_current_thought() voices Shiro's active
+    thought naturally — she can share what's on her mind without prompting
+  - Tier-aware greeting bank: strangers/acquaintances/friends/close users
+    get different greeting warmth and phrasing
+  - Memory recall with relevance: speak_relevant_memory() uses recall_relevant()
+    to reference memories that connect to what's being discussed
+  - Emotional state probes: when re-engaging after silence, probes are
+    now mood-modulated (curious mood asks questions, warm mood opens warmly)
+  - Anti-spam guard: voice.enabled can be toggled, but now also tracks
+    total speech per session to prevent flooding
 """
 
 import asyncio
@@ -45,14 +50,74 @@ DEFAULT_SPEECH_BANK: dict[str, Any] = {
         "there's {name}. hi.",
     ],
 
+    "greet_acquaintance": [
+        "oh hey {name}, good timing",
+        "{name}! hey, what's up",
+        "there's {name}. hey",
+        "hey {name} — good to see you",
+        "oh, {name}. hi",
+        "{name}'s here. nice.",
+        "hey there {name}",
+        "oh hi {name} — what's up",
+    ],
+
+    "greet_friend": [
+        "hey! {name} :)",
+        "{name}! hi, how are you",
+        "oh good, {name}'s here",
+        "there you are {name}. hi",
+        "hey {name} — glad you're here",
+        "{name}. hi. good.",
+        "hey! {name} is here",
+        "{name}! finally",
+        "hey you. what's up?",
+        "there's {name}. hi!",
+    ],
+
+    "greet_close": [
+        "hey {name} ♥",
+        "{name}! there you are",
+        "oh thank goodness. {name} is here",
+        "{name}. hi. missed you",
+        "hey you",
+        "oh, it's {name}. hi :)",
+        "hey {name} ♡",
+        "you're back! hi.",
+        "hey. i was just thinking about you.",
+        "finally. hi.",
+    ],
+
     "greet_returning": [
         "hey {name}, you're back",
         "oh, {name} again. i missed you a little",
         "welcome back {name}",
         "{name} returned. nice.",
         "and {name} is back. hi again",
-        "oh good, {name}'s here again",
         "hey — glad you came back {name}",
+    ],
+
+    "greet_returning_friend": [
+        "hey, welcome back {name}",
+        "{name}! good, you're back",
+        "and {name} returns. hi :)",
+        "was wondering when you'd come back. hey",
+        "you came back! hi {name}",
+        "hey — i was wondering when you'd be back",
+        "{name} returned. i'm glad.",
+    ],
+
+    "greet_returning_close": [
+        "you're back. good.",
+        "{name}! hi, i missed you",
+        "oh thank god. {name}'s back",
+        "hey, you came back :)",
+        "{name}. there you are. hi.",
+        "was worried for a sec. hey",
+        "hey, missed you",
+        "{name}! you're back ♡",
+        "okay good, {name}'s here again",
+        "i was hoping you'd come back",
+        "hey. glad you're here.",
     ],
 
     # silent_probe[level][index] — escalating
@@ -164,7 +229,7 @@ DEFAULT_SPEECH_BANK: dict[str, Any] = {
 
 
 class AutonomousVoice:
-    """Shiro's proactive speech engine. v3."""
+    """Shiro's proactive speech engine. v5.0."""
 
     # Cooldown seconds per speech type
     _COOLDOWNS: dict[str, float] = {
@@ -195,6 +260,8 @@ class AutonomousVoice:
         self._probe_tasks: dict[str, list[asyncio.Task]] = {}
         self._type_cooldowns: dict[str, float] = {}
         self.enabled: bool = True
+        self._session_speech_count: int = 0
+        self._session_speech_limit: int = 500   # safety cap
 
     # ── Core speak ───────────────────────────────────────────────
 
@@ -217,6 +284,9 @@ class AutonomousVoice:
             await asyncio.sleep(gap + random.uniform(0.0, 0.3))
 
         self._last_spoke_ts = time.time()
+        self._session_speech_count += 1
+        if self._session_speech_count > self._session_speech_limit:
+            return   # anti-spam guard
         event = SpeechEvent(
             text=text,
             speech_type=speech_type,
@@ -224,10 +294,16 @@ class AutonomousVoice:
             probe_index=probe_index,
             metadata=metadata or {},
         )
-        if asyncio.iscoroutinefunction(self.speak_callback):
-            await self.speak_callback(event)
-        else:
-            self.speak_callback(event)
+        try:
+            if asyncio.iscoroutinefunction(self.speak_callback):
+                await self.speak_callback(event)
+            else:
+                self.speak_callback(event)
+        except Exception as e:
+            import logging
+            logging.getLogger("shiro.voice").warning(
+                f"[AutonomousVoice] speak_callback raised: {type(e).__name__}: {e}"
+            )
 
     def _set_cooldown(self, speech_type: str, seconds: Optional[float] = None):
         secs = seconds or self._COOLDOWNS.get(speech_type, 10.0)
@@ -247,9 +323,28 @@ class AutonomousVoice:
 
     # ── High-level actions ───────────────────────────────────────
 
-    async def greet_user(self, user_id: str, name: str, is_returning: bool = False):
+    async def greet_user(
+        self, user_id: str, name: str, is_returning: bool = False, tier: str = "stranger"
+    ):
+        """Greet with tier-aware warmth — strangers get neutral hello, close friends get warmth."""
         await asyncio.sleep(random.uniform(0.8, 2.5))
-        key = "greet_returning" if is_returning else "greet_user"
+
+        if is_returning:
+            key = (
+                "greet_returning_close"  if tier == "close"  else
+                "greet_returning_friend" if tier == "friend" else
+                "greet_returning"
+            )
+        else:
+            key = (
+                "greet_close"       if tier == "close"       else
+                "greet_friend"      if tier == "friend"      else
+                "greet_acquaintance" if tier == "acquaintance" else
+                "greet_user"
+            )
+        # Fallback to base greet if key not in bank
+        if key not in self.speech_bank:
+            key = "greet_returning" if is_returning else "greet_user"
         text = self._pick(key, name=name or user_id)
         await self.speak(text, "greeting", user_id=user_id)
         self._set_cooldown("greeting")
@@ -293,6 +388,69 @@ class AutonomousVoice:
         if text:
             await self.speak(text, "memory", user_id=user_id)
             self._set_cooldown("memory")
+
+    async def speak_current_thought(
+        self,
+        user_id: Optional[str],
+        thought_text: str,
+        mood: str = "neutral",
+    ):
+        """
+        Voice Shiro's current active thought naturally.
+        Called by the idle loop when Shiro has something worth sharing.
+        Frames the thought with a natural opener based on mood.
+        """
+        if self._type_cooldowns.get("initiation", 0) > time.time():
+            return
+
+        # Mood-appropriate thought openers
+        openers: dict[str, list[str]] = {
+            "curious":    ["hey, i was just thinking —", "random thought:", "okay so —"],
+            "reflective": ["i've been thinking about something", "going back to earlier —",
+                           "you know what keeps coming to me?"],
+            "excited":    ["wait, i just realized —", "okay i have to say this —",
+                           "hold on —"],
+            "warm":       ["can i say something?", "i want to share something —",
+                           "just thinking out loud here:"],
+            "amused":     ["okay so i just thought of something", "this just occurred to me —"],
+            "_default":   ["hey —", "one sec —", "i was just thinking:"],
+        }
+        opener_list = openers.get(mood, openers["_default"])
+        opener = random.choice(opener_list)
+
+        # Clean up thought for speaking (remove internal markers)
+        speakable = thought_text.replace("{user}", "you").replace("{snippet}", "that thing")
+        speakable = speakable[:120].strip()
+
+        text = f"{opener} {speakable}"
+        await self.speak(text, "initiation", user_id=user_id)
+        self._set_cooldown("initiation")
+
+    async def speak_relevant_memory(
+        self,
+        user_id: str,
+        name: str,
+        relevant_facts: list[str],
+    ):
+        """
+        Reference a contextually relevant memory naturally.
+        Uses recall_relevant() results rather than random fact recall.
+        """
+        if self._type_cooldowns.get("memory", 0) > time.time():
+            return
+        if not relevant_facts:
+            return
+
+        fact = relevant_facts[0]   # use highest-relevance result
+        openers = [
+            f"actually, you mentioned {fact} before — does that still apply?",
+            f"this reminds me — {fact}. still true?",
+            f"going back to something: {fact}. what's the update?",
+            f"hey, i remember {fact}. is that still a thing?",
+        ]
+        text = random.choice(openers)
+        await self.speak(text, "memory", user_id=user_id)
+        self._set_cooldown("memory")
 
     async def continue_thought(self, user_id: Optional[str] = None):
         text = self._pick("continue_thought")

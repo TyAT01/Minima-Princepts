@@ -12,6 +12,7 @@ numpy
 cachetools
 networkx
 pytest
+pytest-asyncio
 onnxruntime-gpu
 webrtcvad-wheels
 fastapi
