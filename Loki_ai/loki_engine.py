@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from llm.client import LlamaClient
 from memory.store import MemoryStore
 from persona.manager import PersonaManager
-from utils.text_utils import split_into_sentences
+from utils.text_utils import split_into_sentences, clean_yaml_block
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +434,7 @@ class LokiEngine:
                     context=reflection_prompt
                 )
 
-                cleaned_raw = self._clean_yaml_block(analysis_raw)
+                cleaned_raw = clean_yaml_block(analysis_raw)
                 data = None
                 try:
                     data = yaml.safe_load(cleaned_raw)
@@ -529,13 +529,6 @@ class LokiEngine:
         except Exception as e:
             logger.error(f"Shutdown failed: {e}")
 
-    def _clean_yaml_block(self, text: str) -> str:
-        if "```yaml" in text: text = text.split("```yaml")[1].split("```")[0]
-        elif "```yml" in text: text = text.split("```yml")[1].split("```")[0]
-        elif "```" in text: text = text.split("```")[1].split("```")[0]
-        lines = text.strip().splitlines()
-        if lines and lines[0].strip().lower() in ["yml", "yaml"]: text = "\n".join(lines[1:])
-        return text.strip()
 
     def generate_autonomous_thought(self):
         """Generates a proactive thought."""
