@@ -246,22 +246,15 @@ class AlwaysListenBot:
                     logger.error(f"Could not find or fetch channel {channel_id}: {e}")
                     return
 
-            # Thoroughly clean up any existing voice clients for this guild to prevent 4006/Already Connected errors
-            for vc in self.bot.voice_clients:
-                if vc.guild.id == channel.guild.id:
-                    if vc.is_connected() and vc.channel.id == channel_id:
-                        logger.info("Already connected to the correct channel.")
-                        self._voice_client = vc
-                        if not self._is_listening:
-                             asyncio.create_task(self.start_listening())
-                        return
-                    else:
-                        logger.info(f"Forcing disconnect of existing voice client in guild {vc.guild.id}")
-                        try:
-                            await vc.disconnect(force=True)
-                            await asyncio.sleep(1) # Give Discord a moment to process disconnect
-                        except Exception as e:
-                            logger.warning(f"Error during forced disconnect: {e}")
+            # 1. CLEANUP: If the bot has a voice client in this guild, force disconnect it to ensure a fresh session (resolves 4006).
+            existing_vc = channel.guild.voice_client
+            if existing_vc:
+                logger.info(f"Found existing voice connection in guild {channel.guild.id}. Forcing disconnect...")
+                try:
+                    await existing_vc.disconnect(force=True)
+                    await asyncio.sleep(1) # Give Discord a moment to process disconnect
+                except Exception as e:
+                    logger.warning(f"Error during forced disconnect: {e}")
 
             self._voice_client = None
             self._is_listening = False
@@ -277,12 +270,13 @@ class AlwaysListenBot:
                         break
                     except Exception as e:
                         logger.error(f"Failed to connect to voice (attempt {attempt + 1}): {e}")
-                        if self._voice_client:
+                        # Forcefully disconnect to clean up session
+                        if channel.guild.voice_client:
                             try:
-                                await self._voice_client.disconnect(force=True)
+                                await channel.guild.voice_client.disconnect(force=True)
                             except Exception:
                                 pass
-                            self._voice_client = None
+                        self._voice_client = None
 
                         if attempt < max_retries - 1:
                             await asyncio.sleep(5)
@@ -368,8 +362,12 @@ class AlwaysListenBot:
             # VAD config for Discord's 48kHz audio
             vad_config = VADConfig(aggressiveness=3, sample_rate=self._config.discord_sample_rate)
             sink = AureliaAudioSink(self, vad_config)
-            self._voice_client.listen(sink, self._processing_pool)
-            logger.info("Started listening in voice channel.")
+            if self._voice_client and self._voice_client.is_connected():
+                self._voice_client.listen(sink, self._processing_pool)
+                logger.info("Started listening in voice channel.")
+            else:
+                logger.warning("Cannot start listening: Voice client is not connected.")
+                self._is_listening = False
 
     async def process_audio_data(self, user, data):
         fp_name = None
