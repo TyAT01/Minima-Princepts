@@ -1,0 +1,622 @@
+(Idle)
+Grace: Design concept... what's your design concept?!
+Seed: Hmm... it's kinda like this and that, and then that and this~?
+(Talk to Seed)
+Grace: This Intelligent Construct... I remember it's a combat-specialized heavy manned Intelligent Construct produced by the military. It's been out of production for quite some time now...
+Seed: Not "this Intelligent Construct," his name is Seed Sr.~
+Grace: Sorry, I can tell he means a lot to you... but how does Mr. Seed Sr. manage to go invisible at will?! That's just mind-blowing...!
+Grace: New Eridu doesn't have this kind of tech yet... even Three Gates Corp.'s Chameleon coating is super unstable in actual combat... How did you pull this off?
+Seed: Hmm~? Looks like you're also a fan of Seed Sr.... Let me break down the design concept and principles for you~
+Seed: Actually, all it requires is some simple tweaks and a change in mindset. Like this... then like that... and then this... and finally this...
+Seed's tiny hands wave left to right, then down as she explains incredibly abstract principles... but Grace seems to follow her train of thought, even nodding thoughtfully in response!
+Seed: The final three steps are: hit it with light from each frequency band, merge the humidity detection and exhaust systems, then tear down and rebuild the whole system~
+Grace: ...
+Grace: Nah, I lost track of what you were saying about two-thirds of the way through...
+Seed: No worries! This is my first time explaining things in such detail. We can add each other on Knock Knock and keep talking there~
+Seed: This is the first time I've seen someone's eyes light up like that just from seeing Seed Sr. move... Grace, you remind me of that saying~
+Seed & Grace: People who love Intelligent Constructs and machines can't be bad!
+Icon Dialogue Talk (The two tech nerds just became friends!)
+Seed: Yah-hoh, Proxy~ Were you also drawn here by the excavators, cranes, and pile drivers like me?
+Icon Dialogue Talk Grace and I are friends!
+Seed: Is that so~ You sure have many friends from all walks...
+Grace: Proxy, why didn't you introduce me to such an amazing mechanical genius earlier! I doubt anyone could surpass this kid's talent when it comes to machines!
+Icon Dialogue Talk Of course, I love these machines!
+Seed: Then Proxy's a machine enjoyer too~ Another thing we have in common!
+Seed: Next time Proxy should bring Eous along, let's have a little mechanics tea party together~
+Grace: Sounds great!
+Icon Dialogue Talk Eous will pass on that!
+Icon Dialogue Talk (Sorry, Eous...)
+Icon Dialogue Talk I came here looking for you, Seed.
+Seed: Really?! I had no idea you cared about what I'm doing so much~
+Seed: Hmm... Maybe next time I move around, I should leave more clues? After all, your tracking skills aren't nearly as insane as Trigger's...
+Seed: Now that we're here, would you like to join us for the upcoming mechanical disassembly and construction discussion~? I'll explain my thought process in detail~ just like before!
+Icon Dialogue Talk I'll join.
+Seed: Awesome~ Grace and I shall show you the wonders and intricacies of machinery~
+Grace: Oh right, Seed... With your talent and all, have you ever thought about developing new machines that could help the citizens of New Eridu?
+Seed: Never even crossed my mind~
+Seed: I usually just tinker with Seed Sr. and make stuff I need. That's all I'm after~
+Grace: But that's such a waste of your talent... If you could apply yourself to developing new types of machinery, we could further reduce the risks humans face!
+Seed: Even if you say that... I still don't really feel it, y'know.
+Icon Dialogue Talk Using research on machines to protect citizens...
+Icon Dialogue Talk ...Sounds like a Seed Sr. thing to do.
+Seed: ...Really...?
+Seed: Lemme think it over~ Grace, can we chat more about this kind of stuff on Knock Knock?
+Grace: Of course! I'm super excited to talk with you!
+(If "Of course, I love these machines!" or "I came here looking for you, Seed." are selected)
+Trust Rank Friendly Trust increase with Seed
+(Idle)
+Seed: Speaking of, my Knock Knock...
+(Talk to Seed again, optional)
+Seed: Come to think of it, on my Knock Knock account... Grace, you're probably like my seventh friend~
+Grace: Huh... how did you manage to have even fewer friends than me?
+Seed: Hehe~ pretty impressive, huh?
+
+(Idle)
+Seed: Come to think of it, the other day I ran into...
+Soldier 11: I think you're just seeing things.
+(Talk to Seed)
+Seed: Y'know, the other day I ran into someone at Lumina Square who smelled just like you, White Pineapple Ponytail~
+Seed: Let me sniff you again to make sure... *sniff sniff*, *sniff sniff*...
+Seed: Mmhm, she's just like you in every way, minus that spicy scent you've got~
+Soldier 11: I'm not a pineapple. Besides, I think it's just your imagination. There's no way two people can smell exactly the same...
+Soldier 11: ...If it really exists, it must be what they call a "doppelganger," and we need to eliminate it right away.
+Seed: That's so mean~ Even if it's a doppelganger, we should still try to get along~
+Soldier 11: That assumption doesn't hold up anyway. After all, you and Seed Sr. don't even smell the same.
+Seed: Huh? But Seed Sr. and I aren't doppelgangers, so of course we smell different~
+Soldier 11: Seed, there's no need to be ashamed. Seed Sr. is your prototype, and you're a replica... That's not something you need to hide.
+Soldier 11: Even if we're not the prototype model, we can still be the best of the best. That's true for both you and me.
+Icon Dialogue Talk (Looks like Soldier 11 completely misunderstood...)
+Icon Dialogue Talk (Is she thinking of her and Anby...?)
+Seed: Your words are inspiring and all~ But Seed Sr. and I aren't even the same species, y'know? Though I'd rather have been born as an Intelligent Construct than a human anyway...
+Soldier 11: Prototypes and replicas aren't such inconvenient concepts. I know you and Seed Sr. are close, unlike how it is for me... but that shouldn't be a reason to doubt yourself.
+Soldier 11: And that definitely shouldn't be your go-to argument when it comes to scents.
+Seed: Hmm, White Pineapple Ponytail, sometimes our channels just broadcast on different wavelengths... Eh, it's too much trouble to explain~
+Soldier 11: I'm not a pineapple.
+Seed: More importantly, there seems to be an amazing smell nearby~ Don't you think so, Proxy~?
+Icon Dialogue Talk Huh? Me?
+Icon Dialogue Talk I don't have a scent, do I...?
+Seed: Oh yes~ Everyone has their own unique scent. Soldier 11 smells like lilies, Trigger smells like sun-warmed blankets, and Orphie smells like lightly toasted marshmallow~
+Icon Dialogue Talk What about you and Magus?
+Seed: Captain smells like a mix of motor oil and gunpowder~ As for me, I smell pretty similar to Proxy, since we're of the same kind and all!
+Soldier 11: Oh really? Lychee Evaporation Agent, let me take a sniff... *sniff sniff*, *sniff sniff*...
+Soldier 11: ...You do smell similar to Seed. But there's still a subtle difference.
+Seed: Maybe it's from the shampoo I used last night~? Hey Proxy, can you tell what scent it is?
+Icon Dialogue Talk Umm...
+Seed: Proxy, you won't be able to smell anything from that far away~
+Seed leans in close, nuzzling her tiny head against your face. You shyly take a sniff, smelling a subtle fragrance: a blend of canola flowers, peaches, and paper...
+Icon Dialogue Talk It smells like flowers... like I've stepped into a flower field...
+Trust Rank Trusted Significant Trust increase with Seed
+Seed: Hehe~ I added a bit of nectar to my shampoo! Of course, Proxy noticed the scent~
+Seed: Wearing this floral scent out, you'll feel like you're surrounded by flowers all the time~ If you like it, I can bring you the shampoo later, and you can smell my hair if you want~!
+Icon Dialogue Talk It smells like fruit... like being in an orchard...
+Seed: Hmm~? I didn't add any fruit to my shampoo... Could it be the peach-scented rust remover I sprayed in Seed Sr.'s cockpit?
+Seed: You've got quite the nose to pick up on that... but next time focus more on my actual scent!
+Icon Dialogue Talk It smells like paper... like I've walked into a bookstore...
+Seed: Ah... well, I was designing new combat components for Seed Sr. last night and accidentally fell asleep on the blueprints...
+Seed: ...Is the smell that obvious? Proxy, I wasn't planning on letting you pick up on that...
+Soldier 11: The subtle difference in scent comes from the shampoo... which means, your scents are really that similar, huh?
+Soldier 11: ...I'm a bit envious. What kind of connection do you two have... Red Horned 9x Speed, could you be one of Seed Sr.'s replicas too?
+Icon Dialogue Talk I'm Seed's senior at our academy.
+Seed: Oh yeah~ We're from the same school!
+Icon Dialogue Talk I'm (‍Seed's brother / Seed's sister‍).
+Seed: Well, you're not wrong~ Take good care of me, big (‍bro / sis‍)~
+(If "It smells like fruit... like being in an orchard..." or "It smells like paper... like I've walked into a bookstore..." are selected)
+Trust Rank Friendly Trust increase with Seed
+(Idle)
+Seed: By the way, that person who has the same scent as you...
+(Talk to Seed again, optional)
+Seed: Come to think of it, that person with your scent was holding a burger~ I've got this feeling we'll meet again~
+Soldier 11: Hmph... is that so? If we ever run into them again, remember to bring me and let me see for myself.
+
+(Idle)
+Seed: Coalby, Coalby~
+Mercury: En-nah! (And I'm NOT called Coalby!)
+Orphie: Mercury, stay calm...
+(Talk to Seed)
+Seed: Coalby, I noticed you hanging around BooBox in Failume Heights — did some Bangboo there catch your fancy~?
+Seed: Either way, I did a quick analysis of your visual records — there's a 45% chance it's a Devilboo, 36% chance it's an Avocaboo, and 19% chance it's a Baddieboo...
+Mercury: En-neh... en-nah! (D—Don't just access my visual records like that! I wasn't paying attention to that Avocaboo at all, they've got zero military discipline!)
+Mercury: En-nah! Ahn-nene! En-ne!!! (And! I'm not Coalby! My name is Mercury!!!)
+Seed: En-neh? En-neh, wah-dah en-neh?
+Mercury: En-neh! En-neh-en! (Stop speaking in that weird made-up Bangboo language of yours, your accent is so thick I can't understand a thing!)
+Seed: Like I was saying, I figured you were hung up on that Avocaboo~ So... I passed along the letter you wrote, and told them it was from Coalby~
+Mercury: En-nah?! Ennenenenene?!!! (You gave it to her?! What have you done?! It's all over now!!!)
+Mercury: En-nuh-nah!!! (And also! Don't call me Coalby! I'm never speaking to you again!!!)
+Orphie: Calm down, Mercury! And Seed, you too. Stop provoking it!
+Seed: Eh~? But Coalby is Coalby!
+Icon Dialogue Talk Why're you calling it Coalby?
+Orphie: Proxy, good thing you're here! Magus is in sleep mode right now, and I can't hold these two back on my own... Help me out!
+Orphie: Mercury is a Battleboo that Magus requested from the higher-ups after Soldier 11 joined the squad and Obol squad was officially established... According to regulations, we had to give it a name.
+Orphie: On the day it joined the team, Captain was supposed to be there for the handover to tell the staff its name... but Seed just happened to get up early that day and get there first.
+Mercury: En-nah... En-nah enne en na!! (I was totally looking forward to getting a cool name... but this little brat took one look at me and gave me this lame name: Coalby!!)
+Mercury: En-nah-nuh... (My one and only chance to be named, gone just like that... Now I'm stuck with the lame name Coalby on my Bangboo ID card forever...)
+Seed: Coalby isn't lame at all, matches your appearance of a perfectly round lump of coal, doesn't it~? Coalby Coalby, adorable little Coalby~
+Orphie: Anyway, it was really upset, so to comfort it, Magus gave it the codename "Mercury"... Since then, it's been going by Mercury...
+Mercury: En-nah... neh! ((‍Mr. Proxy / Miss Proxy‍), you saw it too... This little brat doesn't care about my feelings at all! Not only does she give me random nicknames, but she also ruined my confession plans! I won't forgive her!)
+Icon Dialogue Talk Your real name is super cute.
+Icon Dialogue Talk Seed didn't mean any harm.
+Mercury: En-neh... en, ahnne! (Ugh... soldiers don't need cute names! Even if she didn't mean any harm, it still ended up making Avocaboo hate me...)
+Seed: Hey, Avocaboo doesn't hate you~ It seemed like Avocaboo really took a liking to you after reading your letter~
+Seed: And it says its pit is black too, just like Coalby, so it likes that name and wants to get to know you~
+Mercury: Ehnne... en-nah?! (Eh... R—Really?!)
+Seed: Oh yeah~ It should still be hanging around BooBox. Why not go ask yourself?
+Mercury: Enna! En-neh! (Y—Yes! I'll go right away, as fast as I can!)
+Seed: Coalby, wait up~ Are you heading back to base tonight? Your transmitter's been a bit loose lately, let me fix it up for you like usual~
+Mercury: En-nuh... (I... I will...)
+Coalby... no, Mercury scampered away on tiny legs, leaving behind a smiling Seed and a relieved Orphie...
+Orphie: *sigh*... Crisis averted... Mercury always complains about Seed, but deep down I think it really likes her...
+Seed: I'm in charge of Coalby's maintenance and upgrades~ In reality, it's pretty attached to me~
+Orphie: Soldier Seed! Since Magus is in sleep mode, I have to be the one to tell you off — whether it's Mercury or anyone else, you need to tone it down all these random nicknames!
+Seed: So you're saying I can't call them Coalby, White Pineapple Ponytail, Wagging Golden Tail, and Red Pomegranate Stumbler anymore~?
+Orphie: I don't stumble all the time! But yes, that's exactly what I mean. We all have our codenames, and too many nicknames will just cause confusion! Captain would say the same thing if she were awake!
+Seed: But it's so cute though~ Orphie, I don't like being bossed around~
+Icon Dialogue Talk You can give me a nickname!
+Seed: Ooh, can I, Proxy~?
+Icon Dialogue Talk Maybe if everyone hears my adorable nickname...
+Icon Dialogue Talk They'll accept theirs.
+Seed: Sounds pretty convincing, (‍Gray Fox Booboo / "Blueberry Kitty Booboo"‍)~
+Icon Dialogue Talk I like this nickname~
+Seed: I really like it too, Proxy! I'll call you that more often from now on~ Whispering it in your ear, over and over~
+Seed: And I just came up with a new nickname Fire Dragon Twin Tails~
+Icon Dialogue Talk Let's just stick to codenames.
+Seed: Proxy and Orphie are both such cheapskates.
+Seed: Code names get old so quick, that's why we need something different. I know Coalby's secretly happy when I call it that!
+Icon Dialogue Talk Sorry, but codenames roll off the tongue better...
+Icon Dialogue Talk Better to use codenames during missions.
+Seed: Fine... and here I was, just thinking up a new nickname: Fire Dragon Twin Tails...
+Orphie: Oh? That sounds both cool and cute...
+Orphie: Seed, how about... how about you just stick to nicknames? Captain's still asleep anyway, and as long as you stop calling me Red Pomegranate Stumbler and use Fire Dragon Twin Tails instead...
+Seed: Seed's trust with Orphie just dropped, so no can do~ These new nicknames are for Proxy only~
+Orphie: Wh—What?!
+(If "You can give me a nickname!" is selected)
+Trust Rank Friendly Trust increase with Seed
+(Idle)
+Orphie: Seed, come on, just use the new nickname once...
+Seed: Can't hear you~
+(Talk to Seed again, optional)
+Orphie: Seed, Fire Dragon Twin Tails sounds way better than Red Pomegranate Stumbler... Can you call me that from now on?
+Seed: Orphie, changing your nickname comes with a processing fee~
+Orphie: Hmm... how about I treat you to Floatie Ice Cream tonight? But don't let Magus know...
+Seed: Nice suggestion~ Then I'll approve of changing one word in your nickname, Fire Pomegranate Stumbler~
+Orphie: Huh...!?
+
+(Idle)
+Seed: ...
+"Lady in White": I hate... Hate...
+(Talk to Seed)
+Seed: ...
+"Lady in White": I hate... Hate...
+Seed: ......
+"Lady in White": I hate, hate, hate... Pay with your life... Pay...
+Seed: ...
+"Lady in White": ...Wh—Why do you keep staring at me...
+Seed: ... ...
+"Lady in White": I hate you... suffocate and die...
+Icon Dialogue Talk Seed, look out!
+Icon Dialogue Talk She's about to use some kind of power!
+The Lady in White raises her hand, seemingly unleashing some kind of energy. But Seed appears completely unaffected, maintaining her smile while keeping her unwavering gaze fixed on the Lady in White.
+"Lady in White": Why... you should be suffocating... why... are you... fine...
+Seed: Was that a magic trick? My throat felt kinda tingly for a second~
+"Lady in White": ... ... ...
+Seed: Looks like you've calmed down~ So, can I ask some questions now? You don't have that annoying human vibe, so I wanna talk with you~
+Seed: It's getting pretty late, y'know~ Aren't you heading home? Or are you like me, and don't sleep in a normal bed?
+"Lady in White": Back off... get back... stay away from me!
+Seed: Your hands feel cold~ Orphie's got some spare military jackets, want me to grab one for you~?
+"Lady in White": Don't touch me... Stay away... Stop staring at me!
+Seed: Whoa, you don't move your lips when you talk~ Are you a ventriloquist? Or maybe you're actually an Intelligent Construct? Can I take your joints apart to check~?
+"Lady in White": Don't... don't touch me... help... stay away...
+Icon Dialogue Talk (The Lady in White is actually crying for help...)
+Seed: "Help"? Are you in some kinda trouble? Does it have to do with why you've been hanging around here~?
+Seed: Come to think of it, when I first came to investigate Waifei Peninsula, there was this nasty smell coming from this corridor~ If that's what's bothering you, you don't have to worry about it anymore~
+Seed: I eliminated the source of that smell~ Oh, or could it be that you're one of those weirdos who actually likes that stench? In that case, I guess I just did you a disservice...
+"Lady in White": Eliminated... gone... coming here... no longer brings misfortune...
+Seed: Mhm, you can stop trying so hard now~
+"Lady in White": ... ... ...
+The Lady in White stands motionless for a long while. Suddenly, a chilling gust sweeps through, forcing everyone to shut their eyes. When you manage to open them again, the Lady in White his [sic] gone.
+Seed: Ah... she ran so fast. I was hoping if she really was an Intelligent Construct, I could study her structure... That ice-cold skin, she has to be an Intelligent Construct, right?
+Icon Dialogue Talk Haha... yeah, probably...
+Seed: What a shame... If I could, I'd want to be friends with all Intelligent Constructs~
+Icon Dialogue Talk Seed, you're so powerful...
+Seed: Hmm~? Proxy, what makes you say that?
+(Both choices lead to the following)
+Icon Dialogue Talk What was the Lady in White like...
+Icon Dialogue Talk ...In your eyes? Was she hostile?
+Seed: What a weird question. I wouldn't talk like this to someone who's hostile~ I usually let my turrets do the talking when I sense hostility.
+Seed: I only sensed anxiety and loneliness from her~ She wants everyone to stay as far away as possible when they see her, yet feels lonely at the same time... something like that, yeah?
+Seed: So I thought, maybe she just wanted people to know "I'm in so much pain" or "stay away from here" or something~
+Icon Dialogue Talk You touched her heart.
+Seed: Huh? Was that just now... touching someone's heart?
+Icon Dialogue Talk Of course, you've improved.
+Icon Dialogue Talk You understood what was in her heart.
+Seed: Really...?
+Seed: Proxy, thank you for telling me! I trust what you say... If this is what it means to understand others, then that's certainly exciting~
+Trust Rank Friendly Trust increase with Seed
+Icon Dialogue Talk Can you really get that much from just feeling it?
+Seed: Hmm... You don't understand? Or maybe my judgment is off... After all, I just came up with all this based on my intuition after hearing what she said...
+Seed: It sure is tough to understand others, Proxy...
+(Idle)
+Seed: Let's catch up with her next time~
+(Talk to Seed again, optional)
+Seed: I have a feeling I'll run into that Lady in White again~ Next time I'll be sure to greet her properly with a screwdriver and wrench!
+Seed: Hey Proxy, wanna join me~? The three of us could have a late-night discussion on Intelligent Constructs~
+
+(Idle)
+Vince: ...So, what do you think she'd like?
+Seed: Let me think~
+(Talk to Seed)
+Vince: Well, that's pretty much her background... You should be able to analyze it now, right?
+Seed: That should probably maybe possibly be enough~
+Vince: Such an uncertain answer...
+Icon Dialogue Talk What are you guys doing?
+Seed: Ah, Pro... Senior~ It's like this! This Intelligent Construct uncle from the pawn shop wants to buy a birthday gift for his daughter, and I'm helping him brainstorm~
+Icon Dialogue Talk An Intelligent Construct... has a daughter?
+Vince: Yeah, that's right. Don't ask... it's private.
+Seed: I was hanging around Failume Heights earlier and saw his daughter~ She's tiny and adorable, a genuine human through and through!
+Seed: He kinda reminds me of Seed Sr. with his cluelessness, so I thought maybe I could lend a hand~ And sure enough, he was struggling!
+Vince: *sigh* I don't know if it's because my daughter's approaching puberty... but lately she's been talking back more often, and she won't tell me what's bothering her...
+Vince: And she wasn't happy with ANY of the birthday gifts I got her these past two years, saying my taste is totally lame waaaaahhh!!!
+Icon Dialogue Talk (He's such a dumb dad...)
+Seed: Old man, what birthday gifts have you been giving these past two years~?
+Vince: Two years ago... it was a dress she really loved. It was pink with lots of frills. I was too busy with the shop, so I just dropped off the gift and left...
+Seed: Alright, zero points~ A dress without any electric shock function is pretty lame as a gift~
+Icon Dialogue Talk No way a dress like that exists!
+Icon Dialogue Talk That's not the point!
+Vince: And then last year's gift... I was super busy with work, so I got this massive cake delivered and got her the latest model phone, but she wouldn't accept them. She barely touched the cake...
+Seed: Girls definitely prefer retro games and arcades! Mobile games are just too... weird...
+Icon Dialogue Talk Retro games and arcades???
+Icon Dialogue Talk That's definitely not the point!
+Seed: Senior, are you really questioning the professional judgment of the genius young soldier Seed?! Well then, why don't you share your thoughts with us!
+Vince: I'm not too sure about this girl's suggestions... Master (‍Wise / Belle‍), got any better ideas?
+Icon Dialogue Talk She just wanted her father's company.
+Trust Rank Trusted Significant Trust increase with Seed
+Seed: ...Wow...
+Seed: Senior, I know I'm stating the obvious here... but you might be right! As expected of you!
+Seed: Come to think of it, he's always busy with the shop on her birthday. As punishment, I'll loosen all the screws on this old man's body~!
+Vince: Huh? Is that the reason...? But I opened this shop so I could make enough money to send her to school...
+Seed: A father's company is worth more than millions of Dennies! Unless you're making billions every day, you better make time to be with your daughter on her birthday, got it~
+Vince: O—Okay...!
+Icon Dialogue Talk These gifts are so last season!
+Vince: Huh... last season? But that's literally the latest dress and the newest phone model... There can't possibly be anything newer...
+Seed: That doesn't sound quite right~? Sometimes being last season is actually trendy... It's definitely because it's missing the electric shock function and retro gaming!
+Vince: *cough* Um, you two... would you mind if I think about this a bit more? Sorry for the trouble...
+Icon Dialogue Talk Should give a handmade gift.
+Seed: That's pretty convincing! When it comes to handmade gifts, you can feel the love and care put into them, no matter what they are~
+Seed: As expected of someone who's captured so many hearts — you really know how to move people!
+Vince: Handmade... But I work until late every day, it's hard to find time to make anything myself...
+Seed: If you can't even spare a single moment, your daughter will think business is more important than her! Understood? Then go get her gift made right now, got it~
+Vince: O—Okay...!
+Trust Rank Friendly Trust increase with Seed
+(Idle)
+Seed: So similar...
+(Talk to Seed again, optional)
+Seed: This old guy's awkward way of talking reminds me of Seed Sr... Though at least Seed Sr. always made my birthday presents by hand.
+Icon Dialogue Talk Seed, lemme give you a present...
+Icon Dialogue Talk ...For your birthday this year.
+Seed: Really? Yay~! You're the best~!
+
+(Idle)
+Trigger: Come on, Seed, give me your hand.
+Seed: Here you go, hand~ What should I touch first?
+(Talk to Seed)
+Trigger: Seed, listen up. Though my sight has been damaged, that's precisely why my perception of this world is so clear... Do you understand what I mean?
+Seed: Hmm~? A malfunctioning missile being better at clearing mines? Does it feel something like that?
+Trigger: Something like...? Well, anyway, perceiving the presence of life, perceiving the entire world, these are essential lessons for any elite soldier. Now, just follow my instructions.
+Trigger: First... how do you feel about the scene before you?
+Seed: I likey~ These flowers are growing really well, the watering can is nice and clean, and both the squirrel and kitty seem super content~
+Trigger: Remember this feeling, then reach out and touch them one by one. First, the soil in these potted plants... They nurture the flowers, but have no life of their own. Feel it.
+Seed: Hmm... Is it because of the high humidity in Sailume Bay? Everything feels so damp~ Makes it hard to tell the pH levels... I didn't bring my homemade soil composition analyzer today.
+Trigger: No need to analyze it so deeply. When you touch the flower next... it'll be a completely different feeling.
+Seed: Touching these little ones after touching the soil... It makes them seem more fragile than usual?
+Seed: But they're way softer than dirt... Even the toughest stems feel like they'd snap with just a gentle twist.
+Trigger: Yes. It's precisely because they're alive that people feel this way. From plants to animals... let's take it one step at a time.
+Trigger: Now then, squirrel or kitty... Seed, which one would you rather pet? Tell me what you think.
+Trigger: And... Proxy, you wanna give it a shot too?
+Icon Dialogue Talk When did you notice I was here?
+Icon Dialogue Talk Oh, you spotted me...
+Trigger: Haha... I sensed it the moment you set foot in Sailume Bay. You seem pretty curious about what we're up to... Wanna join us?
+Seed: Squirrel and kitty, it's as hard to choose as pizza and durian... Proxy, you make the call!
+Trigger: Sure! Letting others make choices for you is a choice in itself. Proxy, this is a training exercise for perception skills. Would you mind picking her next training target?
+Icon Dialogue Talk (Point to the sleeping cat)
+You point at the kitten purring in the sunlight. Seed nods, nervously drawing closer, reaching out her hand very slowly until her fingers finally rest gently on the cat's back.
+Seed: Fluffy and warm... and a unique scent of sunlight baked into its fur...
+Seed: ...I can feel its breathing and heartbeat! Seed Sr. had me pet cats before too... It feels similar, but somehow different...!
+Trigger: Each individual is different. That's the point of this training... Once you learn to sense the various forms of life, you'll be able to see a much broader picture.
+Icon Dialogue Talk (Point to Trigger's ponytail)
+You point at Trigger's long, silky, golden ponytail. Seed shows a brief look of surprise, then, realizing Trigger has her guard down at the moment, reaches out and grabs the ponytail.
+Trigger: Huh— wait, what?! Seed, what are you...? Proxy, was this your idea?
+Seed: Ohhh! Trigger's hair is so warm, like a waterfall, and it has this sweet floral shampoo scent... and I think I can even feel heartbeats through the tips of her hair~
+Trigger: Don't say it out loud, this is so embarrassing...!
+Seed: Your idea was genius, Proxy~ Trigger has a breath and heartbeat too, so of course she counts as a training target! Plus, I love Trigger, so this makes the training so much more fun~
+Seed: Trigger sometimes reminds me of Seed Sr., especially when she's teaching... Wouldn't mind having more training sessions like this back at the barracks~
+Trigger: *sigh* You two... As long as it keeps you interested, I guess it's fine to feel around a bit more. Just remember the feel of life's presence... okay?
+Icon Dialogue Talk (Point to own cheek)
+Trust Rank Trusted Significant Trust increase with Seed
+You point to your own cheek, and Seed instantly lights up with sparkling eyes! Like a little kitten, she quickly leans in and cups your cheeks, rubbing them over and over...
+Seed: This is... how Proxy feels... just like (‍canola petals! / a four-leaf clover!‍) ‍[verification needed]
+Seed: Such a strange feeling... different from touching soil, flowers, or kittens. It's kind of hot and incredibly soft, like electric currents running through every inch of skin...
+Seed: ...If I had to describe the feeling, it's like an electrified and heated marshmallow?
+Icon Dialogue Talk (I'm starting to feel a bit shy...)
+Icon Dialogue Talk (Really?)
+Trigger: Huh? Seed, I never said the Proxy could be the target for our perception training, though I suppose it still adheres to our goal... Was it the Proxy who requested it?
+Trigger: How sneaky... I want in too.
+Trigger gets right to work. The kneading shows no signs of stopping. You start to regret suggesting this.
+The perception training continues. Soft squirrels, ants in the soil, butterflies resting on flowers... Under Trigger's guidance, you and Seed get a feel for many different forms of life.
+Each life has its own unique frequency... After a complete training session, all those tactile sensations are clearly etched into your palm.
+(If "the sleeping cat" or "Trigger's ponytail" were selected)
+Trust Rank Friendly Trust increase with Seed
+(Idle)
+Trigger: Nice work, Seed. Now for your homework...
+Seed: I can't hear you~
+(Talk to Seed again, optional)
+Trigger: Alright, that wraps up today's training. Seed, let's head back to report in, and then write a 1000-word reflection on today's training.
+Seed: Hmm~ hmm~ hmm~ I wanna go to that place I once talked about~
+Trigger: Humming and pretending you didn't hear won't help. Captain Magus will be checking later.
+Seed: Trigger... I don't think life can be expressed through mere words, you know.
+Trigger: Don't think about sweet-talking your way out of this either. I'll stay with you until it's done, don't worry.
+Seed: Proxy... Mayday...!
+
+Introduction
+Seed: Yah-hoh~ Let's do something fun on this rare day off, Proxy~
+Seed: Is today's agenda what people call a "date"?
+Seed: Where should we go? Ooh! Wanna kidnap the mayor and make him extend our vacation?
+Seed: Where are you taking me, 'kindred spirit'? I'm so excited!
+Open-World
+(Idling)
+Seed: Proxy, are you out of power? What if I gave you a hug? Would that recharge you?
+Seed: You've gone totally still, did your system crash? I can pop you open and run diagnostics~
+Seed: Are you spacing out, Proxy? I do that too when Captain Magus starts her lectures~
+Seed: I braided my hair all by myself today~ It's not as nice as when Trigger does it, though...
+(Idling while the MC is facing the agent)
+Seed: Looking into your eyes like this... It's like I'm a sunflower soaking up sunshine~
+Seed: You're so close... I can feel every breath you take.
+(When the player bumps in to an npc)
+Seed: Careful now~ This is how I sent a poor officer flying last time!
+Seed: Watch out or you'll bump into someone, Proxy~ Wanna hop on my scooter?
+(Turn off "Accompany Mode")
+Seed: Do you want me to stand by? I can do that, but only for about an hour~
+(When moving far away when "Accompany Mode" is turned off)
+Seed: Proxy? Are you coming back? I'm gonna come look for you!
+(When the player gets too far from the Agent)
+Seed: We're birds of a feather, Proxy. Stay closer to me.
+Seed: You're walking really fast all of a sudden~ Are there pretty flowers up ahead or something?
+(When the player faces the camera at the Agent)
+Seed: Should I wave to the camera? Yah-hoh~
+Seed: Don't forget to give me a copy of the picture~ I want to stick it up in the cockpit!
+Fun Events
+Sixth Street
+(Outside Godfinger)
+Seed: Just between us, Proxy~ I'm pre~tty awesome at video games too!
+Seed: Though Soldier 11 always complains about friendly fire... You probably won't mind, right?
+Seed: Let's play together~ We'll be in sync just like a clown fish and a blue tang~
+(At Sage in a Barrel)
+Seed: Proxy... has this guy been living in a trash can the whole time?
+Seed: It looks cozy and snug in there... but since it's a trash can, I think I'll pass~
+Seed: Though if you had a storage box this size, I'd be more than happy to move in~
+(Outside Box Galaxy)
+Seed: Wanna open some surprise boxes together? I sometimes get them to decorate my cockpit~
+Seed: Hmm~? So you want to get the surprise box you want? That's easy~
+Seed: I'll show you where the hidden edition is... How do I know? It's all intuition~
+Lumina Square
+(Outside Capsule Hotel)
+Seed: Capsule hotel...? Is each room as tiny as a capsule?
+Seed: Wouldn't that be even tighter than the cockpit...? Proxy, Proxy, I wanna check it out!
+Seed: Hmm...? I can't? The room isn't actually that cramped? I see...
+(Outside Dew Gardening Shop)
+Seed: Look, the kids here are all well taken care of~
+Seed: If I get the chance, I'd love to discuss gardening tips with the owner.
+Seed: My little ones can be a bit timid sometimes...
+Failume Heights
+(Outside Phaethon's residence at Suibian Temple)
+Seed: So this is your "cockpit" in Waifei Peninsula? No wonder your scent is so strong here~
+Seed: Can I plant some flowers here? Then I'll come by regularly to water them and loosen up the soil.
+Seed: And that way, I can come visit you often~ It's decided then~
+(At the "Cyclical Destiny" sculpture)
+Seed: Can my scooter stretch out like that too...?
+Seed: I've got an idea for modifications! Gonna try it out when we get back~
+(Outside Indestructibles)
+Seed: Ooh! The tools in these stores are so stylish~
+Seed: I'm dying to take them apart and see what makes them tick!
+Fantasy Resort
+(Outside Archipelago Shoot)
+Seed: I may not have Trigger's marksmanship, but I'm still pretty good at shooting things~
+Seed: My aim with artillery isn't the best... but spray and pray over a large area, and I'll still wipe all the targets out~
+Seed: Want me to show you how it's done?
+(At the food truck at the northeastern corner of the resort)
+Seed: If I weren't in the military, I'd probably be running a food truck~
+Seed: Being able to stay in a tiny, cramped room all day, with plenty of ingredients...
+Seed: En-nehna... just thinking about it feels so nice!
+Seed: Eh... I'd have to serve customers? Nah, I'll pass...
+
+Advertisement
+Godfinger
+(Upon entering Godfinger)
+Seed: What if we just use heavy firepower for total destruction... is that not allowed?
+(Defeating an enemy in a game)
+Seed: Boom! Vaporized~
+(Being defeated in a game)
+Seed: Whoopsie...
+(Winning a game)
+Seed: Hmph hmph~ That was easy, like boiling a frog in Nitro-Fuel~
+(Losing a game)
+Seed: Guess the gears didn't click... No biggie, we'll get it next time~
+Dew Gardening
+Seed: Flower arranging? It's like lining up these cuties to make them look even prettier, right~
+Seed: Leave it to me~ These flowers are about to get a glow up!
+Seed starts arranging the flowers, and after some time...
+(Seed's selected flowers are Carved Base, Butterfly Orchid, Sunset Umbrella, Crispy Star Biscuit)
+Seed: Ta-da! These flowers seem pretty pleased with their new look~
+Seed: When I was arranging these flowers, my heart felt all warm and fuzzy... I wonder why?
+Seed: Proxy, these flowers are for you~ Let's do this again sometime!Friendly Talk
+Seed: It's not quite like my previous safe house, but it feels pretty cozy here. It'd be even better if the room was a bit smaller~
+Seed: Speaking of tight spaces, my cockpit is pretty cramped~ Maybe next time I'll let you take a peek inside~
+(If Seed has defeated the previous Boss using a heavy attack and is not a trial Agent)
+Seed: Hey Proxy, while passing through some ruins earlier, I found a flower growing in the cracks~ it was blooming so beautifully!
+Seed: I must've brought it along with the soil without thinking... The Hollow probably isn't the best place for it to grow, is it?
+Seed: Can you look after it while I'm on deployment. [sic] We can plant it at home together when I come back~
+Seed: Growing flowers with you... what a curious feeling. Maybe I'm starting to understand Seed Sr. a little bit.
+
+(After accepting Commission: Your Heartbeat and Mine)
+Message Seed Icon
+Proxy, Proxy~ I wanna watch a movie~
+Message Seed Icon
+You know those movies that feel like Popping Candy on your eyeballs? You must have some, right?
+Icon DMs REPLY
+What kind of movie is that...?
+Message Seed Icon
+Y'know, the kind that makes your eyes burn and all that~ At least that's what Trigger says~
+You mean a touching film?
+Message Seed Icon
+Yep! That's exactly what Trigger said~
+Message Seed Icon
+I've been having trouble sleeping lately, and she always catches me wandering around late at night. She said she's got a movie to recommend, something I can watch in the cockpit before dozing off~
+Message Seed Icon
+That movie's got quite a dramatic title: The Heartbeat~
+We've got that one in our shop!
+I've got it right here. Wanna see?
+Message Seed Icon
+Awesome~ I knew you would have everything! From Popping Candy to eyeballs, maybe I can even get some Rosetta Data next...
+Icon DMs REPLY
+I still don't have that one...
+I'm just a humble video store manager, y'know
+Message Seed Icon
+En-neh, for me, you're great just being the video store manager~ So, can I come over to your place?
+Message Seed Icon
+Let's watch together~
+Icon DMs REPLY
+You're welcome anytime!
+I've got the video ready!
+Message Seed Icon
+Just give me a sec~ I'll ask the Captain for leave~ I'll say I'm heading to your place, she should be cool with that~
+
+SEED
+Yoh-hoh~ Obol Squad's heavy weapons specialist, Seed, has arrived~
+Our meeting is like a wrench, finding some engine oil~
+*sniff* Ooh~ You bear the scent of one of my kind, hehe~
+Y'know... *sniff* I really like your scent~
+Yah-hoh~ Seed at your service~
+Let's go, Seed Sr.!
+Hm. Better start digging graves!
+
+SEED
+Let me lead the way~
+I'm not late, am I? ' 
+You're a little too close~
+You've done more than enough. Leave the rest to the professionals.
+Gotta be faster!
+Come on, come on!
+I've been on standby for a long time.
+Oops, I can't really control my strength.
+It's not over yet!
+Count on me and Seed Sr.!
+Leave it to Seed! It'll be a-okay.
+Behold, Seed's grand entrance!
+You've exposed your weakness~
+You can rely on me from here on out.
+Recharge your batteries. I'll take care of this!
+Soldier 11, take a break.
+You owe me noodles after this!
+I'm gonna pass you soon, Soldier 11~
+My turn, Soldier 11!
+Wait for me at the noodle shop, Soldier 11.
+I'm coming, Trigger!
+Snipers are better in the backline.
+Trigger, don't push yourself~
+Support me, Trigger!
+Trigger, it's my turn to take care of you.
+Cover me, Orphie!
+Captain, the barrel's scorching hot!
+Leave it to me, captain!
+Watch over the captain, Orphie!
+Captain, Orphie, thanks for all your hard work.
+Seed Sr., we'll win this.
+It's not time to give up yet.
+Crushing the enemy seems easy-peasy now.
+Crank up the effort and we'll take 'em out for good!
+Seed Sr., dismantling the enemy is up to us.
+So annoying... can't we just tear them apart?
+Perfect Assist	 Great working with you~
+You've been a big help!
+We're back and fully refreshed~
+Now we can go another round any time!
+Overheating resolved, ready to resume battle.
+Cooling complete. Overheating cleared.
+Now's not the time to slack off~
+Time to switch! C'mon, c'mon!
+Hoppin' in!
+Reduced to ash.
+Final warning. Surrender now.
+Sorry~ I might have to get a little rough with you.
+Unleashing artillery barrage.
+Don't worry, it'll be over soon!
+What's a girl gotta do to completely tear you into pieces?
+Time to water the plants!
+Look, pretty fireworks~
+*sigh* Oh! Sorry, guess I couldn't control my strength~
+Continuing combat until target neutralized.
+Your sun's about to set, buddy.
+What's that line again? One shot, one kill!
+Annihilating all hostiles within visual range.
+Continuing assault until target is neutralized.
+To destroy is to protect.
+It's your turn to blossom~
+Order received, boosting firepower.
+Extending strike range.
+What is it they say? Reduced to ash!
+One shot, one kill.
+Need a shower? It's raining shells!
+Give 'em a full salvo, Seed Sr.!
+Hmm, definitely not my type. Guess going a little harder won't hurt!
+Ehn—na-ah~ It's nice to stop and enjoy the breeze once in a while~
+Let's finish this in one go!
+Don't tell anyone about me slacking off... *yawn* I mean, we are accomplices, after all.
+After I get back... Yeah, I think I'm gonna take a nap in the cockpit.
+Bzzt bzzt bzzt bzzt~ So annoying!
+That's the best you can do? Hmm, it's the same-old, same-old again.
+Hang in there a little longer this time.
+Is revenge your objective?
+We have a new buddy for target practice, Seed Sr.~
+Oh? Friends of the ones from earlier?
+Hostile target is highly active. Please evade its attacks.
+Warning! Hostile target showing high energy levels.
+Off-Screen Hint	 Hostile attacks incoming. Please evade immediately.
+Warning! Enemy targets attacking from blind spots.
+Looks like there's a second round~
+You seem so chipper, does the thought of getting crushed make you happy?
+You're still in one piece... Alright, I'll play with you a little longer~
+Huh?
+Oh my. Did we not fully dismantle it?
+Huh?
+Odd... my strength is disappearing...
+I'm sorry, Seed Sr.... I'm feeling a little tired...
+The next time I wake up... I hope I'm an Intelligent Construct...
+Yah-hoh~ Let's do something fun on this rare day off, Proxy~
+Is today's agenda what people call a "date"?
+Where should we go? Ooh! Wanna kidnap the mayor and make him extend our vacation?
+Where are you taking me, 'kindred spirit'? I'm so excited!
+Proxy, are you out of power? What if I gave you a hug? Would that recharge you?
+You've gone totally still, did your system crash? I can pop you open and run diagnostics~
+Are you spacing out, Proxy? I do that too when Captain Magus starts her lectures~
+I braided my hair all by myself today~ It's not as nice as when Trigger does it, though...
+Looking into your eyes like this... It's like I'm a sunflower soaking up sunshine~
+You're so close... I can feel every breath you take.
+We're birds of a feather, Proxy. Stay closer to me.
+You're walking really fast all of a sudden~ Are there pretty flowers up ahead or something?
+Careful now~ This is how I sent a poor officer flying last time!
+Watch out or you'll bump into someone, Proxy~ Wanna hop on my scooter?
+Should I wave to the camera? Yah-hoh~
+Don't forget to give me a copy of the picture~ I want to stick it up in the cockpit!
+Do you want me to stand by? I can do that, but only for about an hour~
+Proxy? Are you coming back? I'm gonna come look for you!
+Are you tired, Proxy? Here, take my hand, it's my turn to lead the way~
+You want me to take the lead? Alright, let's go raid the mayor's office!
+This counts as tactical training too. Seed Sr. taught me that~
+What if we just use heavy firepower for total destruction... is that not allowed?
+Hmph hmph~ That was easy, like boiling a frog in Nitro-Fuel~
+Guess the gears didn't click... No biggie, we'll get it next time~
+Boom! Vaporized~
+Whoopsie...
+Flower arranging? It's like lining up these cuties to make them look even prettier, right~
+Leave it to me~ These flowers are about to get a glow up!
+Ta-da! These flowers seem pretty pleased with their new look~
+When I was arranging these flowers, my heart felt all warm and fuzzy... I wonder why?
+Proxy, these flowers are for you~ Let's do this again sometime!
