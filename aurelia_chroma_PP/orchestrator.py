@@ -95,8 +95,9 @@ class AureliaOrchestrator:
         # 1. Platform & User Context
         room_context = f"Platform: {source}. User: {user}."
         if source == "discord":
-            is_alone = len(self.current_members) == 0
-            room_context += f" Members in voice: {', '.join(self.current_members) if not is_alone else 'None'}."
+            members = self.current_members or []
+            is_alone = len(members) == 0
+            room_context += f" Members in voice: {', '.join(members) if not is_alone else 'None'}."
 
         # 2. Memory Retrieval
         memories = self.memory_store.search(query_text, filter_type="interaction")
@@ -442,13 +443,14 @@ class AureliaOrchestrator:
         """Aurelia decides to speak or act on her own, optionally guided by an intent."""
         logger.info(f"Aurelia is thinking (style: {style})...")
 
-        is_alone = len(self.current_members) == 0
+        members = self.current_members or []
+        is_alone = len(members) == 0
 
         # Determine silence type context
         if is_alone:
             silence_context = "You are currently alone in the room/stream. It's very quiet."
         else:
-            silence_context = f"There are people present ({', '.join(self.current_members)}), but they are being quiet."
+            silence_context = f"There are people present ({', '.join(members)}), but they are being quiet."
 
         has_chat = self.twitch_adapter is not None or self.youtube_adapter is not None
         if has_chat:

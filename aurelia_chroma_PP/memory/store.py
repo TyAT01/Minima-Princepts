@@ -91,8 +91,12 @@ class ChromaMemoryStore:
             where=where
         )
         memories = []
-        if results and "metadatas" in results and results["metadatas"]:
-            for metadata in results["metadatas"][0]:
+        if results and results.get("metadatas"):
+            first_metadatas = results["metadatas"][0]
+            if first_metadatas is None:
+                return []
+
+            for metadata in first_metadatas:
                 if metadata:
                     # If we are looking for interactions, skip anything explicitly marked as an insight
                     if filter_type == "interaction" and metadata.get("type") == "insight":
