@@ -87,9 +87,9 @@ class AureliaCadenceController:
         self,
         seed: Optional[int] = None,
         # 'Pro' streamer limits
-        min_gap_s: float = 1.6,
-        soft_gap_s: float = 3.2,
-        max_silence_s: float = 15.0,     # Aurelia hates dead air (Pro: ~10s/min)
+        min_gap_s: float = 1.0,
+        soft_gap_s: float = 2.5,
+        max_silence_s: float = 8.0,     # Aurelia hates dead air (Pro: ~10s/min)
         # Burst tuning
         burst_max_items: int = 4,        # slightly higher for 'pro' feel
         burst_window_s: float = 12.0,

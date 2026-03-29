@@ -77,6 +77,13 @@ class AureliaAudioSink(AudioSink):
                     self.speaking[user] = True
                     # Prepend pre-roll to main buffer
                     self.buffers[user].extend(self.pre_roll_buffers[user])
+
+                    # Interrupt Aurelia if she is speaking
+                    if self.bot.bot and self.bot.bot.loop:
+                        self.bot.bot.loop.call_soon_threadsafe(
+                            lambda: asyncio.create_task(self.bot._orchestrator.stop_speaking())
+                        )
+
                 self.silence_count[user] = 0
             elif self.speaking[user]:
                 self.silence_count[user] += 1
@@ -131,6 +138,7 @@ class AlwaysListenBot:
         self._config = config
         self._orchestrator = orchestrator
         self._orchestrator.discord_play_callback = self._play_response
+        self._orchestrator.discord_stop_callback = self._stop_response
         self._voice_client = None
         self._is_listening = False
         self.bot = None
@@ -229,6 +237,20 @@ class AlwaysListenBot:
     async def _play_response(self, audio_data, text_response, source_label):
         """Puts a response into the queue."""
         await self._response_queue.put((audio_data, text_response, source_label))
+
+    async def _stop_response(self):
+        """Stops current audio playback and clears the response queue."""
+        if self._voice_client and self._voice_client.is_playing():
+            self._voice_client.stop()
+
+        # Clear the queue to prevent further fragments from playing
+        while not self._response_queue.empty():
+            try:
+                self._response_queue.get_nowait()
+                self._response_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+        logger.info("Discord audio playback stopped and queue cleared.")
 
     async def _actually_play_response(self, audio_data, text_response, source_label):
         """Helper to play audio response."""

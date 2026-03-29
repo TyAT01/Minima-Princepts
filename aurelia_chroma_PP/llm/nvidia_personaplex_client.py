@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 import torch
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Generator
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,37 @@ class NVIDIAPersonaPlexClient:
         """
         logger.info("PersonaPlex generating response from text.")
         return None, f"Responding as {self._voice_prompt}. (Integration Placeholder)"
+
+    def stream_respond_to_text(self, text: str, context: str = "") -> Generator[str, None, None]:
+        """Mock streaming for PersonaPlex."""
+        yield "This "
+        yield "is "
+        yield "a "
+        yield "mock "
+        yield "streamed "
+        yield "response "
+        yield "from "
+        yield "PersonaPlex."
+
+    def stream_respond_to_audio(self, audio_path: str, context: str = "") -> Generator[str, None, None]:
+        """Mock streaming for PersonaPlex."""
+        yield "I "
+        yield "heard "
+        yield "you, "
+        yield "and "
+        yield "I'm "
+        yield "responding "
+        yield "via "
+        yield "PersonaPlex "
+        yield "stream."
+
+    def generate_audio_for_fragment(self, fragment: str) -> Optional[np.ndarray]:
+        """Mock audio generation for fragments."""
+        return None
+
+    def filter_text(self, text: str) -> str:
+        """Mock filter for PersonaPlex."""
+        return text
 
     def set_persona_prompt(self, prompt: str):
         """Compatibility method for orchestrator."""
