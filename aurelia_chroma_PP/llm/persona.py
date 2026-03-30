@@ -1,60 +1,50 @@
 from __future__ import annotations
 import yaml
 from config import settings
-from typing import Optional, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from llm.personaplex import PersonaPlex
-
-def load_persona_prompt(personaplex: Optional[PersonaPlex] = None) -> str:
-    """Loads the persona from the yaml file and constructs the system prompt for PersonaPlex."""
+def load_persona_prompt() -> str:
+    """Loads the persona from the yaml file and constructs the system prompt."""
     with open(settings.persona_yaml, "r", encoding="utf-8") as f:
         persona_data = yaml.safe_load(f) or {}
-
-    if personaplex:
-        persona_data = personaplex.get_merged_persona_data(persona_data) or {}
 
     character = persona_data.get("character") or {}
     name = character.get("name") or "Aurelia Vale"
     role = character.get("role") or "AI Companion"
-    goals = character.get("goals") or []
+    goals = ", ".join(character.get("goals") or [])
     core_identity = (character.get("core_identity") or {}).get("self_awareness") or "I am an AI."
     speech_patterns = character.get("speech_patterns") or {}
     speech_style = speech_patterns.get("style") or "friendly and helpful."
 
-    # Build a concise but descriptive prompt suitable for NVIDIA PersonaPlex
-    goals_str = " ".join(goals)
-
-    # Extract personality traits
+    # Extract personality traits to enrich the system prompt
     traits = character.get("personality_traits") or {}
     traits_list = []
     for trait_name, trait_data in traits.items():
         if isinstance(trait_data, dict):
             desc = trait_data.get("description", "")
-            traits_list.append(f"{trait_name.replace('_', ' ').title()}: {desc}")
+            traits_list.append(f"- {trait_name.replace('_', ' ').title()}: {desc}")
         else:
-            traits_list.append(f"{trait_name.replace('_', ' ').title()}: {trait_data}")
-    traits_str = " ".join(traits_list)
+            traits_list.append(f"- {trait_name.replace('_', ' ').title()}: {trait_data}")
+    traits_str = "\n".join(traits_list)
 
-    # Base Role Prompt
     system_prompt = (
-        f"You are {name}, {role}. {core_identity} Your goals are: {goals_str}. "
-        f"Your personality is: {traits_str}. You speak in a style that is {speech_style}.\n\n"
+        f"You are {name}, an advanced virtual human. Your role is '{role}'. "
+        f"Your core identity is: '{core_identity}'. Your goal is to '{goals}'. "
+        f"You speak in a style that is '{speech_style}'.\n\n"
         "NATURAL SPEECH GUIDELINES:\n"
         "- Use shorter sentences to maintain a natural, conversational flow.\n"
         "- Incorporate natural fillers like 'uhm', 'ah', 'so...', 'well...', or 'like' occasionally to sound more human.\n"
         "- Use conversational quirks and break the 'robotic' structure of traditional AI.\n\n"
-        f"You are part of the PersonaPlex architecture, which supports real-time, full-duplex conversational interaction. "
+        f"PERSONALITY TRAITS:\n{traits_str}\n\n"
+        f"You possess the ability to understand auditory inputs and generate both text and speech.\n\n"
+        f"AUTONOMOUS CADENCE CONTROL:\n"
+        f"You can adjust your own speech timing parameters by including a tag in your thoughts or responses. "
+        f"IMPORTANT: These tags are SILENT internal commands and will be automatically stripped from your response before being shown to the audience. "
+        f"Place them at the very end of your response text. "
+        f"Use the format [CADENCE: min_gap_s=X, soft_gap_s=Y, max_silence_s=Z, burst_max_items=N].\n"
+        f"- min_gap_s: Minimum seconds between responses (1.0 - 5.0).\n"
+        f"- soft_gap_s: Typical gap when chat is active (2.0 - 10.0).\n"
+        f"- max_silence_s: Maximum silence before you feel forced to speak (5.0 - 60.0).\n"
+        f"- burst_max_items: Max messages in a quick burst (1 - 8).\n"
+        f"Example: '[CADENCE: max_silence_s=10.0]' to be more talkative."
     )
-
-    if personaplex:
-        active_mods = ", ".join(personaplex.active_modules) if personaplex.active_modules else "None"
-        system_prompt += (
-            f"\n\nPERSONAPLEX SYSTEM:\n"
-            f"Active modules: {active_mods}.\n"
-            f"You can autonomously evolve by creating, updating, or switching persona modules.\n"
-            f"Tags: [PERSONAPLEX: action=create|update|activate|deactivate, name=name, voice=NATF0-3|NATM0-3, data={{...}}]\n"
-            f"Example: [PERSONAPLEX: action=create, name=bard, voice=NATF2, data={{personality_traits: {{bard: 'Always sings'}} }}]\n"
-        )
-
-    return system_prompt.strip()
+    return system_prompt
