@@ -208,8 +208,10 @@ class LokiEngine:
     def _extract_thought_from_stream(self, stream):
         buffer = ""
         in_thought = False
-        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)|\[INNER MONOLOGUE\]|\[THINKING\]', re.IGNORECASE)
+        # Extended patterns to catch variants without brackets and common prefixes
+        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)|(?<!\w)THOUGHTS?:|\[INNER MONOLOGUE\]|\[THINKING\]', re.IGNORECASE)
         end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)|\[/INNER MONOLOGUE\]|\[/THINKING\]', re.IGNORECASE)
+
         for chunk in stream:
             buffer += chunk
             while True:
@@ -218,7 +220,7 @@ class LokiEngine:
                     if match:
                         pre_tag = buffer[:match.start()]
                         if pre_tag: yield pre_tag
-                        buffer = buffer[match.end():]
+                        buffer = buffer[match.end():].lstrip()
                         in_thought = True
                         continue
                     else:
@@ -226,21 +228,34 @@ class LokiEngine:
                             start_idx = buffer.find("[")
                             closing_idx = buffer.find("]")
                             if start_idx < closing_idx:
-                                self.last_thought = buffer[start_idx+1:closing_idx]
-                                buffer = buffer[closing_idx+1:].lstrip()
-                                continue
-                        if len(buffer) > 25:
-                            yield buffer[:-25]
-                            buffer = buffer[-25:]
+                                potential_thought = buffer[start_idx+1:closing_idx]
+                                if len(potential_thought) > 3:
+                                    self.last_thought = potential_thought
+                                    buffer = buffer[closing_idx+1:].lstrip()
+                                    continue
+
+                        if len(buffer) > 40:
+                            yield buffer[:-40]
+                            buffer = buffer[-40:]
                         break
                 else:
                     match = end_pattern.search(buffer)
                     if match:
                         self.last_thought += buffer[:match.start()]
-                        buffer = buffer[match.end():]
+                        buffer = buffer[match.end():].lstrip()
                         in_thought = False
                         continue
                     else:
+                        # Heuristic: if we're in_thought and see a newline followed by direct speech
+                        # like "Loki:" or just a capitalized sentence, it might be an unclosed thought.
+                        if "\n" in buffer:
+                            parts = buffer.split("\n", 1)
+                            if len(parts[1]) > 5 and parts[1].strip() and parts[1].strip()[0].isupper():
+                                self.last_thought += parts[0]
+                                buffer = parts[1]
+                                in_thought = False
+                                continue
+
                         if len(buffer) + len(self.last_thought) > 4000:
                             self.last_thought += buffer
                             buffer = ""
@@ -248,10 +263,13 @@ class LokiEngine:
                         break
         if buffer:
             if in_thought:
-                if len(buffer) > 50 or "." in buffer:
-                    self.last_thought += " [Unclosed]"
-                    yield buffer
-                else: self.last_thought += buffer
+                # If stream ends while in thought, try one last time to find a speech transition
+                transition_match = re.search(r'\n\s*([A-Z])', buffer)
+                if transition_match:
+                    self.last_thought += buffer[:transition_match.start()]
+                    yield buffer[transition_match.start():]
+                else:
+                    self.last_thought += buffer
             else:
                 if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
                     start_idx = buffer.find("[")
@@ -264,9 +282,17 @@ class LokiEngine:
                         return
                 yield buffer
     def _clean_response(self, text: str) -> str:
+        # 1. Remove explicit bracketed/parenthesized thought blocks
         clean = re.sub(r'\[(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\].*?\[/(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\]', '', text, flags=re.IGNORECASE | re.DOTALL)
         clean = re.sub(r'\(THOUGHT\).*?\(/THOUGHT\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
+
+        # 2. Remove loose THOUGHT: prefixes that might have leaked (targeted at start of message)
+        # Require brackets or a colon to avoid matching normal sentences starting with "Thought"
+        clean = re.sub(r'(?i)^(?:\[THOUGHTS?\]|\(THOUGHTS?\)|THOUGHTS?:)\s*.*?(?:\.|\!|\?|\n|$)', '', clean, count=1).strip()
+
+        # 3. Remove any remaining bracketed or parenthesized meta-text
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
+
         # new: strip ALL CAPS starting lines
         lines = clean.splitlines()
         cleaned_lines = []
@@ -369,10 +395,13 @@ class LokiEngine:
     def loki_learn_and_stay_loki(self, user_msg: str, loki_reply: str):
         brain = self._load_brain()
         msg = user_msg.lower()
-        # fact extraction
-        if "my name is" in msg or "call me" in msg:
-            name = msg.split("is")[-1].strip(" .,!?")
-            brain["facts"]["preferred_name"] = name.title()
+        # fact extraction: improve robustness to avoid misinterpreting complaints or questions
+        if ("my name is" in msg or "call me" in msg) and "username" not in msg and "?" not in msg:
+            # Extract name more carefully
+            parts = msg.split("is") if "is" in msg else msg.split("me")
+            name = parts[-1].strip(" .,!?")
+            if len(name) >= 2 and len(name) < 20: # Sanity check on name length (allow 2+ chars like 'Ty')
+                brain["facts"]["preferred_name"] = name.title()
         if "i hate" in msg or "i love" in msg:
             thing = msg.split("hate" if "hate" in msg else "love")[-1].strip()
             brain["facts"][f"user_{'hates' if 'hate' in msg else 'loves'}_{thing}"] = True
