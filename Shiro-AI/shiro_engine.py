@@ -24,6 +24,21 @@ from utils.text_utils import split_into_sentences, clean_yaml_block
 
 logger = logging.getLogger(__name__)
 
+# Hmph variants to throttle (case-insensitive)
+_HMPH_PATTERN = re.compile(
+    r'\bhmph\.?!?|\bhmph,|\bHmph\.?!?',
+    re.IGNORECASE
+)
+# Replacements to rotate through when we suppress hmph
+_HMPH_ALTERNATIVES = [
+    "...",
+    "Tch.",
+    "Whatever.",
+    "Fine.",
+    "*flicks tail*",
+    "Hmm.",
+]
+
 class ShiroEngine:
     """Core logic engine for Shiro AI, shared between UI and Server."""
     # Unified keywords for various thought/meta tags to ensure consistency across filtering methods
@@ -43,7 +58,7 @@ class ShiroEngine:
         self.wardrobe = {
             "default": {
                 "name": "Default Kitsune",
-                "desc": "fox ears and a fluffy tail, wearing a light kimono-style top",
+                "desc": "fox ears and a fluffy tail, wearing an oversized white T-shirt that hangs off one shoulder",
                 "ears": True,
                 "tail": True,
                 "active": True
@@ -51,6 +66,8 @@ class ShiroEngine:
         }
         self.current_outfit = "default"
         self.intensity = 0.5
+        self._hmph_counter = 0          # tracks recent hmph usage
+        self._hmph_session_count = 0    # total this session
         # ---------------------
         # Robust path resolution
         base_path = Path(__file__).parent.resolve()
@@ -561,12 +578,64 @@ class ShiroEngine:
                 yield buffer
 
     def _clean_response(self, text: str) -> str:
-        clean = re.sub(rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?\[/(?:{self.THOUGHT_KEYWORDS})\]', '', text, flags=re.IGNORECASE | re.DOTALL)
-        clean = re.sub(rf'\((?:{self.THOUGHT_KEYWORDS})[^\)]*\).*?\(/(?:{self.THOUGHT_KEYWORDS})\)', '', clean, flags=re.IGNORECASE | re.DOTALL)
+        # Preserve thought markers
+        if "[THOUGHT]" in text or "[/THOUGHT]" in text:
+            return text
+
+        clean = re.sub(
+            rf'\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\].*?\[/(?:{self.THOUGHT_KEYWORDS})\]',
+            '', text, flags=re.IGNORECASE | re.DOTALL
+        )
+        clean = re.sub(
+            rf'\((?:{self.THOUGHT_KEYWORDS})[^\)]*\).*?\(/(?:{self.THOUGHT_KEYWORDS})\)',
+            '', clean, flags=re.IGNORECASE | re.DOTALL
+        )
         clean = re.sub(r'<THOUGHTS?>.*?</THOUGHTS?>', '', clean, flags=re.IGNORECASE | re.DOTALL)
-        clean = re.sub(rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*', '', clean, count=1).strip()
+        clean = re.sub(
+            rf'(?i)^(?:\[(?:{self.THOUGHT_KEYWORDS})[^\]]*\]|\((?:{self.THOUGHT_KEYWORDS})[^\)]*\)|THOUGHTS?:)\s*',
+            '', clean, count=1
+        ).strip()
         clean = re.sub(r'(?i)\*(?:Shiro\s+)?(?:thinks?|thinking|schem\w+|plott\w+).*?\*', '', clean).strip()
         clean = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean).strip()
+
+        # ── Hmph throttle ───────────────────────────────────────────────────────
+        # Allow at most 1 "hmph" per response, and only if 3+ responses have
+        # passed since the last one was allowed through.
+        hmph_matches = list(_HMPH_PATTERN.finditer(clean))
+        if hmph_matches:
+            COOLDOWN = 3  # responses between allowed hmphs
+
+            if self._hmph_counter < COOLDOWN:
+                # Suppress ALL hmph occurrences this response
+                alt_idx = self._hmph_session_count % len(_HMPH_ALTERNATIVES)
+                replacement = _HMPH_ALTERNATIVES[alt_idx]
+                clean = _HMPH_PATTERN.sub(replacement, clean)
+                # Don't reset counter — still cooling down
+            else:
+                # Allow the FIRST hmph only, suppress any extras
+                first_match = hmph_matches[0]
+                if len(hmph_matches) > 1:
+                    # Keep first occurrence, replace the rest
+                    parts = []
+                    last_end = 0
+                    for i, m in enumerate(hmph_matches):
+                        parts.append(clean[last_end:m.start()])
+                        if i == 0:
+                            parts.append(m.group(0))  # keep original
+                        else:
+                            parts.append("")           # suppress extras
+                        last_end = m.end()
+                    parts.append(clean[last_end:])
+                    clean = "".join(parts)
+                self._hmph_counter = 0   # reset cooldown
+                self._hmph_session_count += 1
+
+            self._hmph_counter += 1
+        else:
+            # No hmph this response — advance cooldown counter
+            self._hmph_counter = min(self._hmph_counter + 1, 10)
+        # ── End hmph throttle ───────────────────────────────────────────────────
+
         lines = clean.splitlines()
         cleaned_lines = []
         for line in lines:
