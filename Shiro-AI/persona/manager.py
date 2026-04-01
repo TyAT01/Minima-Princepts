@@ -153,6 +153,21 @@ class PersonaManager:
                     prompt += "- Genuine Moments: " + "; ".join(gm_str) + "\n"
                 prompt += "\n"
 
+            # Tone & Response Style Rules
+            rs_rules = pers.get('response_style', [])
+            if rs_rules and isinstance(rs_rules, list):
+                prompt += "### RESPONSE STYLE RULES\n"
+                for rule in rs_rules:
+                    prompt += f"- {rule}\n"
+                prompt += "\n"
+
+            tc = pers.get('tone_calibration', {})
+            if tc:
+                prompt += "### TONE CALIBRATION\n"
+                for situation, guidance in tc.items():
+                    prompt += f"- {situation.replace('_', ' ').title()}: {guidance}\n"
+                prompt += "\n"
+
             # Speech Patterns
             speech = pers.get('speech_patterns', {})
             if speech:
@@ -193,12 +208,12 @@ class PersonaManager:
             prompt += "2. VISIBILITY: The user CANNOT see your thoughts. Do NOT repeat timestamps or exact durations in your spoken response unless specifically asked.\n"
             prompt += "3. FORMAT: Follow the [THOUGHT] ... [/THOUGHT] Response pattern strictly. No brackets [ ] or parentheses ( ) in the spoken part.\n"
 
-            # Response Style
-            style_cfg = self.persona_data.get('response_style', pers.get('response_style', {}))
-            if not style_cfg:
-                style_cfg = {'default_words': 25, 'soft_cap': 40, 'hard_cap': 60}
+            # Response Length Config
+            len_cfg = self.persona_data.get('response_length', pers.get('response_length', {}))
+            if not len_cfg:
+                len_cfg = {'default_words': 25, 'soft_cap': 40, 'hard_cap': 60}
 
-            prompt += f"4. LENGTH: Target ~{style_cfg.get('default_words', 25)} words (Soft limit: {style_cfg.get('soft_cap', 40)}, Hard limit: {style_cfg.get('hard_cap', 60)}).\n"
+            prompt += f"4. LENGTH: Target ~{len_cfg.get('default_words', 25)} words (Soft limit: {len_cfg.get('soft_cap', 40)}, Hard limit: {len_cfg.get('hard_cap', 60)}).\n"
             prompt += "5. ENERGY: Keep it short, punchy, coy, and engaging.\n\n"
 
             prompt += "### MEMORY & SELF-AWARENESS\n"

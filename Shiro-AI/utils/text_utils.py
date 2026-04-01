@@ -67,6 +67,10 @@ def clean_yaml_block(text: str) -> str:
     # 2. Remove bolding (frequent source of YAML parse errors like **ANALYSIS**)
     text = text.replace("**", "")
 
+    # 2b. Escape/Replace bullet points that might be confused with YAML aliases if not properly indented
+    # (e.g., "* Fact" -> "Fact")
+    text = re.sub(r'^\s*\* ', '  - ', text, flags=re.MULTILINE)
+
     # 3. Strip leading/trailing whitespace
     text = text.strip()
 

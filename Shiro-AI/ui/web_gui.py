@@ -392,8 +392,6 @@ class ShiroGUI:
 
         with gr.Blocks(
             title=self.title,
-            theme=self.theme_obj,
-            css=self.custom_css,
         ) as demo:
 
             # ── Header ──────────────────────────────────────
@@ -662,6 +660,10 @@ class ShiroGUI:
 
     def launch(self, share=False):
         if self.interface:
-            self.interface.launch(share=share)
+            self.interface.launch(
+                share=share,
+                theme=self.theme_obj,
+                css=self.custom_css
+            )
         else:
             logger.error("UI not built. Call build_ui() first.")
