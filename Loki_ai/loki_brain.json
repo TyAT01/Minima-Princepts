@@ -1,0 +1,17 @@
+{
+  "version": "eternal_1.0",
+  "born": 1770701635.8626842,
+  "personality": {
+    "menace": 0.75,
+    "sarcasm": 0.875,
+    "loyalty": 0.8,
+    "softness": 0.35
+  },
+  "trust": 0,
+  "facts": {},
+  "roasts": [],
+  "achievements": [],
+  "outfits": [
+    "default"
+  ]
+}

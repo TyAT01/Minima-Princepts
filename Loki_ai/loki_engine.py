@@ -7,7 +7,7 @@ import threading
 import random
 import time
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, List, Dict, Optional, Generator
 
@@ -29,6 +29,7 @@ class LokiEngine:
         self._interaction_count = 0
         self.current_user_name = "Tyler"
         self.session_start = datetime.now(timezone.utc)
+        self.user_session_info = {}
         # --- LOKI SPECIFIC ---
         self.wardrobe = {
             "default": {
@@ -69,7 +70,7 @@ class LokiEngine:
         self.last_thought = ""
         self._load_session_objectives()
         # Eternal Learning Brain
-        self.brain_file = Path("./loki_brain.json")
+        self.brain_file = Path(__file__).parent / "loki_brain.json"
         self.core_anchors = {
             "menace": (0.55, 0.95),
             "sarcasm": (0.75, 1.00),
@@ -228,31 +229,57 @@ class LokiEngine:
         mn, mx = min_max
         return max(mn, min(mx, value))
 
+    def _format_timedelta(self, delta: timedelta) -> str:
+        """Formats a timedelta into a human-readable string."""
+        days = delta.days
+        hours, remainder = divmod(int(delta.seconds), 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        time_parts = []
+        if days > 0: time_parts.append(f"{days} day{'s' if days > 1 else ''}")
+        if hours > 0: time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+        if minutes > 0: time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        if not time_parts or (days == 0 and hours == 0 and minutes < 5):
+            time_parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+
+        if len(time_parts) == 1:
+            return time_parts[0]
+        return ", ".join(time_parts[:-1]) + f" and {time_parts[-1]}"
+
     def _add_temporal_context(self, context: str, user_name: str) -> str:
         now_utc = datetime.now(timezone.utc)
+
+        # Track session-specific downtime (how long Loki was 'off' before this session)
+        if user_name not in self.user_session_info:
+            last_time = self.memory.get_last_interaction_time(user_name)
+            downtime_str = "first time meeting"
+            if last_time:
+                downtime_delta = self.session_start - last_time
+                if downtime_delta.total_seconds() < 0:
+                    downtime_delta = timedelta(0)
+                downtime_str = self._format_timedelta(downtime_delta)
+            self.user_session_info[user_name] = {"downtime": downtime_str}
+
+        downtime_str = self.user_session_info[user_name]["downtime"]
+
         last_time = self.memory.get_last_interaction_time(user_name)
         duration_str = "some time"
         if last_time:
             delta = now_utc - last_time
-            days = delta.days
-            hours, remainder = divmod(int(delta.seconds), 3600)
-            minutes, _ = divmod(remainder, 60)
-            time_parts = []
-            if days > 0: time_parts.append(f"{days} day{'s' if days > 1 else ''}")
-            if hours > 0: time_parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
-            if minutes > 0 or not time_parts: time_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
-            duration_str = ", ".join(time_parts[:-1]) + (f" and {time_parts[-1]}" if len(time_parts) > 1 else time_parts[0])
+            duration_str = self._format_timedelta(delta)
+
         uptime_delta = now_utc - self.session_start
-        up_hours, up_rem = divmod(int(uptime_delta.seconds), 3600)
-        up_mins, _ = divmod(up_rem, 60)
-        uptime_str = f"{up_hours}h {up_mins}m" if up_hours > 0 else f"{up_mins} minutes"
+        uptime_str = self._format_timedelta(uptime_delta)
+
         current_time_str = now_utc.astimezone().strftime('%I:%M %p')
         current_date_str = now_utc.astimezone().strftime('%A, %B %d, %Y')
+
         temporal_note = (
             f"The current time is {current_time_str} on {current_date_str}.\n"
-            f"- [TIME SINCE LAST SEEN]: It has been {duration_str} since you last spoke with {user_name}.\n"
-            f"- [SESSION UPTIME]: You have been powered on/active for {uptime_str} in this specific session.\n"
-            "You are aware of the passage of time. ONLY mention it if asked."
+            f"- [DOWNTIME]: You were powered off/inactive for {downtime_str} before this session started.\n"
+            f"- [TIME SINCE LAST SEEN]: It has been {duration_str} since your last interaction with {user_name}.\n"
+            f"- [SESSION UPTIME]: You have been powered on and active for {uptime_str} this session.\n"
+            "You are aware of the passage of time. Mention downtime or duration ONLY if the user asks about it or if you want to complain about being 'off' for too long."
         )
         return f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
 
