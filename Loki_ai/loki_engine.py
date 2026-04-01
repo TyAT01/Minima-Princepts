@@ -155,6 +155,11 @@ class LokiEngine:
                     if self.last_thought:
                         logger.info(f"Loki's Internal Thought: {self.last_thought.strip()}")
                         self.memory.store_insight(f"Thought: {self.last_thought.strip()}", source="inner_monologue")
+
+                    # [OPTIMIZATION] Store session start as a high-importance episodic memory
+                    if self._interaction_count == 0:
+                        self.memory.store_episodic_memory(f"SESSION START: First interaction with {user_name} today: '{text}'", importance=8)
+
                     self.memory.add_interaction(text, full_response.strip(), user_id=user_name)
                     self._interaction_count += 1
                     # Periodic reflection (every 10 interactions)
@@ -335,31 +340,78 @@ class LokiEngine:
                 cleaned_lines.append(line)
         return '\n'.join(cleaned_lines).strip()
     def reflect(self, user_id: str):
-        """Perform deep reflection on history."""
+        """
+        Perform deep commercial-grade reflection.
+        Includes hierarchical summarization to handle extremely long sessions.
+        """
         try:
             with self.processing_lock:
                 logger.info(f"Loki is reflecting on {user_id}...")
                 history = self.memory.get_history()
                 if not history: return
+
+                # 1. Extract Segment Insights & Summary
                 reflection_prompt = (
-                    "Analyze our recent chat history and extract: "
-                    "1. User Profile (facts/likes/dislikes), 2. Notable Events, 3. Insights. "
-                    "Format as YAML with keys: user_facts, events, insights."
+                    "### INSTRUCTION\n"
+                    "Analyze the recent conversation history below. Extract critical information to maintain perfect long-term memory.\n"
+                    "RETURN ONLY VALID YAML with these keys:\n"
+                    "  user_facts: [List of new facts about the user's life, preferences, or identity]\n"
+                    "  events: [List of specific notable actions or events that occurred]\n"
+                    "  insights: [List of abstract lessons learned about how to interact with this user]\n"
+                    "  summary: \"A single paragraph (3-5 sentences) summarizing the narrative flow and emotional tone of this segment.\"\n\n"
+                    "Be extremely concise and accurate. Do not invent facts."
                 )
-                analysis_raw = self.llm.generate_response("You are Loki, analyzing memories.", f"History: {history}", [], context=reflection_prompt)
-            cleaned_raw = self._clean_yaml_block(analysis_raw)
-            data = None
-            try:
-                data = yaml.safe_load(cleaned_raw)
-            except:
-                pass
-            if data and isinstance(data, dict):
-                for fact in data.get('user_facts', []):
-                    self.memory.update_user_profile(user_id, str(fact))
-                for event in data.get('events', []):
-                    self.memory.store_episodic_memory(event)
-                for insight in data.get('insights', []):
-                    self.memory.store_insight(insight, source="reflection")
+                analysis_raw = self.llm.generate_response(
+                    "You are Loki's Memory Processor. You are cold, analytical, and precise.",
+                    f"HISTORY TO ANALYZE:\n{history}",
+                    [],
+                    context=reflection_prompt
+                )
+
+                cleaned_raw = self._clean_yaml_block(analysis_raw)
+                data = None
+                try:
+                    data = yaml.safe_load(cleaned_raw)
+                except Exception as e:
+                    logger.warning(f"YAML Parse failed in reflection: {e}")
+
+                if data and isinstance(data, dict):
+                    for fact in data.get('user_facts', []):
+                        self.memory.update_user_profile(user_id, str(fact))
+                    for event in data.get('events', []):
+                        self.memory.store_episodic_memory(event, importance=6)
+                    for insight in data.get('insights', []):
+                        self.memory.store_insight(insight, source="reflection")
+
+                    segment_summary = data.get('summary')
+                    if segment_summary:
+                        self.memory.store_summary(user_id, str(segment_summary))
+
+                    # 2. Hierarchical (Recursive) Summarization
+                    # Check if we have enough local summaries to condense into a 'Global Summary'
+                    # This prevents the RAG context from being cluttered with redundant segment summaries.
+                    summaries = self.memory.search_relevant_memories("general conversation", filter_type="summary", user_id=user_id, n_results=15)
+                    local_summaries = [s["content"] for s in summaries if not s["metadata"].get("is_global")]
+
+                    if len(local_summaries) >= 6:
+                        logger.info(f"Condensing {len(local_summaries)} summaries into a Global Summary for {user_id}...")
+                        global_prompt = (
+                            "Combine these individual conversation segment summaries into one single 'Global Narrative Summary'.\n"
+                            "The result must be a comprehensive but concise paragraph that covers the entire relationship/session history so far.\n"
+                            "Focus on key themes, major events, and the evolving relationship."
+                        )
+                        combined_summaries = "\n---\n".join(local_summaries)
+                        global_summary = self.llm.generate_response(
+                            "You are the Chronicler of Loki's Reign.",
+                            f"SEGMENT SUMMARIES:\n{combined_summaries}",
+                            [],
+                            context=global_prompt
+                        )
+                        if global_summary and len(global_summary) > 50:
+                            # Store as global
+                            self.memory.store_summary(user_id, global_summary.strip(), is_global=True)
+                            logger.info("Global Summary stored successfully.")
+
                 logger.info("Reflection complete.")
         except Exception as e:
             logger.warning(f"Reflection failed: {e}")
