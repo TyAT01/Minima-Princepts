@@ -263,13 +263,14 @@ class LokiApp:
         # Setup signal handlers for graceful shutdown
         if threading.current_thread() is threading.main_thread():
             def handle_exit(sig, frame):
-                logging.info("Graceful shutdown initiated...")
+                logging.info("Graceful shutdown signal received...")
                 if self.gui and self.gui.interface:
                     try:
                         self.gui.interface.close()
                     except:
                         pass
-                sys.exit(0)
+                # Signal Gradio to stop, but don't exit immediately if we want run() to finish finally
+                # sys.exit(0) # Removing sys.exit to allow finally block in run()
 
             try:
                 signal.signal(signal.SIGINT, handle_exit)
@@ -278,7 +279,14 @@ class LokiApp:
                 # Still might fail if not in main interpreter even if main thread
                 pass
 
-        self.gui.launch(share=ui_cfg.get('share', False))
+        try:
+            self.gui.launch(share=ui_cfg.get('share', False))
+        finally:
+            logging.info("Performing Reflective Shutdown...")
+            try:
+                self.engine.shutdown()
+            except Exception as e:
+                logging.error(f"Error during engine shutdown: {e}")
 
 if __name__ == "__main__":
     # Configure logging

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import numpy as np
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Dict, Optional
@@ -114,28 +115,27 @@ class MemoryStore:
             self.short_term_buffer.pop(0)
             self.short_term_buffer.pop(0)
 
-    def store_insight(self, insight: str, source: str = "reflection", user_id: Optional[str] = None):
+    def store_insight(self, insight: str, user_id: str, source: str = "reflection"):
         """Stores a lesson learned or a significant fact for long-term recall."""
         now = datetime.now(timezone.utc)
         insight_id = f"insight_{now.timestamp()}"
 
         metadata = {
+            "user_id": user_id,
             "insight": insight,
             "source": source,
             "timestamp": now.isoformat(),
             "type": "insight"
         }
-        if user_id:
-            metadata["user_id"] = user_id
 
         self._collection.add(
             ids=[insight_id],
             documents=[insight],
             metadatas=[metadata]
         )
-        logger.info(f"Stored insight: {insight_id}")
+        logger.info(f"Stored insight for {user_id}: {insight_id}")
 
-    def store_episodic_memory(self, event_description: str, importance: int = 5):
+    def store_episodic_memory(self, event_description: str, user_id: str, importance: int = 5):
         """Stores a notable event or personal experience."""
         now = datetime.now(timezone.utc)
         event_id = f"event_{now.timestamp()}"
@@ -144,13 +144,14 @@ class MemoryStore:
             ids=[event_id],
             documents=[event_description],
             metadatas=[{
+                "user_id": user_id,
                 "description": event_description,
                 "importance": importance,
                 "timestamp": now.isoformat(),
                 "type": "episodic"
             }]
         )
-        logger.info(f"Stored episodic memory: {event_id}")
+        logger.info(f"Stored episodic memory for {user_id}: {event_id}")
 
     def store_summary(self, user_id: str, summary: str, is_global: bool = False):
         """Stores a concise summary of a conversation segment."""
@@ -187,56 +188,127 @@ class MemoryStore:
         )
         logger.info(f"Updated profile for {user_id}")
 
-    def search_relevant_memories(self, query: str, n_results: int = 8, filter_type: Optional[str] = None, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Searches memory for relevant past interactions, insights, or profile facts."""
+    def search_relevant_memories(
+        self,
+        query: str,
+        n_results: int = 8,
+        filter_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+        use_mmr: bool = True,
+        mmr_lambda: float = 0.5,
+        hypothetical_answer: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Searches memory with optional MMR for diversity and HyDE support.
+        """
+        if n_results <= 0:
+            return []
+
+        search_query = hypothetical_answer if hypothetical_answer else query
+
         where = {}
         if filter_type:
             where["type"] = filter_type
         if user_id:
-            # Note: ChromaDB 'where' with multiple conditions usually needs '$and'
             if filter_type:
                 where = {"$and": [{"type": filter_type}, {"user_id": user_id}]}
             else:
                 where = {"user_id": user_id}
 
+        # If using MMR, fetch more candidates than requested
+        fetch_k = n_results * 3 if use_mmr else n_results
+
         results = self._collection.query(
-            query_texts=[query],
-            n_results=n_results,
-            where=where if where else None
+            query_texts=[search_query],
+            n_results=fetch_k,
+            where=where if where else None,
+            include=["documents", "metadatas", "embeddings", "distances"]
         )
 
-        memories = []
-        if results and results.get("metadatas") and results["metadatas"][0]:
-            for i, metadata in enumerate(results["metadatas"][0]):
-                if metadata:
-                    memories.append({
-                        "content": results["documents"][0][i],
-                        "metadata": metadata
-                    })
-        return memories
+        if not results or not results.get("metadatas") or not results["metadatas"][0]:
+            return []
 
-    def get_full_context(self, query: str, user_id: Optional[str] = None, max_chars: int = 3200) -> str:
+        candidates = []
+        for i in range(len(results["ids"][0])):
+            candidates.append({
+                "id": results["ids"][0][i],
+                "content": results["documents"][0][i],
+                "metadata": results["metadatas"][0][i],
+                "embedding": results["embeddings"][0][i],
+                "distance": results["distances"][0][i]
+            })
+
+        if use_mmr and len(candidates) > n_results:
+            selected_indices = self._perform_mmr(
+                [c["embedding"] for c in candidates],
+                [1.0 - c["distance"] for c in candidates],
+                n_results,
+                mmr_lambda
+            )
+            return [candidates[i] for i in selected_indices]
+
+        return candidates[:n_results]
+
+    def _perform_mmr(self, embeddings: List[List[float]], similarities: List[float], k: int, lambda_param: float) -> List[int]:
+        """Simple MMR implementation for diversity."""
+        if not embeddings or k <= 0: return []
+
+        n = len(embeddings)
+        k = min(k, n)
+
+        # Convert to numpy for faster math
+        emb_array = np.array(embeddings)
+
+        selected = [0] # Start with the most relevant
+        remaining = list(range(1, n))
+
+        while len(selected) < k:
+            best_mmr = -1e9
+            best_idx = -1
+
+            # Precompute similarity between remaining and selected
+            for i in remaining:
+                # Max similarity to any already selected document
+                # We need cosine similarity here
+                current_emb = emb_array[i]
+                selected_embs = emb_array[selected]
+
+                # Manual cosine similarity if not normalized
+                # Assuming SentenceTransformer returns normalized embeddings
+                dot_products = np.dot(selected_embs, current_emb)
+                norms_selected = np.linalg.norm(selected_embs, axis=1)
+                norm_current = np.linalg.norm(current_emb)
+
+                # Avoid division by zero
+                sim_to_selected = dot_products / (norms_selected * norm_current + 1e-9)
+                max_sim_to_selected = np.max(sim_to_selected)
+
+                mmr_score = lambda_param * similarities[i] - (1 - lambda_param) * max_sim_to_selected
+
+                if mmr_score > best_mmr:
+                    best_mmr = mmr_score
+                    best_idx = i
+
+            if best_idx == -1: break
+            selected.append(best_idx)
+            remaining.remove(best_idx)
+
+        return selected
+
+    def get_full_context(self, query: str, user_id: Optional[str] = None, max_chars: int = 3000, hypothetical_answer: Optional[str] = None) -> str:
         """
         Commercial-grade context assembly using a tiered priority budget system.
         Ensures the most critical memories are included first within the token limit.
         """
-        # 1. Fetch broad range of candidates
+        # 1. Fetch broad range of candidates with MMR
         optimized_query = f"relevant past memories for: {query}"
-        raw_results = self._collection.query(
-            query_texts=[optimized_query],
-            n_results=25,
-            where={"user_id": user_id} if user_id else None
+        memories = self.search_relevant_memories(
+            optimized_query,
+            n_results=15,
+            user_id=user_id,
+            use_mmr=True,
+            hypothetical_answer=hypothetical_answer
         )
-
-        memories = []
-        if raw_results and raw_results.get("metadatas") and raw_results["metadatas"][0]:
-            for i, metadata in enumerate(raw_results["metadatas"][0]):
-                if metadata:
-                    memories.append({
-                        "content": raw_results["documents"][0][i],
-                        "metadata": metadata,
-                        "relevance": 1.0 - (raw_results["distances"][0][i] if "distances" in raw_results else 0.5)
-                    })
 
         # 2. Categorize and Rank by Importance/Relevance
         categories = {
@@ -312,11 +384,11 @@ class MemoryStore:
         global_sums = [m["content"] for m in categories["summary"] if m["metadata"].get("is_global")]
         local_sums = [m["content"] for m in categories["summary"] if not m["metadata"].get("is_global")]
 
-        # Sort local summaries by timestamp (newest first)
+        # Sort summaries by timestamp (newest first)
         categories["summary"].sort(key=lambda x: x["metadata"].get("timestamp", ""), reverse=True)
 
         # Take up to 2 global and 3 local for a balanced perspective
-        balanced_summaries = global_sums[:2] + [m["content"] for m in categories["summary"] if not m["metadata"].get("is_global")][:3]
+        balanced_summaries = global_sums[:2] + local_sums[:3]
         add_to_context("CONVERSATION SUMMARIES", balanced_summaries)
 
         # Priority 5: Insights & Lessons
