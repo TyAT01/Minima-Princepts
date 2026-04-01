@@ -19,6 +19,19 @@ class Settings(BaseSettings):
     discord_guild_id: Optional[int] = None
     discord_voice_channel_id: Optional[int] = None
 
+    # Twitch
+    twitch_username: Optional[str] = None
+    twitch_token: Optional[str] = None
+    twitch_channel: Optional[str] = None
+
+    # YouTube
+    youtube_api_key: Optional[str] = None
+    youtube_token: Optional[str] = None
+    youtube_live_chat_id: Optional[str] = None
+
+    # Output settings
+    enable_local_audio: bool = True
+
     # Audio settings
     sample_rate: int = 24000
     discord_sample_rate: int = 48000

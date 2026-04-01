@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 
 from adapters.base import InputAdapter
 from adapters.schemas import Event
@@ -23,12 +23,14 @@ class YouTubeChatAdapter(InputAdapter):
     def __init__(
         self,
         api_key: str | None = None,
+        token: str | None = None,
         live_chat_id: str | None = None,
         username_fallback: str = "youtube_user",
     ) -> None:
         self._logger = logging.getLogger(__name__)
-        self._api_key = api_key or os.getenv("AURELIA_YOUTUBE_API_KEY", "").strip()
-        self._live_chat_id = live_chat_id or os.getenv("AURELIA_YOUTUBE_LIVE_CHAT_ID", "").strip()
+        self._api_key = api_key or os.getenv("AURELIA_CHROMA_YOUTUBE_API_KEY", "").strip()
+        self._token = token or os.getenv("AURELIA_CHROMA_YOUTUBE_TOKEN", "").strip()
+        self._live_chat_id = live_chat_id or os.getenv("AURELIA_CHROMA_YOUTUBE_LIVE_CHAT_ID", "").strip()
         self._username_fallback = username_fallback
         self._queue: asyncio.Queue[Event] = asyncio.Queue()
         self._loop = asyncio.get_event_loop()
@@ -102,6 +104,33 @@ class YouTubeChatAdapter(InputAdapter):
             )
             await self._queue.put(event)
         await asyncio.sleep(polling_ms / 1000)
+
+    async def send_message(self, text: str) -> None:
+        """Sends a message to the YouTube live chat."""
+        if not self._token:
+            self._logger.warning("YouTube adapter missing OAuth token; cannot send message.")
+            return
+
+        self._logger.info(f"Sending message to YouTube: {text}")
+        url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet&key={self._api_key}"
+        data = {
+            "snippet": {
+                "liveChatId": self._live_chat_id,
+                "type": "textMessageEvent",
+                "textMessageDetails": {
+                    "messageText": text
+                }
+            }
+        }
+        try:
+            req = Request(url, data=json.dumps(data).encode("utf-8"), method="POST")
+            req.add_header("Authorization", f"Bearer {self._token}")
+            req.add_header("Content-Type", "application/json")
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, urlopen, req)
+        except Exception as e:
+            self._logger.error(f"Failed to send YouTube message: {e}")
 
 
 class YouTubeLogAdapter(InputAdapter):
