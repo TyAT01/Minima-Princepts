@@ -16,9 +16,9 @@ class LlamaClient:
         base_url: str = "http://localhost:11434/api",
         model: str = "loki:latest",
         api_type: str = "ollama",
-        temperature: float = 0.7,
+        temperature: float = 0.6,
         top_p: float = 0.9,
-        repeat_penalty: float = 1.1,
+        repeat_penalty: float = 1.2,
         max_tokens: int = 512
     ):
         """

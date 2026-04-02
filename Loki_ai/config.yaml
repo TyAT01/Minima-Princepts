@@ -4,9 +4,9 @@ llm:
   api_type: "ollama"  # 'ollama' or 'openai'
   base_url: "http://localhost:11434/api"
   model: "loki:latest"
-  temperature: 0.9
-  top_p: 0.92
-  repeat_penalty: 1.08
+  temperature: 0.6
+  top_p: 0.9
+  repeat_penalty: 1.2
   max_tokens: 512
 
 stt:
