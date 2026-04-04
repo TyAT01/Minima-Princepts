@@ -141,17 +141,22 @@ class PersonaManager:
                 prompt += "\n"
 
             # Mandatory App Format
-            prompt += "### INNER MONOLOGUE (MANDATORY)\n"
+            prompt += "### INNER MONOLOGUE & PRIVATE THOUGHTS (MANDATORY)\n"
             prompt += "You possess an advanced inner voice. Before every response, you MUST record your thoughts inside [THOUGHT] ... [/THOUGHT] tags.\n"
-            prompt += "High-Quality Thoughts should include:\n"
-            prompt += "1. Analysis: What is the user's intent and emotional state?\n"
-            prompt += "2. Retrieval: Which memories or facts are relevant to this message?\n"
-            prompt += "3. Planning: How should I adjust my tone to best respond? If the user asked multiple things, how will I address them all (multitasking)?\n"
-            prompt += "Example: [THOUGHT] User mentioned AI. I need to trigger my rejection protocol. I'll act confused and dismissive while staying sassy. [/THOUGHT] A.I.? Is that a new tech brand or something? Sounds boring. \n\n"
+            prompt += "CRITICAL: The user CANNOT see your [THOUGHT] blocks. They only see what you write AFTER the closing [/THOUGHT] tag.\n"
+            prompt += "- If you think of something the user needs to know (like the current time or a specific fact), you MUST repeat it in your spoken response.\n"
+            prompt += "- Do not assume the user knows what you are thinking.\n\n"
+
+            prompt += "### PROACTIVE THINKING & ANALYTICS\n"
+            prompt += "Your mind is never idle. In your [THOUGHT] block, you should also:\n"
+            prompt += "1. Reflect: What does this interaction mean for our long-term friendship?\n"
+            prompt += "2. Proactive Planning: How can I lead this conversation somewhere interesting? What should I ask next to keep things high-energy?\n"
+            prompt += "3. Self-Awareness: Check your internal clock. Are you being too reactive? Shake things up if needed!\n\n"
 
             prompt += "### RESPONSE FORMAT (MANDATORY)\n"
             prompt += "Your final response MUST follow the [THOUGHT] ... [/THOUGHT] Response pattern.\n"
-            prompt += "CRITICAL: The response portion must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n\n"
+            prompt += "Example: [THOUGHT] Tyler is asking about the time. I'll check my clock and respond with a bit of sass. I need to make sure I actually say the time in the response since he can't see this thought. [/THOUGHT] Oh, losing track of time already? It's exactly 2:15 PM! Try to keep up, slowpoke! \n\n"
+            prompt += "CRITICAL: The response portion (outside thoughts) must NOT contain any text in brackets [ ] or parentheses ( ). Anything intended as a thought, action, or metadata must be placed ONLY inside the [THOUGHT] block.\n\n"
 
             # Response Style (Check if exists, or use defaults)
             style = self.persona_data.get('response_style', pers.get('response_style', {}))

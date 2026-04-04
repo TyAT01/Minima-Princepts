@@ -144,8 +144,9 @@ class LuminaApp:
         self.last_thought = ""
 
         # Patterns for thought-start and thought-end (case-insensitive, handles brackets and parentheses)
-        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)', re.IGNORECASE)
-        end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)', re.IGNORECASE)
+        # Added more variants to catch common model mistakes
+        start_pattern = re.compile(r'\[THOUGHTS?\]|\(THOUGHTS?\)|\[INNER MONOLOGUE\]|\[THINKING\]', re.IGNORECASE)
+        end_pattern = re.compile(r'\[/THOUGHTS?\]|\(/THOUGHTS?\)|\[/INNER MONOLOGUE\]|\[/THINKING\]', re.IGNORECASE)
 
         for chunk in stream:
             buffer += chunk
@@ -161,10 +162,20 @@ class LuminaApp:
                         in_thought = True
                         continue
                     else:
+                        # [Refined] Before yielding safe buffer, check for simple bracketed thoughts at the start
+                        if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
+                            # If we see "[...]" and it's not a known start tag (checked above)
+                            # it might be a simple bracketed thought.
+                            # We only do this if it's at the very start of the whole response.
+                            closing_idx = buffer.find("]")
+                            self.last_thought = buffer[buffer.find("[")+1:closing_idx]
+                            buffer = buffer[closing_idx+1:].lstrip()
+                            continue
+
                         # No start tag found. Yield safe buffer, keeping enough to catch partial tags.
-                        if len(buffer) > 15:
-                            yield buffer[:-15]
-                            buffer = buffer[-15:]
+                        if len(buffer) > 25:
+                            yield buffer[:-25]
+                            buffer = buffer[-25:]
                         break
                 else:
                     match = end_pattern.search(buffer)
@@ -176,7 +187,6 @@ class LuminaApp:
                         continue
                     else:
                         # Inside thought, wait for closing tag or stream end.
-                        # We no longer drain the buffer here to avoid fragmenting words in the CMD log.
                         # Safety cap for thoughts (prevent infinite growth)
                         if len(buffer) + len(self.last_thought) > 4000:
                             self.last_thought += buffer
@@ -187,19 +197,26 @@ class LuminaApp:
         # Final cleanup
         if buffer:
             if in_thought:
-                self.last_thought += buffer
-                # If the stream ended without a closing tag, treat the content as response
-                # especially if it's long and doesn't have an opening tag anymore.
-                if len(self.last_thought) > 50 and not start_pattern.search(self.last_thought):
-                    yield self.last_thought
-                    self.last_thought = ""
+                # If it ends while in thought, it might be an unclosed thought or a leaked response
+                # If there's a lot of content and it looks like sentences, it might be a leaked response
+                if len(buffer) > 100 or "." in buffer:
+                     # Heuristic: if it's long, maybe the model forgot to close the thought and started speaking
+                     self.last_thought += " [Unclosed]"
+                     yield buffer
+                else:
+                    self.last_thought += buffer
             else:
                 # Last resort check for bracketed thought if nothing was extracted
                 if not self.last_thought and buffer.strip().startswith("[") and "]" in buffer:
-                    match = re.match(r'^\[(.*?)\]', buffer.strip())
-                    if match:
-                        self.last_thought = match.group(1)
-                        yield buffer.strip()[match.end():].strip()
+                    # Look for the FIRST closing bracket and opening bracket
+                    start_idx = buffer.find("[")
+                    closing_idx = buffer.find("]")
+                    if start_idx < closing_idx:
+                        pre_bracket = buffer[:start_idx]
+                        if pre_bracket:
+                            yield pre_bracket
+                        self.last_thought = buffer[start_idx+1:closing_idx]
+                        yield buffer[closing_idx+1:].strip()
                         return
                 yield buffer
 
@@ -267,10 +284,15 @@ class LuminaApp:
                 up_mins, _ = divmod(up_rem, 60)
                 uptime_str = f"{up_hours}h {up_mins}m" if up_hours > 0 else f"{up_mins} minutes"
 
+                # 3. Current Time
+                current_time_str = now_utc.astimezone().strftime('%I:%M %p')
+                current_date_str = now_utc.astimezone().strftime('%A, %B %d, %Y')
+
                 temporal_note = (
+                    f"The current time is {current_time_str} on {current_date_str}. "
                     f"It has been {duration_str} since your last interaction with {user_name}. "
                     f"You have been 'active' for the last {uptime_str} this session. "
-                    "You are highly aware of this passage of time and should acknowledge it if the gap is significant or if asked."
+                    "You are highly aware of this passage of time and should acknowledge it if asked or if the gap is significant."
                 )
 
                 context = f"### [TEMPORAL CONTEXT]\n- {temporal_note}\n\n{context}"
@@ -290,7 +312,16 @@ class LuminaApp:
 
                     # Remove any remaining bracketed text or parentheticals (leaked inner thoughts/actions/metadata)
                     # Uses a lookahead/lookbehind to avoid breaking standard Markdown links [text](url)
-                    clean_fragment = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', fragment).strip()
+                    # [Refined] Only remove if it looks like a tag or is long enough to be a leaked thought.
+                    # This avoids stripping things like "I am [happy]" or "(shrugs)" if they are intentional.
+                    # However, the persona instruction says NOT to use brackets/parens at all.
+                    # So we'll keep it strict but refined.
+                    # Clean up any leaked thought/action blocks completely
+                    clean_fragment = re.sub(r'\[(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\].*?\[/(THOUGHT|INNER MONOLOGUE|THINKING|ACTION|SCENE|META|SYSTEM)\]', '', fragment, flags=re.IGNORECASE | re.DOTALL)
+                    clean_fragment = re.sub(r'\(THOUGHT\).*?\(/THOUGHT\)', '', clean_fragment, flags=re.IGNORECASE | re.DOTALL)
+
+                    # Remove any remaining bracketed text or parentheticals
+                    clean_fragment = re.sub(r'\[.*?\](?!\()|(?<!\])\(.*?\)', '', clean_fragment).strip()
                     if clean_fragment:
                         response_fragments.append(clean_fragment)
                         yield clean_fragment
@@ -308,8 +339,9 @@ class LuminaApp:
                     logging.info(f"Successfully processed message. Response length: {len(full_response)}")
 
                 # Periodic reflection (every 10 interactions)
+                # Run in background to avoid blocking the UI response
                 if self.memory.count() % 10 == 0:
-                     self.reflect(user_name)
+                     threading.Thread(target=self.reflect, args=(user_name,), daemon=True).start()
 
             except Exception as e:
                 self.error_handler.handle_error(e, "Text Processing")
