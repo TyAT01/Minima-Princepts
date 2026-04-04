@@ -3,13 +3,16 @@ import os
 import asyncio
 from pathlib import Path
 
-# Add Aurelia_chroma to path
-sys.path.append(os.path.abspath("Aurelia_chroma"))
+# Add Aurelia-AI to path
+sys.path.append(os.path.abspath("Aurelia-AI"))
 
-from llm.persona import load_persona_prompt
+from persona.manager import PersonaManager
 
 async def simulate_chat():
-    prompt = load_persona_prompt()
+    manager = PersonaManager()
+    manager.load_persona()
+    prompt = manager.get_system_prompt()
+
     print("\n" + "="*60)
     print("✨ AURELIA VALE PERSONA VERIFICATION ✨")
     print("="*60)
