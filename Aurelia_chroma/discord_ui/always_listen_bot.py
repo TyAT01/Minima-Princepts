@@ -180,16 +180,16 @@ class AlwaysListenBot:
 
         @bot.event
         async def on_message(message: nextcord.Message):
-          try:
-            if message.author == bot.user or not self._voice_client:
-                return
+            try:
+                if message.author == bot.user or not self._voice_client:
+                    return
 
-            thinking_message = await message.channel.send("Thinking...")
-            response_text = await self._orchestrator.process_text_input(message.content, message.author.display_name, "discord")
-            await thinking_message.edit(content=response_text)
-          except Exception as e:
-            logger.exception("Error in on_message")
-            await self._orchestrator.report_error(str(e))
+                thinking_message = await message.channel.send("Thinking...")
+                response_text = await self._orchestrator.process_text_input(message.content, message.author.display_name, "discord")
+                await thinking_message.edit(content=response_text)
+            except Exception as e:
+                logger.exception("Error in on_message")
+                await self._orchestrator.report_error(str(e))
 
         await bot.start(self._config.token)
 
@@ -274,24 +274,28 @@ class AlwaysListenBot:
             logger.info("Started listening in voice channel.")
 
     async def process_audio_data(self, user, data):
-      try:
-        fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        fp.close()
+        fp_name = None
+        try:
+            fp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            fp_name = fp.name
+            fp.close()
 
-        audio_np = np.frombuffer(data, dtype=np.int16)
-        if audio_np.size % 2 == 0:
-            audio_mono = audio_np.reshape(-1, 2).mean(axis=1).astype(np.float32) / 32768.0
-        else:
-            audio_mono = audio_np.astype(np.float32) / 32768.0
+            audio_np = np.frombuffer(data, dtype=np.int16)
+            if audio_np.size % 2 == 0:
+                audio_mono = audio_np.reshape(-1, 2).mean(axis=1).astype(np.float32) / 32768.0
+            else:
+                audio_mono = audio_np.astype(np.float32) / 32768.0
 
-        resampled_audio = librosa.resample(audio_mono, orig_sr=self._config.discord_sample_rate, target_sr=self._config.sample_rate)
-        sf.write(fp.name, resampled_audio, self._config.sample_rate)
+            resampled_audio = librosa.resample(audio_mono, orig_sr=self._config.discord_sample_rate, target_sr=self._config.sample_rate)
+            sf.write(fp_name, resampled_audio, self._config.sample_rate)
 
-        await self._orchestrator.process_audio_input(fp.name, str(user), "discord")
-        self._safe_delete(fp.name)
-      except Exception as e:
-        logger.exception("Error in process_audio_data")
-        await self._orchestrator.report_error(str(e))
+            await self._orchestrator.process_audio_input(fp_name, str(user), "discord")
+        except Exception as e:
+            logger.exception("Error in process_audio_data")
+            await self._orchestrator.report_error(str(e))
+        finally:
+            if fp_name:
+                self._safe_delete(fp_name)
 
     def _safe_delete(self, filepath: str):
         try:

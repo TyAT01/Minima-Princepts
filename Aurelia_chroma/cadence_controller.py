@@ -243,7 +243,7 @@ class AureliaCadenceController:
             updates["burst_max_items"] = self.burst_max_items
 
         if updates:
-            print(f"Cadence Controller Config Updated: {updates}")
+            logger.info(f"Cadence Controller Config Updated: {updates}")
         return updates
 
     def pop_consumed_message(self, msg: ChatMessage) -> None:
