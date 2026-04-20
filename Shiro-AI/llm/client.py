@@ -19,20 +19,29 @@ _ANTI_LEAK_SUFFIX = (
 )
 
 def _build_payload(model, messages, temperature, top_p, repeat_penalty,
-                   max_tokens, num_gpu, tools=None, max_tokens_override=None):
+                   max_tokens, num_gpu, tools=None, max_tokens_override=None,
+                   num_ctx: int = 2048):
     """Build Ollama chat payload. Called from both sync and async paths.
     max_tokens_override: if set, overrides self.max_tokens for this call only.
     Used to allow longer responses for complex/deep messages.
+    num_ctx: context window size. Defaults to 4096 to match engine config default.
+    Raising this increases KV-cache VRAM usage significantly — on a 4GB budget with
+    GPT-SoVITS taking 1.5-1.6GB, 4096 is the safe ceiling. Set via config.yaml
+    llm.num_ctx if you need more and have the headroom.
+    FIX: was hardcoded to 6144 which ignored the engine's config value entirely,
+    causing KV-cache to eat into TTS VRAM headroom on every request.
     """
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
+        "keep_alive": -1,  # keep model loaded in VRAM indefinitely — no reload penalty
         "options": {
             "temperature": temperature,
             "top_p": top_p,
             "repeat_penalty": repeat_penalty,
             "num_predict": max_tokens_override if max_tokens_override else max_tokens,
+            "num_ctx": num_ctx,
             "stop": ["User:", "System:", "\nUser:", "\nSystem:"],
         }
     }
@@ -84,6 +93,7 @@ class LlamaClient:
         self.max_tokens = max_tokens
         self.use_native_tools = use_native_tools
         self.num_gpu = num_gpu
+        self.num_ctx = 4096  # Safe default for 4GB VRAM budget — override via config.yaml llm.num_ctx
         self._endpoint_type = "chat" # Default to chat
         self._session: Optional[aiohttp.ClientSession] = None
         self._supports_tools: Optional[bool] = None # Cache for tool support
@@ -233,7 +243,8 @@ class LlamaClient:
 
         payload = _build_payload(target_model, messages, self.temperature, self.top_p,
                                   self.repeat_penalty, self.max_tokens, self.num_gpu, tools,
-                                  max_tokens_override=max_tokens_override)
+                                  max_tokens_override=max_tokens_override,
+                                  num_ctx=self.num_ctx)
 
         response = requests.post(f"{self.base_url}/chat", json=payload, timeout=60, stream=True)
         if response.status_code == 400:
@@ -264,7 +275,8 @@ class LlamaClient:
         messages.append({"role": "user", "content": user_input})
 
         payload = _build_payload(target_model, messages, self.temperature, self.top_p,
-                                  self.repeat_penalty, self.max_tokens, self.num_gpu, tools)
+                                  self.repeat_penalty, self.max_tokens, self.num_gpu, tools,
+                                  num_ctx=self.num_ctx)
 
         session = await self._get_session()
         async with session.post(f"{self.base_url}/chat", json=payload) as response:
@@ -298,12 +310,14 @@ class LlamaClient:
             "model": target_model,
             "prompt": full_prompt,
             "stream": True,
+            "keep_alive": -1,
             "options": {
                 "temperature": self.temperature,
                 "top_p": self.top_p,
                 "repeat_penalty": self.repeat_penalty,
                 "num_predict": self.max_tokens,
-                "stop": ["User:", "System:", "\nUser:", "\nSystem:"]  # removed [SYSTEM: — was cutting replies
+                "num_ctx": self.num_ctx,
+                "stop": ["User:", "System:", "\nUser:", "\nSystem:"]
             }
         }
         if self.num_gpu is not None:
@@ -421,13 +435,13 @@ class LlamaClient:
             params = fn.get('parameters', {}).get('properties', {})
             tool_desc += f"- {name}: {desc} (Parameters: {list(params.keys())})\n"
 
+        # FIX: removed [SYSTEM] TOOL USE bracket token — replaced with plain prose header
         instruction = (
-            "\n\n### [SYSTEM] TOOL USE\n"
-            "The following tools are available to you if needed:\n"
+            "\n\nTools available to you:\n"
             f"{tool_desc}\n"
-            "To use a tool, you MUST output the following exact format on a new line:\n"
+            "To use a tool, output this exact format on a new line:\n"
             "TOOL_CALLS: [{\"function\": {\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}}]\n"
-            "Follow the exact JSON format. The engine will catch this and provide the result in the next turn.\n"
+            "The engine will catch this and provide the result in the next turn.\n"
         )
         return system_prompt + instruction
 
