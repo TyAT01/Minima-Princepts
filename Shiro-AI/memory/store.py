@@ -5,7 +5,6 @@ import time
 import logging
 import re
 import asyncio
-from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +35,11 @@ class MemoryStore:
         self.short_term_buffer: List[Dict[str, str]] = []
         self._last_seen_cache: dict = {}  # PERF: in-memory cache for get_last_interaction_time
         self.session_objectives: List[str] = []
+        # Per-user short-term buffers — keyed by user_id.
+        # self.short_term_buffer is the active buffer for the current user.
+        # Switching users swaps which per-user buffer is active.
+        self._user_buffers: dict = {}    # user_id -> List[Dict]
+        self._active_user_id: str = ""   # which user owns the current short_term_buffer
 
         # Dual Layer Cache
         self._search_cache = TTLCache(maxsize=100, ttl=300) # 5 min TTL
@@ -205,30 +209,54 @@ class MemoryStore:
         # Use HyDE if provided
         search_query = hypothetical_answer if hypothetical_answer else query
 
-        # PERF FIX P3: Run all 4 ChromaDB searches concurrently.
-        # Previously sequential (~4x single query time). Now runs in parallel
-        # so total cost = slowest single search instead of sum of all four.
+        # PERF FIX P3: Run all searches concurrently.
         from concurrent.futures import ThreadPoolExecutor, as_completed
         search_tasks = {
-            "interactions": (search_query, n_memories, "interaction", user_id, exclude_list),
-            "summaries":    (search_query, 2,         "summary",     user_id, None),
-            "insights":     (search_query, 3,         "insight",     user_id, None),
-            "entities":     (search_query, 3,         "entity",      user_id, None),
+            "interactions":  (search_query, n_memories, "interaction",   user_id, exclude_list),
+            "summaries":     (search_query, 2,          "summary",       user_id, None),
+            "insights":      (search_query, 3,          "insight",       user_id, None),
+            "entities":      (search_query, 3,          "entity",        user_id, None),
+            # Book memories stored under user_id="system" — globally available
+            "book_memories": (search_query, 4,          "book_memory",   None,    None),
+            # User profile facts — always searched for this user specifically
+            "profile_facts": (search_query, 6,          "profile_fact",  user_id, None),
         }
         results_map = {}
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        with ThreadPoolExecutor(max_workers=6) as ex:
             futures = {
                 ex.submit(self.search_relevant_memories, *args): key
                 for key, args in search_tasks.items()
             }
             for fut in as_completed(futures):
                 results_map[futures[fut]] = fut.result()
-        interactions = results_map.get("interactions", [])
-        summaries    = results_map.get("summaries", [])
-        insights     = results_map.get("insights", [])
-        entities     = results_map.get("entities", [])
+
+        interactions  = results_map.get("interactions",  [])
+        summaries     = results_map.get("summaries",     [])
+        insights      = results_map.get("insights",      [])
+        entities      = results_map.get("entities",      [])
+        book_memories = results_map.get("book_memories", [])
+        profile_facts = results_map.get("profile_facts", [])
+
+        # Filter book memories to only include genuinely relevant ones (distance < 0.82)
+        # Books use extractive summaries — their embeddings score lower than direct conversation.
+        # 0.75 was too tight and was filtering out valid book memories on book-topic queries.
+        book_memories = [b for b in book_memories if b.get("distance", 1.0) < 0.82]
+        # Filter profile facts to closest matches only (distance < 0.80)
+        profile_facts = [p for p in profile_facts if p.get("distance", 1.0) < 0.80]
 
         context_parts = []
+
+        # Profile facts first — most personal, highest relevance signal
+        if profile_facts:
+            context_parts.append(f"### WHAT I KNOW ABOUT {user_id.upper()}")
+            for p in profile_facts:
+                context_parts.append(f"- {p['content']}")
+
+        # Book memories second — curated, high-quality knowledge
+        if book_memories:
+            context_parts.append("### BOOKS I HAVE READ")
+            for b in book_memories:
+                context_parts.append(f"- {b['content']}")
 
         if summaries:
             context_parts.append("### RECENT SUMMARIES")
@@ -256,6 +284,49 @@ class MemoryStore:
                 context_parts.append(inter['content'])
 
         return "\n\n".join(context_parts)
+
+    def get_memory_gap_hint(self, query: str, user_id: str = "Stranger") -> str:
+        """
+        Returns a hint string describing how much relevant memory exists for a query.
+        Used by the engine to tell Shiro whether she's drawing from real memory or
+        operating blind — so she can respond naturally about gaps rather than fabricating.
+
+        Checks: user interactions + profile facts + book memories.
+        Returns one of:
+          "rich"    — strong memories found (distance < 0.4)
+          "partial" — some memories but weak match (0.4–0.65)
+          "sparse"  — very little relevant memory found
+          "none"    — nothing found at all
+        """
+        try:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            tasks = {
+                "interactions":  (query, 3, "interaction",  user_id, None),
+                "profile_facts": (query, 3, "profile_fact", user_id, None),
+                "book_memories": (query, 3, "book_memory",  None,    None),
+            }
+            all_results = []
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                futs = {ex.submit(self.search_relevant_memories, *args): k
+                        for k, args in tasks.items()}
+                for fut in as_completed(futs):
+                    try:
+                        all_results.extend(fut.result())
+                    except Exception:
+                        pass
+
+            if not all_results:
+                return "none"
+            distances = [r.get("distance", 1.0) for r in all_results]
+            best = min(distances)
+            if best < 0.40:
+                return "rich"
+            elif best < 0.65:
+                return "partial"
+            else:
+                return "sparse"
+        except Exception:
+            return "none"
 
     async def get_full_context_async(self, query: str, user_id: str = "Stranger", n_memories: int = 5):
         """Async version of get_full_context."""
@@ -290,6 +361,27 @@ class MemoryStore:
                 "timestamp_unix": time.time()
             }],
             ids=[insight_id]
+        )
+
+    def store_book_memory(self, content: str, book_title: str, source: str = "book_memory"):
+        """
+        Stores a book-derived memory with type='book_memory'.
+        Stored under user_id='system' so it's globally accessible across all users.
+        Uses type='book_memory' so get_full_context can tier it separately from
+        conversation memories — always available, never pruned by user filters.
+        """
+        mem_id = str(uuid.uuid4())
+        self.collection.add(
+            documents=[content],
+            metadatas=[{
+                "type":            "book_memory",
+                "user_id":         "system",
+                "source":          source,
+                "book_title":      book_title,
+                "timestamp":       datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp_unix":  time.time(),
+            }],
+            ids=[mem_id]
         )
 
     async def store_insight_async(self, insight_text: str, user_id: str, source: str = "reflection"):
@@ -340,6 +432,60 @@ class MemoryStore:
              ids=[fact_id]
          )
 
+    def store_user_facts_batch(self, user_id: str, facts: dict):
+        """
+        Store multiple user facts at once as profile_fact entries.
+        Called in real-time from the engine whenever inner_mind extracts
+        new facts from a user message — much faster than waiting for reflection.
+
+        facts: dict of {fact_type: value}, e.g. {"likes": "board games", "age": "26"}
+        Deduplicates against recent profile_facts for this user so we don't
+        spam ChromaDB with identical entries every turn.
+        """
+        if not facts:
+            return
+        # Fetch existing recent facts for this user to deduplicate
+        try:
+            existing = self.collection.get(
+                where={"$and": [{"user_id": user_id}, {"type": "profile_fact"}]},
+                include=["documents"],
+                limit=100,
+            )
+            existing_docs = set(existing.get("documents") or [])
+        except Exception:
+            existing_docs = set()
+
+        to_add_docs, to_add_metas, to_add_ids = [], [], []
+        now = time.time()
+        ts  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        for fact_type, value in facts.items():
+            if not value or not str(value).strip():
+                continue
+            doc = f"{fact_type}: {value}"
+            if doc in existing_docs:
+                continue   # already stored — skip
+            to_add_docs.append(doc)
+            to_add_metas.append({
+                "type":            "profile_fact",
+                "user_id":         user_id,
+                "fact_type":       fact_type,
+                "timestamp":       ts,
+                "timestamp_unix":  now,
+            })
+            to_add_ids.append(str(uuid.uuid4()))
+
+        if to_add_docs:
+            try:
+                self.collection.add(
+                    documents=to_add_docs,
+                    metadatas=to_add_metas,
+                    ids=to_add_ids,
+                )
+                logger.debug(f"[MemoryStore] Stored {len(to_add_docs)} user facts for {user_id}")
+            except Exception as e:
+                logger.warning(f"[MemoryStore] store_user_facts_batch error: {e}")
+
     def get_last_interaction_time(self, user_id: str) -> Optional[datetime]:
         """Retrieves the timestamp of the last interaction with this user."""
         # PERF+BUG FIX: Old impl used query_texts=[""] — a vector search on an empty
@@ -379,56 +525,118 @@ class MemoryStore:
         return self.short_term_buffer
 
     def load_recent_history(self, user_id: str = "Stranger", limit: int = 15):
-        """Loads recent interactions from ChromaDB into the short-term buffer."""
+        """
+        Loads the most recent interactions from ChromaDB into the short-term buffer
+        for the given user_id, and makes that buffer the active one.
+
+        On user switch: saves the current buffer for the previous user, then loads
+        or creates a fresh buffer for the new user. This prevents memory bleed
+        between users in multi-user chat sessions.
+        """
+        import re as _re
+
+        # Save the current buffer back to the per-user store before switching
+        if self._active_user_id and self._active_user_id != user_id:
+            self._user_buffers[self._active_user_id] = list(self.short_term_buffer)
+
+        # If we already have an in-memory buffer for this user from earlier in the
+        # session, restore it immediately (avoids a ChromaDB round-trip on switch-back)
+        if user_id in self._user_buffers and self._active_user_id != user_id:
+            self.short_term_buffer = self._user_buffers[user_id]
+            self._active_user_id = user_id
+            logger.debug(f"[MemoryStore] Restored in-session buffer for {user_id} ({len(self.short_term_buffer)//2} turns)")
+            return
+
+        self._active_user_id = user_id
+
         try:
-            results = self.collection.query(
-                query_texts=[""],
-                n_results=limit,
+            fetch_limit = max(limit * 4, 60)
+            results = self.collection.get(
                 where={"$and": [{"user_id": user_id}, {"type": "interaction"}]},
-                include=["documents", "metadatas"]
+                include=["documents", "metadatas"],
+                limit=fetch_limit,
             )
 
-            if results and results['documents'] and results['documents'][0]:
-                # ChromaDB returns most relevant/recent if query is empty?
-                # Actually, without a query it might be random-ish or by insertion.
-                # Let's sort by timestamp_unix if available in metadata.
-                docs = results['documents'][0]
-                metas = results['metadatas'][0]
+            docs  = results.get("documents", [])
+            metas = results.get("metadatas", [])
 
-                combined = list(zip(docs, metas))
-                # Sort by timestamp_unix ascending to rebuild conversation flow
-                combined.sort(key=lambda x: x[1].get('timestamp_unix', 0))
-
+            if not docs:
+                # Always clear the buffer when switching users — even if this user
+                # has no history. Leaving a previous user's turns in the buffer
+                # causes memory cross-contamination between users in multi-user chat.
                 self.short_term_buffer = []
-                for doc, meta in combined:
-                    # Extract user and assistant parts from the stored document
-                    # Format: "[timestamp] User (id): user_text\nShiro: bot_text"
-                    lines = doc.split("\n")
-                    user_part = ""
-                    bot_part = ""
-                    for line in lines:
-                        if "User (" in line and "): " in line:
-                            user_part = line.split("): ", 1)[1]
-                        elif "Shiro: " in line:
-                            bot_part = line.split("Shiro: ", 1)[1]
+                self._user_buffers[user_id] = []
+                logger.info(f"No stored history found for {user_id}.")
+                return
 
-                    if user_part:
-                        self.short_term_buffer.append({"role": "user", "content": user_part})
-                    if bot_part:
-                        # FIX: Strip any "Shiro:" speaker prefix from stored bot text.
-                        # Old leaky responses may have been stored with "Shiro: " prefixed,
-                        # which would teach the LLM to use that prefix in future replies.
-                        import re as _re
+            combined = list(zip(docs, metas))
+            combined.sort(key=lambda x: x[1].get("timestamp_unix", 0), reverse=True)
+            combined = combined[:limit]
+            combined.reverse()
+
+            self.short_term_buffer = []
+            for doc, meta in combined:
+                lines = doc.split("\n")
+                user_part = ""
+                bot_part  = ""
+                for line in lines:
+                    if "User (" in line and "): " in line:
+                        user_part = line.split("): ", 1)[1].strip()
+                    elif "Shiro: " in line:
+                        bot_part = line.split("Shiro: ", 1)[1].strip()
                         bot_part = _re.sub(r"(?i)^\s*shiro:\s*", "", bot_part).strip()
-                        self.short_term_buffer.append({"role": "assistant", "content": bot_part})
 
-                # Truncate to max_short_term
-                if len(self.short_term_buffer) > self.max_short_term * 2:
-                    self.short_term_buffer = self.short_term_buffer[-(self.max_short_term * 2):]
+                if user_part:
+                    self.short_term_buffer.append({"role": "user",      "content": user_part})
+                if bot_part:
+                    self.short_term_buffer.append({"role": "assistant", "content": bot_part})
 
-                logger.info(f"Loaded {len(self.short_term_buffer)//2} recent turns into short-term buffer for {user_id}.")
+            if len(self.short_term_buffer) > self.max_short_term * 2:
+                self.short_term_buffer = self.short_term_buffer[-(self.max_short_term * 2):]
+
+            self._user_buffers[user_id] = list(self.short_term_buffer)
+            logger.info(f"Loaded {len(self.short_term_buffer)//2} recent turns into short-term buffer for {user_id}.")
         except Exception as e:
-            logger.error(f"Failed to load recent history: {e}")
+            logger.error(f"Failed to load recent history for {user_id}: {e}")
+
+    def get_memory_count(self) -> int:
+        """Returns total number of records in the ChromaDB collection."""
+        try:
+            return self.collection.count()
+        except Exception:
+            return 0
+
+    def get_episodic_memories(self, limit: int = 20, user_id: str = None) -> list:
+        """
+        Returns recent episodic memories (type=event or type=insight) for the
+        memory management panel. Sorted newest-first.
+        """
+        try:
+            where_filter = {"type": {"$in": ["event", "insight"]}}
+            if user_id:
+                where_filter = {"$and": [{"user_id": user_id}, {"type": {"$in": ["event", "insight"]}}]}
+            results = self.collection.get(
+                where=where_filter,
+                include=["documents", "metadatas"],
+                limit=limit * 2,  # fetch extra to sort
+            )
+            docs  = results.get("documents", [])
+            metas = results.get("metadatas", [])
+            combined = list(zip(docs, metas))
+            combined.sort(key=lambda x: x[1].get("timestamp_unix", 0), reverse=True)
+            combined = combined[:limit]
+            return [
+                {
+                    "content":   doc,
+                    "type":      meta.get("type", ""),
+                    "timestamp": meta.get("timestamp", ""),
+                    "user_id":   meta.get("user_id", ""),
+                }
+                for doc, meta in combined
+            ]
+        except Exception as e:
+            logger.warning(f"get_episodic_memories error: {e}")
+            return []
 
     def prune_old_memories(self, days: int = 30):
         """Removes low-priority memories older than N days."""
@@ -447,3 +655,31 @@ class MemoryStore:
             logger.info(f"Pruned memories older than {days} days.")
         except Exception as e:
             logger.error(f"Pruning failed: {e}")
+
+    def purge_memories_containing(self, phrase: str, user_id: str = None) -> int:
+        """
+        Delete all ChromaDB memories whose content contains the given phrase.
+        Used to clean up false/fabricated memories before they propagate.
+        Returns the number of entries deleted.
+        """
+        try:
+            where = {"user_id": user_id} if user_id else None
+            results = self.collection.get(
+                where=where,
+                include=["documents", "metadatas"],
+                limit=500,
+            )
+            ids_to_delete = []
+            phrase_lower = phrase.lower()
+            docs  = results.get("documents", [])
+            ids   = results.get("ids", [])
+            for doc, doc_id in zip(docs, ids):
+                if phrase_lower in doc.lower():
+                    ids_to_delete.append(doc_id)
+            if ids_to_delete:
+                self.collection.delete(ids=ids_to_delete)
+                logger.info(f"[MemoryStore] Purged {len(ids_to_delete)} memories containing {phrase!r}")
+            return len(ids_to_delete)
+        except Exception as e:
+            logger.error(f"[MemoryStore] purge_memories_containing error: {e}")
+            return 0
