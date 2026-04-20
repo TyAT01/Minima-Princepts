@@ -131,7 +131,7 @@ class ShiroConfig:
     on_speak:   Optional[Callable[[SpeechEvent], Any]] = None
 
     # LLM context
-    llm_token_budget: int = 2048   # safe for most local 7B models; raise for larger
+    llm_token_budget: int = 4096   # FIX: was 2048 — raised to match num_ctx:6144 config
 
     def __post_init__(self):
         if self.probe_schedule_seconds is None:
@@ -202,7 +202,7 @@ class LocalLLMBridge:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()  # FIX: get_event_loop() deprecated in Python 3.10+
         return await loop.run_in_executor(
             None,
             self._chat_sync,
@@ -233,7 +233,7 @@ class LocalLLMBridge:
                 full += token
                 print(token, end="", flush=True)
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()  # FIX: get_event_loop() deprecated in Python 3.10+
         queue: asyncio.Queue = asyncio.Queue()
 
         def _stream_thread():
@@ -270,7 +270,7 @@ class LocalLLMBridge:
                 logger.warning(f"[LocalLLMBridge] stream error: {e}")
             loop.call_soon_threadsafe(queue.put_nowait, None)   # sentinel
 
-        asyncio.get_event_loop().run_in_executor(None, _stream_thread)
+        loop.run_in_executor(None, _stream_thread)  # FIX: reuse loop var from above
 
         while True:
             token = await queue.get()
@@ -301,7 +301,12 @@ class LocalLLMBridge:
                 "model": self.model,
                 "messages": messages,
                 "stream": stream,
-                "options": {"temperature": temperature, "num_predict": max_tokens},
+                "keep_alive": -1,  # FIX: keep model loaded — prevents reload on every call
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens,
+                    "num_ctx": 6144,  # FIX: was unset (defaulted to Ollama's 2048) — match config
+                },
             }
         return {
             "model": self.model,

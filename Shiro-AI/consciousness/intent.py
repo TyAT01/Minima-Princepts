@@ -21,6 +21,7 @@ RuleEngine:
 import re
 import random
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 from collections import deque
@@ -355,47 +356,75 @@ class IntentPlanner:
 
 class TimePattern:
     """
-    Learns what hours a user typically shows up.
+    Learns what hours a user typically shows up and leaves.
     Produces natural-language observations for Shiro to reference.
-
-    "you're usually here around this time"
-    "you're here earlier than usual"
-    "late night visit — you okay?"
     """
 
     BUCKET_COUNT = 24   # one bucket per hour
 
     def __init__(self):
         # user_id → [count_per_hour_0..23]
-        self._hourly: dict[str, list[int]] = {}
+        self._hourly:    dict[str, list[int]] = {}
+        self._departures: dict[str, list[int]] = {}   # departure hour counts
+        self._streaks:   dict[str, list[str]] = {}    # user_id → sorted date strings
 
     def record_visit(self, user_id: str):
-        import datetime
-        hour = datetime.datetime.now().hour
+        hour = datetime.now().hour
         if user_id not in self._hourly:
             self._hourly[user_id] = [0] * self.BUCKET_COUNT
         self._hourly[user_id][hour] += 1
 
+    def record_departure(self, user_id: str):
+        """Record what hour a user left. Called from on_user_leave."""
+        hour = datetime.now().hour
+        if user_id not in self._departures:
+            self._departures[user_id] = [0] * self.BUCKET_COUNT
+        self._departures[user_id][hour] += 1
+
     def usual_hours(self, user_id: str, top_n: int = 3) -> list[int]:
-        """Returns the top-N hours this user is usually active."""
         counts = self._hourly.get(user_id, [0] * 24)
         return sorted(range(24), key=lambda h: counts[h], reverse=True)[:top_n]
 
+    def usual_departure_hours(self, user_id: str, top_n: int = 2) -> list[int]:
+        counts = self._departures.get(user_id, [0] * 24)
+        if sum(counts) < 3:
+            return []
+        return sorted(range(24), key=lambda h: counts[h], reverse=True)[:top_n]
+
+    def leaving_soon_observation(self, user_id: str) -> str:
+        """
+        Returns a natural-language note if current hour is close to the user's
+        typical departure time. Requires at least 3 departure samples.
+        Used to inject soft awareness into autonomous messages.
+        """
+        dep_counts = self._departures.get(user_id, [])
+        total_dep = sum(dep_counts) if dep_counts else 0
+        if total_dep < 3:
+            return ""
+        current = datetime.now().hour
+        top_dep = self.usual_departure_hours(user_id, 2)
+        for dep_h in top_dep:
+            pct = dep_counts[dep_h] / total_dep
+            if pct < 0.25:  # need at least 25% of sessions at this hour
+                continue
+            # ±1 hour window
+            if abs(current - dep_h) <= 1 or (current == 23 and dep_h == 0) or (current == 0 and dep_h == 23):
+                pct_str = f"{int(pct * 100)}%"
+                return (
+                    f"Note: {user_id} typically leaves around {dep_h}:00 "
+                    f"({pct_str} of sessions). They may be heading out soon."
+                )
+        return ""
+
     def visit_observation(self, user_id: str) -> Optional[str]:
-        """
-        Returns a short natural-language observation about this visit's timing,
-        or None if we don't know enough yet.
-        """
-        import datetime
         counts = self._hourly.get(user_id, [])
         if not counts or sum(counts) < 4:
             return None
 
-        current_hour = datetime.datetime.now().hour
+        current_hour = datetime.now().hour
         usual = self.usual_hours(user_id, 3)
         total = sum(counts) or 1
         current_freq = counts[current_hour] / total
-
         mean_freq = (sum(counts) / 24) / total
 
         if current_freq > mean_freq * 2.5:
@@ -411,10 +440,118 @@ class TimePattern:
         return None
 
     def export(self) -> dict:
-        return {"hourly": self._hourly}
+        return {"hourly": self._hourly, "departures": self._departures,
+                "streaks": self._streaks}
 
     def import_data(self, data: dict):
-        self._hourly = data.get("hourly", {})
+        self._hourly     = data.get("hourly", {})
+        self._departures = data.get("departures", {})
+        self._streaks    = data.get("streaks", {})
+
+    # ── Ritual / streak tracking ──────────────────────────────────────────────
+
+    def record_session_date(self, user_id: str) -> None:
+        """Record that a session occurred today. Called once per session start."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        if not hasattr(self, '_streaks'):
+            self._streaks: dict[str, list[str]] = {}
+        if user_id not in self._streaks:
+            self._streaks[user_id] = []
+        dates = self._streaks[user_id]
+        if not dates or dates[-1] != today:
+            dates.append(today)
+            if len(dates) > 90:  # keep last 90 days
+                self._streaks[user_id] = dates[-90:]
+
+    def current_streak(self, user_id: str) -> int:
+        """How many consecutive days has this user chatted with Shiro?"""
+        if not hasattr(self, '_streaks'):
+            return 0
+        dates = self._streaks.get(user_id, [])
+        if not dates:
+            return 0
+        from datetime import timedelta
+        streak = 1
+        prev = datetime.strptime(dates[-1], "%Y-%m-%d")
+        for d in reversed(dates[:-1]):
+            curr = datetime.strptime(d, "%Y-%m-%d")
+            if (prev - curr).days == 1:
+                streak += 1
+                prev = curr
+            else:
+                break
+        return streak
+
+    def ritual_observation(self, user_id: str) -> str:
+        """
+        Returns a natural-language ritual note if a recurring pattern exists.
+        Covers: streaks, gaps, weekly day patterns, time-of-day patterns,
+        and session count milestones.
+        """
+        from datetime import timedelta as _td
+        streak = self.current_streak(user_id)
+        hour   = datetime.now().hour
+        today  = datetime.now()
+        dates  = self._streaks.get(user_id, [])
+        total_sessions = sum(self._hourly.get(user_id, []))
+
+        notes = []
+
+        # Session milestones
+        if total_sessions in (10, 25, 50, 100, 200, 500):
+            notes.append(f"session {total_sessions} — that's actually a milestone")
+
+        # Streak observations
+        if streak >= 30:
+            notes.append(f"a month straight — {streak} days running")
+        elif streak >= 14:
+            notes.append(f"two weeks in a row, {streak} days")
+        elif streak >= 7:
+            notes.append(f"every day this week — that's a streak")
+        elif streak >= 3:
+            notes.append(f"{streak} days in a row")
+
+        # Gap detection — came back after missing a day
+        if len(dates) >= 2 and streak == 1:
+            try:
+                last_date = datetime.strptime(dates[-2], "%Y-%m-%d")
+                gap_days = (today - last_date).days
+                if gap_days == 2:
+                    notes.append("you skipped yesterday")
+                elif 3 <= gap_days <= 6:
+                    notes.append(f"back after {gap_days - 1} days away")
+                elif gap_days >= 7:
+                    notes.append(f"it's been a while — {gap_days} days")
+            except Exception:
+                pass
+
+        # Weekly day pattern — do they always come on Wednesdays?
+        if len(dates) >= 6:
+            try:
+                day_counts = [0] * 7
+                for d in dates[-20:]:
+                    day_counts[datetime.strptime(d, "%Y-%m-%d").weekday()] += 1
+                peak_day = max(range(7), key=lambda i: day_counts[i])
+                peak_count = day_counts[peak_day]
+                today_weekday = today.weekday()
+                day_names = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+                if peak_count >= 3 and today_weekday == peak_day:
+                    notes.append(f"{day_names[peak_day]}s are kind of your thing")
+            except Exception:
+                pass
+
+        # Time of day patterns
+        obs = self.visit_observation(user_id)
+        if obs and "usually around" in obs:
+            notes.append("right on schedule")
+        elif hour >= 23 or hour < 2:
+            notes.append("another late night")
+        elif hour < 6:
+            notes.append("extremely early — or extremely late")
+        elif hour < 8:
+            notes.append("early start")
+
+        return ", ".join(notes) if notes else ""
 
 
 # ─────────────────────────────────────────────────────────────

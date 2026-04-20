@@ -17,7 +17,7 @@ import re
 import datetime
 from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
-from collections import Counter
+from collections import Counter, deque, deque
 
 if TYPE_CHECKING:
     from .events import EventBus
@@ -315,6 +315,141 @@ class BehaviorProfile:
 #  SelfAwareness
 # ─────────────────────────────────────────────────────────────
 
+
+
+# ─────────────────────────────────────────────────────────────
+#  UserIntentModel — Theory of Mind: what does the user WANT?
+# ─────────────────────────────────────────────────────────────
+
+# Conversation goals Shiro can infer from message patterns
+_INTENT_SIGNALS: list[tuple[str, re.Pattern, float]] = [
+    ("wants_info",     re.compile(r"\b(what|how|why|when|where|who|can you|tell me|explain|help me|does)\b", re.I), 0.9),
+    ("wants_to_vent",  re.compile(r"\b(so frustrated|i hate|ugh|this sucks|i cant|i'm tired of|nobody|always|never)\b", re.I), 0.85),
+    ("wants_company",  re.compile(r"\b(bored|nothing to do|just wanted|hey|hi|anyone|talk to me|what's up)\b", re.I), 0.8),
+    ("wants_to_play",  re.compile(r"\b(game|play|vs|challenge|bet|try|fight me|beat you|let's|wanna)\b", re.I), 0.8),
+    ("wants_feedback", re.compile(r"\b(what do you think|thoughts|opinion|rate|review|is this good|how does this)\b", re.I), 0.85),
+    ("wants_to_share", re.compile(r"\b(check this|look|omg|guess what|you won't believe|i just|i did|i made|i got)\b", re.I), 0.75),
+    ("testing_shiro",  re.compile(r"\b(do you|can you|are you|would you|are you real|prove|pretend|roleplay)\b", re.I), 0.7),
+    ("wants_depth",    re.compile(r"\b(do you think|do you feel|what's your view|philosophic|serious|honest|actually)\b", re.I), 0.8),
+    ("winding_down",   re.compile(r"\b(gtg|gotta go|brb|ttyl|bye|see you|later|goodnight|gn|heading out|leaving)\b", re.I), 0.95),
+]
+
+
+class UserIntentModel:
+    """
+    Theory of Mind layer: models what the user wants FROM this conversation.
+
+    Infers the user's conversational goal from message patterns over a rolling
+    window, then computes a confidence score. Used by SelfAwareness to inject a
+    concise 'what they want' hint into the system prompt so Shiro responds to
+    INTENT, not just surface words.
+
+    Tracks:
+      current_intent   — strongest inferred goal right now
+      intent_history   — rolling deque of recent intents
+      confidence       — 0.0–1.0 certainty about current_intent
+      satisfaction_score — did Shiro meet the inferred need? (updated externally)
+    """
+
+    WINDOW = 5
+
+    def __init__(self, user_id: str):
+        self.user_id            = user_id
+        self.current_intent: str = "unknown"
+        self.confidence: float  = 0.0
+        self.intent_history: deque = deque(maxlen=self.WINDOW)
+        self.satisfaction_score: float = 0.5
+        self._raw_scores: dict  = {}
+
+    def update(self, text: str) -> tuple[str, float]:
+        """Infer intent from text. Returns (intent_name, confidence)."""
+        scores: dict[str, float] = {}
+        for label, pattern, weight in _INTENT_SIGNALS:
+            matches = len(pattern.findall(text))
+            if matches:
+                scores[label] = min(1.0, weight * (1 + (matches - 1) * 0.2))
+        self._raw_scores = scores
+        if not scores:
+            self.current_intent = "general_chat"
+            self.confidence = 0.3
+        else:
+            best = max(scores, key=scores.get)
+            self.current_intent = best
+            self.confidence = scores[best]
+        self.intent_history.append(self.current_intent)
+        return self.current_intent, self.confidence
+
+    def dominant_intent(self) -> str:
+        """Most frequent intent across recent window."""
+        if not self.intent_history:
+            return "unknown"
+        counts: dict[str, int] = {}
+        for i in self.intent_history:
+            counts[i] = counts.get(i, 0) + 1
+        return max(counts, key=counts.get)
+
+    def is_shifting(self) -> bool:
+        """True if last two intents differ — conversational goal is in flux."""
+        h = list(self.intent_history)
+        return len(h) >= 2 and h[-1] != h[-2]
+
+    def record_satisfaction(self, shiro_response: str) -> None:
+        """
+        Heuristic: estimate whether Shiro met the user's inferred intent.
+        Updates satisfaction_score with an EMA to avoid single-response overfit.
+        """
+        resp_lower = shiro_response.lower()
+        intent = self.current_intent
+        met = 0.5
+
+        if intent == "wants_info":
+            met = 0.8 if len(shiro_response) > 80 else 0.4
+        elif intent == "wants_to_vent":
+            ack = ["i understand", "that sounds", "that must", "i hear", "that's hard", "sounds like"]
+            met = 0.85 if any(w in resp_lower for w in ack) else 0.35
+        elif intent == "wants_to_play":
+            met = 0.8 if any(w in resp_lower for w in ["game", "play", "challenge", "move", "round"]) else 0.4
+        elif intent == "wants_feedback":
+            met = 0.8 if len(shiro_response) > 50 else 0.5
+        elif intent == "wants_company":
+            met = 0.75
+        elif intent == "winding_down":
+            farewell = ["bye", "see you", "take care", "later", "good", "night", "soon"]
+            met = 0.9 if any(w in resp_lower for w in farewell) else 0.5
+
+        self.satisfaction_score = self.satisfaction_score * 0.7 + met * 0.3
+
+    def prompt_hint(self) -> str:
+        """Natural-language hint for the LLM about this user's current goal."""
+        if self.current_intent in ("unknown", "general_chat") or self.confidence < 0.5:
+            return ""
+        _hints = {
+            "wants_info":     "They seem to want information or an explanation — be clear and direct.",
+            "wants_to_vent":  "They may be venting. Acknowledge feelings first; don't rush to fix.",
+            "wants_company":  "They want connection more than content — be warm and present.",
+            "wants_to_play":  "They're in a playful or competitive mood — match the energy.",
+            "wants_feedback": "They want your honest take — give a real opinion.",
+            "wants_to_share": "They're excited to share something — receive it with genuine interest.",
+            "testing_shiro":  "They may be testing or probing you — be honest and grounded.",
+            "wants_depth":    "They want a real, thoughtful exchange — not a surface reply.",
+            "winding_down":   "They're wrapping up — keep your reply brief and warm.",
+        }
+        base = _hints.get(self.current_intent, "")
+        if not base:
+            return ""
+        shift = " Their goal seems to be shifting." if self.is_shifting() else ""
+        conf  = f" [confidence: {self.confidence:.0%}]" if self.confidence < 0.7 else ""
+        return base + shift + conf
+
+    def export(self) -> dict:
+        return {
+            "current_intent":    self.current_intent,
+            "confidence":        round(self.confidence, 3),
+            "dominant_intent":   self.dominant_intent(),
+            "satisfaction_score": round(self.satisfaction_score, 3),
+        }
+
+
 class SelfAwareness:
     """Shiro's perception of herself and her environment. v4."""
 
@@ -369,6 +504,9 @@ class SelfAwareness:
         # Cross-session behavioral profiles
         self.behavior_profiles: dict[str, "BehaviorProfile"] = {}
 
+        # Theory of Mind — per-user conversational intent models
+        self.intent_models: dict[str, UserIntentModel] = {}
+
     # ── User lifecycle ───────────────────────────────────────────
 
     def user_entered(self, user_id: str, name: str = "", **meta) -> UserProfile:
@@ -411,6 +549,15 @@ class SelfAwareness:
         self._push_event("left", user_id=user_id)
         self._update_room_state()
 
+    def on_shiro_response(self, user_id: str, shiro_text: str) -> None:
+        """
+        Call after Shiro generates a response.
+        Updates the intent satisfaction model for this user.
+        """
+        intent_model = self.intent_models.get(user_id)
+        if intent_model:
+            intent_model.record_satisfaction(shiro_text)
+
     def user_spoke(self, user_id: str, text: str, name: str = "") -> UserProfile:
         now = time.time()
         if user_id not in self.users:
@@ -448,6 +595,10 @@ class SelfAwareness:
         self._detect_topics(p, text)
         self._detect_quirks(p, text)
         self._detect_mirror_vocab(p, text)
+
+        # ── Theory of Mind: infer conversational intent ──────────────────────
+        intent_model = self.intent_models.setdefault(user_id, UserIntentModel(user_id))
+        intent_model.update(text)
 
         if "humor" in emotions:
             self._last_humor_ts = now
@@ -625,6 +776,19 @@ class SelfAwareness:
             "endearment_words": [], "learned_nicknames": [], "humor_style": "unknown"
         })
 
+    def get_intent_hint(self, user_id: str) -> str:
+        """
+        Returns a natural-language Theory of Mind hint about what this user wants.
+        Injected into the LLM prompt each turn.
+        Returns empty string if intent unknown or confidence too low.
+        """
+        model = self.intent_models.get(user_id)
+        return model.prompt_hint() if model else ""
+
+    def get_intent_model(self, user_id: str) -> Optional["UserIntentModel"]:
+        """Return the UserIntentModel for this user, or None if not seen yet."""
+        return self.intent_models.get(user_id)
+
     def humor_context_hint(self, user_id: str) -> str:
         """Return a natural-language hint for the LLM about this user's humor style.
         Injected into the system prompt so Shiro can respond appropriately."""
@@ -773,6 +937,10 @@ class SelfAwareness:
             "behavior_profiles": {
                 uid: bp.export()
                 for uid, bp in self.behavior_profiles.items()
+            },
+            "intent_models": {
+                uid: m.export()
+                for uid, m in self.intent_models.items()
             },
         }
 

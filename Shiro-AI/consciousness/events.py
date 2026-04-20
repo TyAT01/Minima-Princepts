@@ -96,7 +96,13 @@ class EventBus:
         try:
             if asyncio.iscoroutinefunction(handler):
                 try:
-                    loop = asyncio.get_event_loop()
+                    # FIX: get_event_loop() deprecated in Python 3.10+ inside async context.
+                    # Try get_running_loop() first; fall back to get_event_loop() for
+                    # non-async callers (e.g. sync emit() called from a non-async context).
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = asyncio.get_event_loop()
                     if loop.is_running():
                         loop.create_task(handler(**data))
                     else:

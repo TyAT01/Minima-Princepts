@@ -27,9 +27,8 @@ from utils.text_utils import calculate_text_similarity
 #  Rough token counter (no tiktoken needed)
 # ─────────────────────────────────────────────────────────────
 
-def _estimate_tokens(text: str) -> int:
-    """Approximate token count: ~1 token per 3.8 chars (conservative)."""
-    return max(1, int(len(text) / 3.8))
+# _estimate_tokens: canonical version in utils.text_utils
+from utils.text_utils import estimate_tokens as _estimate_tokens
 
 
 # ─────────────────────────────────────────────────────────────
@@ -585,11 +584,11 @@ class ContextWindow:
       4. Older messages (trimmed first if over budget)
     """
 
-    def __init__(self, token_budget: int = 2048):
+    def __init__(self, token_budget: int = 4096):
         """
         token_budget: approximate max tokens for context (excluding generation).
-        Defaults to 2048 which is safe for most local 7B models.
-        Set higher (4096) for larger models or if you have more VRAM.
+        FIX: raised from 2048→4096 to match ShiroConfig.llm_token_budget and
+        our num_ctx:6144 setting. Leaves ~2000 tokens for generation headroom.
         """
         self.token_budget = token_budget
 
@@ -615,7 +614,8 @@ class ContextWindow:
 
         # 2. Memory summary — inject as a system note if we have budget
         if memory_summary and memory_summary.strip():
-            mem_block = f"[What you remember about this person]\n{memory_summary}"
+            # FIX: removed bracket token — plain prose header prevents echo-bait
+            mem_block = f"What you remember about this person:\n{memory_summary}"
             mem_tokens = _estimate_tokens(mem_block)
             if used_tokens + mem_tokens < self.token_budget * 0.5:
                 messages.append({"role": "system", "content": mem_block})

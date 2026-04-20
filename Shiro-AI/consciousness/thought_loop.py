@@ -622,6 +622,46 @@ class InnerMind:
             except asyncio.CancelledError:
                 pass
 
+    # ── Bridge ───────────────────────────────────────────────────
+
+    def feed_to_inner_mind(self, inner_mind: object) -> None:
+        """
+        Bridge: push the most recent async thought into ShiroInnerMind's
+        working memory so the cognitive pipeline can surface it in the next
+        LLM prompt. Called by ShiroEngine after each tick.
+
+        Only feeds thoughts younger than 30 s to avoid injecting stale context.
+        Uses duck-typing on inner_mind to avoid circular imports.
+        """
+        recent = list(self.thought_buffer)[-1] if self.thought_buffer else None
+        if not recent or recent.age_seconds() > 30.0:
+            return
+        wm = getattr(inner_mind, "working_memory", None)
+        if wm is None:
+            return
+        # Import WorkingMemoryItem via try/except for both flat and package layouts
+        try:
+            from persona.inner_mind import WorkingMemoryItem as _WMI
+        except ImportError:
+            try:
+                from inner_mind import WorkingMemoryItem as _WMI
+            except ImportError:
+                return
+        wm_key = f"_loop_thought_{recent.category}"
+        wm[wm_key] = _WMI(
+            key=wm_key,
+            value=recent.text,
+            strength=min(0.65, 0.3 + recent.arousal * 0.35),
+        )
+
+    def on_context_update(self, ctx: dict) -> None:
+        """
+        Convenience alias for update_context() with explicit naming.
+        Called by ShiroEngine when conversation context changes (topic shift,
+        mood, new user, etc.) to keep the async loop in sync.
+        """
+        self.update_context(ctx)
+
     # ── Loop ─────────────────────────────────────────────────────
 
     async def _loop(self):
