@@ -1,0 +1,14 @@
+Title: Example Book
+Author: Your Name Here
+Genre: Fantasy
+Fiction: true
+Year: 2024
+Description: A short example showing the correct file format for Shiro's book reader.
+---
+Once upon a time, in a land far away, there lived a curious fox who loved to read.
+She would spend her evenings beneath a great oak tree, turning pages long after the
+stars had come out. The fox believed that every book held a small door to somewhere
+new, and she made it her mission to walk through every one she could find.
+
+Replace this text with the full content of your book.
+Any plain UTF-8 text works. Project Gutenberg books are ideal.
