@@ -25,7 +25,7 @@ if sys.platform == "win32":
                     abs_path = os.path.abspath(missing_path)
                     os.makedirs(abs_path, exist_ok=True)
                     from faster_whisper import WhisperModel
-                except:
+                except Exception:
                     raise e
             else:
                 raise e
@@ -34,11 +34,21 @@ if sys.platform == "win32":
 else:
     from faster_whisper import WhisperModel
 
-# Optional import for VAD (some environments use webrtcvad-wheels)
+# Silero VAD — lightweight neural VAD, runs <1ms/chunk on CPU
+# Replaces webrtcvad: better accuracy, no false positives on background noise
 try:
-    import webrtcvad
-except ImportError:
-    webrtcvad = None
+    import torch as _silero_torch
+    _silero_model, _silero_utils = _silero_torch.hub.load(
+        repo_or_dir='snakers4/silero-vad',
+        model='silero_vad',
+        force_reload=False,
+        verbose=False,
+    )
+    _silero_get_speech_ts = _silero_utils[0]  # get_speech_timestamps helper
+    _SILERO_AVAILABLE = True
+except Exception:
+    _SILERO_AVAILABLE = False
+    _silero_model = None
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +82,42 @@ class STTSystem:
         if self.model is None:
             self.load_model()
 
-        segments, info = self.model.transcribe(audio_source, beam_size=5)
-        return " ".join(segment.text.strip() for segment in segments).strip()
+        segments, info = self.model.transcribe(
+            audio_source,
+            beam_size=5,
+            language="en",
+            vad_filter=False,
+        )
+        text = " ".join(segment.text.strip() for segment in segments).strip()
+
+        # Block non-latin scripts (Georgian, Cyrillic, etc.) — Whisper hallucination
+        import unicodedata
+        letter_chars = [c for c in text if unicodedata.category(c).startswith('L')]
+        if letter_chars:
+            latin_ratio = sum(1 for c in letter_chars if ord(c) < 0x0590) / len(letter_chars)
+            if latin_ratio < 0.7:
+                logger.warning(f"[STT] Non-latin script filtered: {text!r}")
+                return ""
+
+        # Filter known Whisper hallucinations
+        HALLUCINATIONS = {
+            "thank you for watching", "thanks for watching",
+            "please subscribe", "like and subscribe", ".", "..", "...",
+        }
+        if text.lower().strip(".! ") in HALLUCINATIONS:
+            return ""
+
+        # Filter suspiciously repetitive output
+        words = text.split()
+        if len(words) >= 4 and len(set(w.lower() for w in words)) <= 2:
+            return ""
+
+        # Filter superscript/subscript garbage (ᶦᶦᶦᶦ)
+        if text and all(unicodedata.category(c) in ('Lm', 'Sk', 'So', 'Lo') or ord(c) > 0x2000 for c in text.replace(' ','')):
+            logger.warning(f"[STT] Garbage script filtered: {text!r}")
+            return ""
+
+        return text
 
 class VoiceMonitor:
     """Background monitor that captures audio from the default mic and segments speech."""
@@ -90,16 +134,12 @@ class VoiceMonitor:
         # decrease (100-200) for very quiet speakers.
         self.energy_threshold = energy_threshold
 
-        try:
-            if webrtcvad:
-                self.vad = webrtcvad.Vad(3) # Aggressiveness 3
-                logger.info("webrtcvad initialized successfully.")
-            else:
-                self.vad = None
-                logger.warning("webrtcvad not found. Using Energy-based fallback VAD.")
-        except Exception as e:
-            logger.error(f"Failed to initialize webrtcvad: {e}. Using Energy-based fallback VAD.")
+        if _SILERO_AVAILABLE:
+            self.vad = _silero_model
+            logger.info("Silero VAD initialized — neural speech detection active.")
+        else:
             self.vad = None
+            logger.warning("Silero VAD not available. Using Energy-based fallback VAD.")
 
         self.buffer = collections.deque(maxlen=20) # 600ms pre-roll
         self.triggered = False
@@ -124,18 +164,23 @@ class VoiceMonitor:
         logger.info("Voice Monitor stopped.")
 
     def _is_speech(self, frame_bytes):
-        """Detects speech using WebRTC VAD or Energy-based fallback."""
-        if self.vad:
+        """Detects speech using Silero VAD (neural) or Energy-based fallback."""
+        if self.vad is not None and _SILERO_AVAILABLE:
             try:
-                return self.vad.is_speech(frame_bytes, self.sample_rate)
+                # Silero expects float32 tensor normalised to [-1, 1]
+                audio_int16 = np.frombuffer(frame_bytes, dtype=np.int16)
+                audio_f32 = _silero_torch.from_numpy(
+                    audio_int16.astype(np.float32) / 32768.0
+                )
+                confidence = self.vad(audio_f32, self.sample_rate).item()
+                return confidence > 0.5
             except Exception as e:
-                logger.debug(f"WebRTC VAD error: {e}")
-                # Fallback to energy detection on error
+                logger.debug(f"Silero VAD error: {e}")
+                # Fall through to energy detection
 
-        # Energy-based VAD (RMS)
+        # Energy-based VAD (RMS) fallback
         audio_data = np.frombuffer(frame_bytes, dtype=np.int16)
         rms = np.sqrt(np.mean(audio_data.astype(np.float32)**2))
-        # Threshold for typical quiet room is ~50-100. Let's use 300 for speech.
         return rms > self.energy_threshold
 
     def _listen_loop(self):
@@ -208,6 +253,15 @@ class VoiceMonitor:
             self.is_listening = False
 
     def _process_segment(self, audio_bytes):
+        # Dedup guard — skip if this exact audio was already sent
+        # (can happen if VAD triggers twice on the same utterance boundary)
+        import hashlib
+        seg_hash = hashlib.md5(audio_bytes[:512]).hexdigest()
+        if getattr(self, '_last_seg_hash', None) == seg_hash:
+            logger.debug("[VoiceMonitor] Duplicate segment skipped")
+            return
+        self._last_seg_hash = seg_hash
+
         # Convert bytes to float32 numpy array as expected by faster-whisper
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
