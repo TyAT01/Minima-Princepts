@@ -5,19 +5,12 @@
       <stop offset="100%" stop-color="#3a6fa8"/>
     </linearGradient>
   </defs>
-  <!-- Helmet dome -->
   <path d="M20 55 Q20 15 50 15 Q80 15 80 55 L80 70 Q80 78 72 78 L28 78 Q20 78 20 70 Z" fill="url(#ug)" stroke="#2a5585" stroke-width="2"/>
-  <!-- Visor slit -->
   <rect x="28" y="48" width="44" height="10" rx="4" fill="#1a2a3a" stroke="#2a5585" stroke-width="1.5"/>
-  <!-- Visor highlight -->
   <rect x="30" y="50" width="40" height="3" rx="2" fill="#4a90e2" opacity="0.4"/>
-  <!-- Cheek guards -->
   <path d="M20 60 L14 70 Q14 82 24 82 L28 78 L28 60 Z" fill="#4a7ab8" stroke="#2a5585" stroke-width="1.5"/>
   <path d="M80 60 L86 70 Q86 82 76 82 L72 78 L72 60 Z" fill="#4a7ab8" stroke="#2a5585" stroke-width="1.5"/>
-  <!-- Neck guard -->
   <rect x="30" y="76" width="40" height="10" rx="3" fill="#3a6fa8" stroke="#2a5585" stroke-width="1.5"/>
-  <!-- Center ridge -->
   <path d="M50 15 L50 55" stroke="#5a9ad0" stroke-width="2" opacity="0.5"/>
-  <!-- Plume base -->
   <rect x="46" y="10" width="8" height="8" rx="2" fill="#5a8ab8"/>
 </svg>
