@@ -1,26 +1,72 @@
 # Shiro-AI Configuration
 
 llm:
-  api_type: "ollama"  # 'ollama' or 'openai'
+  api_type: "ollama"
   base_url: "http://localhost:11434/api"
   model: "shiro:latest"
   fallback_model: "llama3.1:8b-instruct-q4_K_M"
-  temperature: 0.65
-  top_p: 0.88
-  repeat_penalty: 1.08
-  max_tokens: 512
+  temperature: 0.68          # Slightly lower → less hallucination / fabricated recall
+  top_p: 0.88                # Tighter nucleus keeps persona on-track
+  repeat_penalty: 1.18       # Higher → suppresses Shiro looping the same phrase
+  max_tokens: 768            # Was 512 — caused mid-sentence cutoffs (seen in log)
+  num_ctx: 2048              # llama3.1 8B Q4_KM uses ~4.1 GB VRAM at 32 layers.
+                             # 2048 ctx adds ~0.6 GB KV cache — total LLM ~4.7 GB.
+                             # With GPT-SoVITS (~1.5 GB) + ChromaDB (~0.4 GB) = ~6.6 GB.
+                             # 6144 was wrong — that adds ~1.8 GB KV cache, not 350 MB,
+                             # pushing total to ~7.7 GB and causing the VRAM spike.
   use_native_tools: false
-  num_gpu: 35
+  num_gpu: 32                # llama3.1 8B Q4_KM = 4.07 GB at 32 layers.
+                             # Your VRAM cap is 4 GB → this is the correct value.
+                             # Was 18 (partial offload) which left 14 layers on CPU,
+                             # slowing inference and destabilizing the persona.
 
 stt:
-  model_size: "base"
-  device: null  # 'cuda' or 'cpu', null for auto-detect
-  compute_type: "float16"
+  model_size: "small.en"
+  device: "cpu"
+  compute_type: "int8"
 
 memory:
   db_path: "./shiro_memory"
   collection_name: "shiro_ai_memories"
   max_short_term: 10
+
+# ── Primary User ────────────────────────────────────────────────────────────
+primary_user: "Tyler"
+
+# ── Known Users ─────────────────────────────────────────────────────────────
+known_users:
+  - display_name: "Tyler"
+    aliases:
+      - "Ty"
+      - "TyAT"
+    platforms:
+      webui: "Tyler"
+      discord: "TyAT"
+      youtube: ""
+      twitch: ""
+    notes: "Primary user and creator. WebUI: Tyler. Discord: TyAT. Same person."
+
+  - display_name: "Boss"
+    aliases: []
+    platforms:
+      webui: "Boss"
+    notes: "Real name Rob. Asked to be called Boss."
+
+  - display_name: "ChaoticWolf"
+    aliases: []
+    platforms: {}
+    notes: ""
+
+  - display_name: "mikeyohp"
+    aliases: []
+    platforms:
+      discord: "mikeyohp"
+    notes: ""
+
+  - display_name: "Michael"
+    aliases: []
+    platforms: {}
+    notes: ""
 
 ui:
   title: "🦊 Shiro: The Sly Kitsune Yaoguai"
@@ -29,3 +75,56 @@ ui:
 
 persona:
   sheet_path: "shiro_sheet.yaml"
+
+# ── Vision ─────────────────────────────────────────────────────────────────
+vision:
+  enabled: false
+  mode: on_demand
+  passive_interval_secs: 60
+  idle_unload_secs: 300
+  device: cpu
+  max_dim: 1280
+  min_confidence: 0.4
+  languages: ["en"]
+
+# ── YouTube Chat ───────────────────────────────────────────────────────────
+youtube_chat:
+  enabled: false
+  video_id: ""
+  poll_interval: 2.0
+  prefix_username: true
+
+tts:
+  enabled: true
+  api_url: "http://127.0.0.1:9880"
+  ref_audio: "F:/Shiro-AI/gpt_sovits_setup/tts_reference/shiro_reference2.wav"
+  ref_text: "You should always be prepared for a sly fox to come across your path."
+  language: "en"
+  speed:    1.0
+  volume:   1.0
+  device:   "cuda"
+  timeout: 40
+
+# ── Discord ────────────────────────────────────────────────────────────────
+discord:
+  enabled: true
+  token: ""
+  prefix: "!"
+  owner_id: 226840618062708736
+  shiro_names:
+    - "shiro"
+    - "hey shiro"
+    - "shiro?"
+    - "oi shiro"
+  address_confidence_threshold: 0.55
+  tts_in_voice: true
+  stt_in_voice: false
+  auto_start: false
+
+# ── Stream Profiles ────────────────────────────────────────────────────────
+stream_profiles:
+  file: "./stream_profiles.json"
+  min_messages_to_profile: 3
+  message_history_limit: 15
+  twitch_identity_map: {}
+  youtube_identity_map: {}

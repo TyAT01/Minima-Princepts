@@ -15,11 +15,15 @@ New in v5.0:
 """
 
 import asyncio
+import logging
+import re
 import random
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Any
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -302,7 +306,6 @@ class AutonomousVoice:
             else:
                 self.speak_callback(event)
         except Exception as e:
-            import logging
             logging.getLogger("shiro.voice").warning(
                 f"[AutonomousVoice] speak_callback raised: {type(e).__name__}: {e}"
             )
@@ -495,7 +498,6 @@ class AutonomousVoice:
                     bucket.pop(default_len)
 
     def learn_from_user(self, text: str, user_id: str):
-        import re
         # Mirror greeting style
         m = re.match(r"^\s*(\b(?:hey|hi|hello|yo|sup|heya)\b[\w\s~]*?)(?:[!.,]|$)", text, re.I)
         if m:

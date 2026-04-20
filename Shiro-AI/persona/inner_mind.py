@@ -109,10 +109,10 @@ _STRATEGY_VERBOSITY: Dict[ResponseStrategy, str] = {
 
 # Response length/tone hints injected into prompt per strategy
 _STRATEGY_HINTS: Dict[ResponseStrategy, str] = {
-    ResponseStrategy.DIRECT:     "Keep it concise and clear. 1-3 sentences.",
+    ResponseStrategy.DIRECT:     "Keep it concise and clear. 1 sentence max.",
     ResponseStrategy.CLARIFY:    "Ask one specific question. Don't assume.",
-    ResponseStrategy.TEASE:      "Playful, coy, light. Let the warmth peek through. 2-4 sentences.",
-    ResponseStrategy.WARM:       "Sincere and present. Drop the act. Be real. 2-5 sentences.",
+    ResponseStrategy.TEASE:      "One short playful jab. Warm, not mean. 1 sentence only — no monologue.",
+    ResponseStrategy.WARM:       "Sincere and present. Drop the act. Be real. 1-2 sentences.",
     ResponseStrategy.TEACH:      "Clear explanation with Shiro's personality. Structured but not dry.",
     ResponseStrategy.EMPATHIZE:  "Feelings first. Information second. Lead with presence.",
     ResponseStrategy.EXPLORE:    "Go deep. Offer perspective. Take your time.",
@@ -218,21 +218,29 @@ class PersonalityTraits:
 
 
 @dataclass
-class UserProfile:
+class CognitiveUserProfile:
     """Everything Shiro knows about this person. Fully persisted."""
-    name:              Optional[str]  = None
-    nickname:          Optional[str]  = None
-    known_interests:   List[str]      = field(default_factory=list)
-    emotional_moments: List[str]      = field(default_factory=list)
-    preferences:       Dict[str, str] = field(default_factory=dict)   # e.g. "snack": "cookies"
-    compliments_given: int = 0
-    times_pushed_back: int = 0
-    session_count:     int = 0
+    name:                  Optional[str]  = None    # real/preferred name (from intro or detection)
+    nickname:              Optional[str]  = None    # Shiro's nickname for them
+    platform_display_name: Optional[str]  = None    # Discord/platform display name — AUTHORITATIVE ID
+    known_interests:       List[str]      = field(default_factory=list)
+    emotional_moments:     List[str]      = field(default_factory=list)
+    preferences:           Dict[str, str] = field(default_factory=dict)   # e.g. "snack": "cookies"
+    compliments_given:     int = 0
+    times_pushed_back:     int = 0
+    session_count:         int = 0
     # Curiosity journal: things Shiro wants to know about this person
-    curiosity_journal: List[str] = field(default_factory=list)
+    curiosity_journal:     List[str] = field(default_factory=list)
 
     def display_name(self) -> str:
-        return self.nickname or self.name or "you"
+        """Shiro's preferred label for this person.
+        Priority: explicit preferred name > platform display name > fallback."""
+        return self.nickname or self.name or self.platform_display_name or "you"
+
+    def identity_label(self) -> str:
+        """The authoritative label used in memory tagging and context headers.
+        Always uses platform display name if available so memories survive name changes."""
+        return self.platform_display_name or self.name or "unknown"
 
     def add_interest(self, topic: str):
         if topic and topic not in self.known_interests:
@@ -352,7 +360,8 @@ class WorkingMemoryItem:
     value:            str
     strength:         float = 1.0
     last_reinforced:  float = field(default_factory=time.time)
-    DECAY_RATE:       float = 0.12
+    DECAY_RATE:       float = 0.04   # FIX: was 0.12 — too fast, facts vanished in ~8 turns
+                                     # 0.04 means a fact lasts ~25 turns before fading below 0.15
 
     def decay(self):
         self.strength = max(0.0, self.strength - self.DECAY_RATE)
@@ -685,7 +694,7 @@ def _narrativize_thoughts(
     mood:         MoodVector,
     strategy:     ResponseStrategy,
     relationship: RelationshipState,
-    user_profile: UserProfile,
+    user_profile: CognitiveUserProfile,
 ) -> str:
     if not thoughts:
         return "Okay. Taking this in. Think before I open my mouth..."
@@ -781,8 +790,8 @@ _VERBOSITY_BUDGETS = {
     "rich":     3200,
 }
 
-def _estimate_tokens(text: str) -> int:
-    return max(1, len(text) // _CHARS_PER_TOKEN)
+# _estimate_tokens: canonical version lives in utils.text_utils
+from utils.text_utils import estimate_tokens as _estimate_tokens
 
 def _trim_to_budget(inner_context: str, budget_tokens: int) -> str:
     if _estimate_tokens(inner_context) <= budget_tokens:
@@ -810,11 +819,14 @@ def _trim_to_budget(inner_context: str, budget_tokens: int) -> str:
 
 _NAME_PATTERNS = [
     re.compile(r"\bmy name is\s+([A-Za-z]{2,20})\b",    re.IGNORECASE),
-    re.compile(r"\bi'?m\s+([A-Za-z]{2,20})\b",          re.IGNORECASE),
-    re.compile(r"\bi\s+am\s+([A-Za-z]{2,20})\b",        re.IGNORECASE),
+    # "i'm NAME" — exclude gerunds (-ing words) and common verbs
+    re.compile(r"\bi'?m\s+([A-Za-z]{2,20})\b(?!\w*ing\b)",  re.IGNORECASE),
+    # "i am NAME" — same guard, also exclude -ing words
+    re.compile(r"\bi\s+am\s+([A-Za-z]{2,20})\b(?!\w*ing\b)", re.IGNORECASE),
     re.compile(r"\bcall me\s+([A-Za-z]{2,20})\b",       re.IGNORECASE),
     re.compile(r"\byou can call me\s+([A-Za-z]{2,20})\b",re.IGNORECASE),
-    re.compile(r"\bname'?s?\s+([A-Za-z]{2,20})\b",      re.IGNORECASE),
+    # "name's X" — only fire if preceded by "my" to avoid false matches
+    re.compile(r"\bmy\s+name'?s?\s+([A-Za-z]{2,20})\b", re.IGNORECASE),
     re.compile(r"\bi go by\s+([A-Za-z]{2,20})\b",        re.IGNORECASE),
 ]
 _COMMON_FILLER = frozenset({
@@ -826,19 +838,64 @@ _COMMON_FILLER = frozenset({
     "coming", "from", "actually", "indeed", "unknown", "user", "stranger",
     "always", "human", "spending", "friend", "someone", "anyone", "nothing",
     "something", "master", "master shiro", "master_shiro", "shiro", "fox",
-    "kitsune", "yaoguai", "dummy", "silly", "stranger", "another", "everything"
+    "kitsune", "yaoguai", "dummy", "silly", "stranger", "another", "everything",
+    # Common false positives from "i'm [verb]ing" patterns
+    "getting", "thinking", "working", "waiting", "talking", "looking", "feeling",
+    "wondering", "asking", "telling", "saying", "making", "taking", "giving",
+    "trying", "coming", "going", "using", "checking", "keeping", "starting",
+    "heading", "calling", "running", "playing", "eating", "reading", "watching",
+    "not", "just", "only", "about", "right", "wrong", "here", "there",
+    "serious", "kidding", "joking", "guessing", "assuming", "hoping", "planning",
+    # Emotional/state adjectives that follow "i'm" but are NOT names
+    # e.g. "i'm genuinely curious", "i'm not sure", "i'm desperate"
+    "genuinely", "curious", "uncertain", "unsure", "interested", "engaged",
+    "surprised", "impressed", "aware", "certain", "careful", "desperate",
+    "present", "excited", "worried", "concerned", "frustrated", "annoyed",
+    "pleased", "grateful", "proud", "ashamed", "embarrassed", "confused",
+    "bored", "tired", "exhausted", "anxious", "nervous", "calm", "relaxed",
+    "angry", "upset", "hurt", "scared", "afraid", "hopeful", "content",
+    "satisfied", "unsatisfied", "disappointed", "motivated", "determined",
+    "familiar", "comfortable", "uncomfortable", "available", "serious",
+    "playful", "honest", "sincere", "direct", "open", "closed", "neutral",
+    "positive", "negative", "mixed", "ambivalent", "conflicted",
+    # Common adjectives after "i am" that aren't names
+    "here", "correct", "wrong", "right", "sure", "aware", "done", "back",
+    "sorry", "glad", "ready", "set", "good", "bad", "fine", "okay",
+    "new", "old", "young", "adult", "human", "real", "fake", "serious",
 })
 
 def _extract_name(message: str) -> Optional[str]:
     for pat in _NAME_PATTERNS:
         m = pat.search(message)
         if m:
-            candidate = m.group(1).strip().capitalize()
-            # Stricter filtering: skip common filler and known stop-words
-            if candidate.lower() not in _COMMON_FILLER and \
-               candidate.lower() not in _STOP_WORDS and \
-               len(candidate) > 1:
-                return candidate
+            raw = m.group(1).strip()
+            candidate = raw.capitalize()
+            # Must be at least 2 characters and not in filter lists
+            if candidate.lower() in _COMMON_FILLER:
+                continue
+            if candidate.lower() in _STOP_WORDS:
+                continue
+            if len(candidate) < 2:
+                continue
+            # Additional guard: words ending in common adjective/adverb suffixes
+            # are almost certainly not names (e.g. "genuinely", "actually", "currently")
+            if re.search(r'(ly|ful|ness|ment|tion|ive|ous|ish|able|ible|'
+                         r'less|ward|wards|some|like|most|ary|ery|ory)$',
+                         candidate.lower()):
+                continue
+            # Require the word appeared capitalised in the original message OR
+            # came from an explicit "my name is" / "call me" pattern (patterns 0,3,4,5,6)
+            pat_idx = _NAME_PATTERNS.index(pat)
+            explicit_pattern = pat_idx in (0, 3, 4, 5, 6)
+            if not explicit_pattern and not raw[0].isupper():
+                # "i'm [lowercase word]" — only accept if it really looks like a name
+                # A real name would be 2-12 chars, no common word endings
+                if len(raw) < 2 or len(raw) > 15:
+                    continue
+                # Skip if it looks like a state/emotion word (common pattern: ends in -ed,-ing)
+                if re.search(r'(ed|ing)$', raw.lower()):
+                    continue
+            return candidate
     return None
 
 
@@ -973,8 +1030,13 @@ class ShiroInnerMind:
         self.self_model         = SelfModel()
         self.playfulness        = PlayfulnessMeter()
 
+        # Per-response confidence tracking (feeds back into system prompt)
+        # 0.0 = very uncertain, 1.0 = highly confident
+        self.response_confidence: float = 0.75
+        self._confidence_history: deque = deque(maxlen=20)
+
         # Multi-user Relationship & Profile tracking
-        self.user_profiles: Dict[str, UserProfile] = {"default": UserProfile()}
+        self.user_profiles: Dict[str, CognitiveUserProfile] = {"default": CognitiveUserProfile()}
         self.relationships: Dict[str, RelationshipState] = {"default": RelationshipState()}
         self.sentiment_trends: Dict[str, SentimentTrend] = {"default": SentimentTrend()}
         self.emotional_momenta: Dict[str, EmotionalMomentum] = {"default": EmotionalMomentum()}
@@ -992,6 +1054,7 @@ class ShiroInnerMind:
         self.session_start  = datetime.now()
         self.last_active    = time.time()
         self.turn_count     = 0
+        self._session_summary_last_saved = 0  # skip first tick if loaded at interval boundary
         self.topic_graph:   Dict[str, TopicNode]   = {}
         self.interest_map:  defaultdict            = defaultdict(float)
         self.unresolved_questions: List[str]       = []
@@ -1011,7 +1074,7 @@ class ShiroInnerMind:
         logger.info(f"[{self.name}] Inner mind v5.0 (multi-user) initialized. 🦊")
 
     @property
-    def user_profile(self) -> UserProfile:
+    def user_profile(self) -> CognitiveUserProfile:
         return self.user_profiles.get(self.active_user_id, self.user_profiles["default"])
 
     @property
@@ -1030,30 +1093,52 @@ class ShiroInnerMind:
     def _thought_type_last_turn(self) -> Dict[ThoughtType, int]:
         return self.thought_type_history.get(self.active_user_id, self.thought_type_history["default"])
 
-    def _ensure_user(self, user_id: str):
+    def _ensure_user(self, user_id: str, platform_display_name: Optional[str] = None):
         if user_id not in self.user_profiles:
-            self.user_profiles[user_id] = UserProfile()
+            self.user_profiles[user_id] = CognitiveUserProfile(
+                platform_display_name=platform_display_name
+            )
             self.relationships[user_id] = RelationshipState()
             self.sentiment_trends[user_id] = SentimentTrend()
             self.emotional_momenta[user_id] = EmotionalMomentum()
             self.thought_type_history[user_id] = {}
+        elif platform_display_name and not self.user_profiles[user_id].platform_display_name:
+            # Seed the platform name if we didn't have it before
+            self.user_profiles[user_id].platform_display_name = platform_display_name
 
-    def switch_user(self, user_id: str):
+        # FIX: If name is still None but we have a platform_display_name, use it as
+        # the fallback name so identity_label() never returns "unknown" for a known user.
+        # This is the root cause of `user=unknown` appearing in every save log line.
+        # platform_display_name is the authoritative identity — if the user hasn't
+        # explicitly introduced themselves, this is still who they are.
+        if platform_display_name:
+            profile = self.user_profiles.get(user_id)
+            if profile is not None and profile.name is None:
+                profile.name = platform_display_name
+
+    def seed_user(self, user_id: str, platform_display_name: str):
+        """Call this when a user first appears (e.g. from Discord bridge) to seed
+        their authoritative platform identity. Safe to call multiple times."""
+        with self._lock:
+            self._ensure_user(user_id, platform_display_name)
+
+    def switch_user(self, user_id: str, platform_display_name: Optional[str] = None):
         if not user_id:
             user_id = "default"
         with self._lock:
-            self._ensure_user(user_id)
+            self._ensure_user(user_id, platform_display_name)
             self.active_user_id = user_id
 
     # -----------------------------------------------------------------
     # PUBLIC API
     # -----------------------------------------------------------------
 
-    def process_input(self, user_message: str, user_id: str = None) -> dict:
+    def process_input(self, user_message: str, user_id: str = None,
+                      platform_display_name: Optional[str] = None) -> dict:
         """Call BEFORE the LLM. Returns dict with inner_context + metadata."""
         with self._lock:
             if user_id:
-                self.switch_user(user_id)
+                self.switch_user(user_id, platform_display_name)
             self.turn_count += 1
             now = time.time()
             _t0 = now
@@ -1146,7 +1231,8 @@ class ShiroInnerMind:
                 self._apply_importance_decay()
                 self._rebuild_hot_cache()
 
-            if self.turn_count % self.SESSION_SUMMARY_INTERVAL == 0:
+            if (self.turn_count % self.SESSION_SUMMARY_INTERVAL == 0
+                    and self.turn_count > self._session_summary_last_saved):
                 self._safe_step("session_summary", self._synthesize_session_summary)
 
             # --- Update thought type cooldowns
@@ -1180,7 +1266,104 @@ class ShiroInnerMind:
                 "token_estimate":     _estimate_tokens(inner_context),
                 "compliance_rate":    round(self.self_model.strategy_compliance_rate, 2),
                 "timings":            dict(self._timings) if self.profiling else {},
+                "response_confidence": round(self.response_confidence, 3),
+                "confidence_hint":     self.confidence_hint(),
             }
+
+    def _compute_response_confidence(self, response: str, user_message: str) -> float:
+        """
+        Estimate Shiro's confidence in her own response (0.0–1.0).
+
+        Heuristics:
+          - Long, specific responses score higher than vague/short ones
+          - Hedging language ("maybe", "i think", "not sure") lowers confidence
+          - Responses that contain a direct answer to a question score higher
+          - Repeating the user's phrasing back without adding content scores lower
+
+        This feeds back into the system prompt as a metacognitive hint so Shiro
+        can naturally say "I'm not sure about this" when confidence is low.
+        """
+        resp_lower = response.lower()
+        user_lower = user_message.lower()
+        score = 0.75  # default baseline
+
+        # Hedging language lowers confidence
+        hedges = [
+            "i think", "i believe", "not sure", "maybe", "perhaps",
+            "might be", "could be", "i guess", "i'm not certain",
+            "i don't know", "i'm unsure", "probably", "i'm not sure"
+        ]
+        hedge_count = sum(1 for h in hedges if h in resp_lower)
+        score -= hedge_count * 0.07
+
+        # Factual / specific language raises confidence
+        confident_markers = [
+            "is", "are", "was", "were", "will", "because",
+            "the reason", "specifically", "exactly", "definitely", "yes"
+        ]
+        conf_count = sum(1 for m in confident_markers if m in resp_lower)
+        score += min(0.15, conf_count * 0.02)
+
+        # Short responses to long questions score lower (likely evasive)
+        if len(user_message) > 80 and len(response) < 40:
+            score -= 0.12
+
+        # Direct echo of user's words without elaboration scores lower
+        user_words = set(user_lower.split())
+        resp_words = set(resp_lower.split())
+        overlap_ratio = len(user_words & resp_words) / max(len(user_words), 1)
+        if overlap_ratio > 0.6 and len(response) < 60:
+            score -= 0.10
+
+        score = max(0.1, min(1.0, score))
+        self._confidence_history.append(score)
+        self.response_confidence = score
+        return score
+
+    def _recursive_reflect(self, response: str, user_message: str) -> None:
+        """
+        Second-order reflection: if response confidence is low OR the recent
+        response contradicts Shiro's working memory, generate a corrective
+        self-note stored in working memory.
+
+        This implements the spec's "AI critiques its thought → AI improves
+        reasoning" loop without firing an extra LLM call.
+        """
+        confidence = self._compute_response_confidence(response, user_message)
+
+        # Low confidence → store self-corrective note in working memory
+        if confidence < 0.55:
+            self.working_memory["_meta_uncertainty"] = WorkingMemoryItem(
+                key="_meta_uncertainty",
+                value=(
+                    f"My last response had low confidence ({confidence:.0%}). "
+                    "I should acknowledge uncertainty if this topic comes up again."
+                ),
+                strength=0.8,
+                source="metacognition",
+            )
+
+        # Check for potential contradiction with working memory
+        for wm_key, wm_item in list(self.working_memory.items()):
+            if wm_key.startswith("_"):
+                continue
+            # Simple check: if a high-confidence memory's key words appear in the
+            # user message, and our response confidence is low, flag for review
+            if wm_item.strength > 0.7:
+                mem_words = set(wm_item.key.lower().split("_"))
+                msg_words = set(user_message.lower().split())
+                if len(mem_words & msg_words) >= 2 and confidence < 0.6:
+                    self.working_memory["_meta_review"] = WorkingMemoryItem(
+                        key="_meta_review",
+                        value=(
+                            f"Possible tension: my response (conf={confidence:.0%}) "
+                            f"may not align with what I know about '{ wm_item.key}'. "
+                            "Worth revisiting."
+                        ),
+                        strength=0.7,
+                        source="metacognition",
+                    )
+                    break
 
     def reflect_on_response(self, response: str, user_message: str):
         """Call AFTER the LLM generates a response. Shiro learns from what she said."""
@@ -1205,6 +1388,7 @@ class ShiroInnerMind:
 
             self._memorize(user_message, response)
             self._extract_to_working_memory(response)
+            self._extract_facts_from_user(user_message)   # real-time fact extraction from user
 
             # Extract curiosity journal entries from response
             self._extract_user_curiosity(response, user_message)
@@ -1219,8 +1403,25 @@ class ShiroInnerMind:
             self.mood.valence   += (0.60 - self.mood.valence) * 0.03    # slow pull toward baseline
             self.mood.dominance += (0.45 - self.mood.dominance) * 0.02
 
+            # Recursive reflection — second-order metacognition
+            self._recursive_reflect(response, user_message)
+
             if self.profiling:
                 self._timings["reflect"] = time.time() - _t0
+
+    def confidence_hint(self) -> str:
+        """
+        Returns a prompt hint based on Shiro's confidence in her last response.
+        Empty string if confidence is within the normal range (0.55–0.85).
+        """
+        c = self.response_confidence
+        if c < 0.45:
+            return "You feel genuinely uncertain about your last answer. If this topic comes up, be honest about that uncertainty."
+        if c < 0.55:
+            return "You're not fully sure about this. A small note of uncertainty in your reply is appropriate."
+        if c > 0.9:
+            return "You're highly confident on this — you can be clear and direct."
+        return ""  # Normal range — no hint needed
 
     def introspect(self) -> str:
         """Full diagnostic snapshot of Shiro's inner state."""
@@ -1308,21 +1509,39 @@ class ShiroInnerMind:
         return message
 
     def _extract_user_info(self, message: str):
-        """Name detection, compliment counting."""
-        # Allow updating name if it's unknown or a generic filler/placeholder
+        """Name detection, compliment counting.
+        
+        Logic:
+        - platform_display_name is NEVER overwritten here (set by seed_user / Discord bridge)
+        - self.user_profile.name is the *preferred* real name the user told us
+        - We only update .name if the user explicitly introduces themselves AND
+          the detected name is clearly different from their platform display name
+        """
         current_name = self.user_profile.name
-        is_generic = (current_name is None or
-                      current_name.lower() in _COMMON_FILLER or
-                      current_name in ["Stranger", "User", "you"])
+        platform_name = self.user_profile.platform_display_name
 
-        if is_generic:
-            name = _extract_name(message)
-            if name:
+        # Only try to detect a preferred name if the user doesn't have one yet,
+        # OR if they're actively correcting us ("my name is X")
+        name = _extract_name(message)
+        if name:
+            # Reject if the detected name is just the platform display name (redundant)
+            if platform_name and name.lower() == platform_name.lower():
+                pass  # already known — don't update
+            elif name.lower() not in _COMMON_FILLER and name.lower() not in _STOP_WORDS and len(name) > 1:
+                old_name = current_name
                 self.user_profile.name = name
-                self._add_thought(
-                    f"They told me their name is {name}. Remember that.",
-                    ThoughtType.WARMTH, 0.95
-                )
+                if old_name and old_name != name:
+                    # Name correction — log it
+                    self._add_thought(
+                        f"They corrected their name: was '{old_name}', now '{name}'. "
+                        f"Update everything that used the old name.",
+                        ThoughtType.WARMTH, 0.97
+                    )
+                elif not old_name:
+                    self._add_thought(
+                        f"They told me their name is {name}. Remember that.",
+                        ThoughtType.WARMTH, 0.95
+                    )
                 self.working_memory["user_name"] = WorkingMemoryItem(
                     key="user_name", value=name, strength=1.0
                 )
@@ -1630,22 +1849,25 @@ class ShiroInnerMind:
         """
         Detect if user is referencing something from a past session.
         Fires a CALLBACK thought if detected.
+
+        FIX: Lowered from 2 keyword matches to 1, and removed the recall_count > 0
+        guard — fresh memories can trigger callbacks too.
         """
         if not memories or not self._can_fire(ThoughtType.CALLBACK):
             return
 
         msg_lower = message.lower()
-        for mem in memories[:2]:
-            if mem.recall_count > 0:
-                # Check if any keywords from this memory appear in current message
-                matches = [k for k in mem.keywords[:5] if len(k) > 4 and k in msg_lower]
-                if len(matches) >= 2:
-                    thoughts.append(self._make_thought(
-                        f"They're touching on something from before — "
-                        f"'{mem.topic}'. I actually remember that.",
-                        ThoughtType.CALLBACK, 0.80
-                    ))
-                    break
+        for mem in memories[:3]:
+            # Check if any keywords from this memory appear in current message
+            matches = [k for k in mem.keywords[:8] if len(k) > 4 and k in msg_lower]
+            if len(matches) >= 1:
+                recall_hint = f" (recalled {mem.recall_count}x)" if mem.recall_count > 0 else ""
+                thoughts.append(self._make_thought(
+                    f"They're touching on '{mem.topic}'{recall_hint} — "
+                    f"I actually remember that context.",
+                    ThoughtType.CALLBACK, 0.80
+                ))
+                break
 
     def _extract_user_curiosity(self, response: str, user_message: str):
         """
@@ -1764,15 +1986,22 @@ class ShiroInnerMind:
                 hot_results.append((score, mem))
 
         # Full scan (with user tag filtering)
-        user_tag = self.user_profile.name
+        # Use identity_label (platform display name when available) — stable across name changes
+        user_tag = self.user_profile.identity_label()
         full_results: List[Tuple[float, MemoryTrace]] = []
         for mem in self.memory_bank:
             if mem in self._hot_cache:
                 continue   # already checked
             if not mem.tfidf_vector:
                 continue
-            # Prefer memories tagged to this user (or untagged = global)
-            if mem.user_tag and mem.user_tag != user_tag:
+            # Accept memories tagged to this user (by any of their known names),
+            # untagged global memories, or memories tagged to the active_user_id key
+            if mem.user_tag and mem.user_tag not in (
+                user_tag,
+                self.active_user_id,
+                self.user_profile.name,
+                self.user_profile.platform_display_name,
+            ):
                 continue
 
             sim = _cosine_similarity(query_vec, mem.tfidf_vector)
@@ -1790,7 +2019,22 @@ class ShiroInnerMind:
         return top
 
     def _memorize(self, user_message: str, response: str):
-        """Store episodic memory, skip if near-duplicate exists."""
+        """Store episodic memory, skip if near-duplicate exists.
+
+        CONTAMINATION GUARD: Reject system directives, inner-mind blocks, and
+        greeting prompts before they enter memory. These were previously stored
+        and would get recalled as behavioral instructions, causing Shiro to
+        repeat stale greetings and fabricate context every session.
+        """
+        _DIRECTIVE_PATTERNS = [
+            r'^\(LOG:', r'^\[SHIRO', r'^\[SYSTEM', r'^SYSTEM DIRECTIVE',
+            r'Reply as Shiro speaking', r'Shiro, be cautious',
+            r'Shiro, say a simple', r'Tyler just arrived',
+        ]
+        for pat in _DIRECTIVE_PATTERNS:
+            if re.search(pat, user_message.strip(), re.IGNORECASE):
+                return  # reject — system directive, not a real user message
+
         topic    = self._top_interest() or "general"
         tokens   = _tokenize(user_message + " " + response)
         tf_raw   = _build_tfidf(tokens)
@@ -1813,7 +2057,7 @@ class ShiroInnerMind:
             topic=topic, summary=summary,
             emotional_tag=self.mood.label(),
             keywords=keywords, tfidf_vector=tfidf_vec,
-            user_tag=self.user_profile.name,
+            user_tag=self.user_profile.identity_label(),   # stable — platform name, not extracted name
             importance=self._estimate_importance(user_message, response),
         )
         self.memory_bank.append(trace)
@@ -1838,9 +2082,19 @@ class ShiroInnerMind:
             mem.apply_importance_decay()
 
     def _rebuild_hot_cache(self):
-        """Rebuild the fast-path cache from top-recalled memories."""
+        """Rebuild the fast-path cache from top-recalled memories.
+
+        CONTAMINATION GUARD: Even if dirty memories exist in the bank from before
+        this fix, filter them here so they can never enter LLM context.
+        """
+        _BAD = [r'^\(LOG:', r'^\[SHIRO', r'^\[SYSTEM', r'^SYSTEM DIRECTIVE',
+                r'Reply as Shiro', r'Tyler just arrived']
+        def _clean(m):
+            s = str(m.summary)
+            return not any(re.search(p, s, re.IGNORECASE) for p in _BAD)
         self._hot_cache = sorted(
-            self.memory_bank, key=lambda m: m.recall_count, reverse=True
+            [m for m in self.memory_bank if _clean(m)],
+            key=lambda m: m.recall_count, reverse=True
         )[:8]
 
     def _synthesize_session_summary(self):
@@ -1854,6 +2108,7 @@ class ShiroInnerMind:
         top_topics = sorted(self.interest_map.items(), key=lambda x: -x[1])[:5]
         topic_str  = ", ".join(t for t, _ in top_topics) if top_topics else "various topics"
         name       = self.user_profile.display_name()
+        user_tag   = self.user_profile.identity_label()
         summary    = (f"Session at turn {self.turn_count} with {name}. "
                       f"Topics discussed: {topic_str}. "
                       f"Relationship level: {self.relationship.level.name}. "
@@ -1869,11 +2124,12 @@ class ShiroInnerMind:
             emotional_tag=self.mood.label(),
             keywords=list(tf_raw.keys())[:10],
             tfidf_vector=tfidf_vec,
-            user_tag=self.user_profile.name,
+            user_tag=user_tag,
             importance=0.75,
             is_session_summary=True,
         )
         self.memory_bank.append(trace)
+        self._session_summary_last_saved = self.turn_count
         if self.verbose:
             logger.info(f"[{self.name}] Session summary stored at turn {self.turn_count}.")
 
@@ -1900,7 +2156,7 @@ class ShiroInnerMind:
                         break
         self.memory_bank = [m for idx, m in enumerate(self.memory_bank) if idx not in to_remove]
         if merged and self.verbose:
-            self._log(f"[{self.name}] Consolidation: {merged} merged. Bank: {len(self.memory_bank)}")
+            logger.info(f"[{self.name}] Consolidation: {merged} merged. Bank: {len(self.memory_bank)}")
 
     def _decay_working_memory(self):
         dead = [k for k, v in self.working_memory.items() if not v.is_alive()]
@@ -1918,6 +2174,80 @@ class ShiroInnerMind:
             elif len(self.working_memory) < self.MAX_WORKING_MEMORY:
                 self.working_memory[key] = WorkingMemoryItem(key=key, value=name, strength=0.8)
 
+    def _extract_facts_from_user(self, message: str):
+        """
+        Real-time fact extraction from the user's message.
+        Populates working_memory and user_profile.preferences with things
+        the user says about themselves — so Shiro can reference them naturally.
+
+        Patterns captured:
+          - "I love / like / enjoy / hate / prefer X"
+          - "my favourite X is Y" / "I'm a X person"
+          - "I am / I'm [adjective/role]"
+          - "I have / own X"
+          - "I work / I do X for a living"
+          - Numbers: age ("I'm 26"), time references
+        """
+        msg = message.strip()
+        msg_lower = msg.lower()
+
+        _PREF_PATTERNS = [
+            # "I love/like/enjoy/hate/prefer [thing]"
+            (re.compile(
+                r"\bi\s+(?:really\s+)?(?:love|like|enjoy|adore|prefer|hate|dislike|can't stand)\s+"
+                r"(?:to\s+)?([a-z][a-z\s,'-]{2,40}?)(?:\.|,|$|\s+and\b|\s+but\b)",
+                re.IGNORECASE
+            ), "likes"),
+            # "my favourite/favorite X is Y"
+            (re.compile(
+                r"\bmy\s+(?:fav(?:ou?rite)?|top|go-to)\s+[\w\s]{1,15}?\s+is\s+([a-z][a-z\s,'-]{2,35}?)(?:\.|,|$)",
+                re.IGNORECASE
+            ), "favourite"),
+            # "I'm a X person / I'm into X"
+            (re.compile(
+                r"\bi'?m\s+(?:a\s+)?(?:into|really\s+into|big\s+on|obsessed\s+with)\s+([a-z][a-z\s,'-]{2,35}?)(?:\.|,|$)",
+                re.IGNORECASE
+            ), "interest"),
+            # "I work as / I'm a [job]"
+            (re.compile(
+                r"\bi\s+(?:work\s+as\s+(?:a\s+)?|do\s+|am\s+a\s+)([a-z][a-z\s,'-]{2,35}?)(?:\s+for|\.|,|$)",
+                re.IGNORECASE
+            ), "occupation"),
+            # "I own / I have a [thing]"
+            (re.compile(
+                r"\bi\s+(?:own|have)\s+(?:a\s+)?([a-z][a-z\s,'-]{2,35}?)(?:\.|,|$)",
+                re.IGNORECASE
+            ), "owns"),
+        ]
+
+        for pattern, fact_type in _PREF_PATTERNS:
+            for m in pattern.finditer(msg_lower):
+                value = m.group(1).strip().rstrip(".,!? ")
+                if len(value) < 3 or value in _STOP_WORDS:
+                    continue
+                key = f"{fact_type}_{value[:20].replace(' ','_')}"
+                if key not in self.working_memory and len(self.working_memory) < self.MAX_WORKING_MEMORY:
+                    self.working_memory[key] = WorkingMemoryItem(
+                        key=key,
+                        value=f"{fact_type}: {value}",
+                        strength=0.9,
+                    )
+                    # Also persist to user profile preferences
+                    self.user_profile.preferences[fact_type] = value
+                    logger.debug(f"[InnerMind] Fact extracted: {fact_type}={value!r}")
+                elif key in self.working_memory:
+                    self.working_memory[key].reinforce(0.3)
+
+        # Age extraction: "I'm 26" / "I am 26 years old"
+        age_m = re.search(r"\bi(?:'?m| am)\s+(\d{1,3})\s*(?:years?\s+old|yo\b)?", msg_lower)
+        if age_m:
+            age = int(age_m.group(1))
+            if 5 < age < 120:
+                self.working_memory["user_age"] = WorkingMemoryItem(
+                    key="user_age", value=f"age: {age}", strength=1.0
+                )
+                self.user_profile.preferences["age"] = str(age)
+
     def _working_memory_hint(self, message: str) -> Optional[str]:
         msg_lower = message.lower()
         for item in self.working_memory.values():
@@ -1930,8 +2260,8 @@ class ShiroInnerMind:
         return [
             {"key": k, "value": v.value, "strength": round(v.strength, 2)}
             for k, v in sorted(self.working_memory.items(), key=lambda x: -x[1].strength)
-            if v.strength > 0.2
-        ][:5]
+            if v.strength > 0.15   # FIX: was 0.2 — more recently extracted facts visible
+        ][:8]  # FIX: was 5 — show more items
 
     # -----------------------------------------------------------------
     # SELF-CRITIQUE
@@ -2041,16 +2371,32 @@ class ShiroInnerMind:
         verbosity:     str = "standard",
     ) -> str:
         name    = self.user_profile.display_name()
+        # Build a clear, unambiguous identity string for the LLM
+        platform_name = self.user_profile.platform_display_name
+        preferred_name = self.user_profile.name
+        if platform_name and preferred_name and platform_name.lower() != preferred_name.lower():
+            identity_str = f"{platform_name} (prefers to be called {preferred_name})"
+        elif preferred_name:
+            identity_str = preferred_name
+        elif platform_name:
+            identity_str = platform_name
+        else:
+            identity_str = "someone new"
+
         hint    = _STRATEGY_HINTS.get(self.current_strategy, "")
-        # FIX: Header replaced. Old "[SHIRO INNER MIND v4 -- Turn X]" format was
-        # echoed by the LLM because it read as a template to follow. [p1]/[p2] markers
-        # also leaked as they look like valid bracket tokens. Now uses plain-language
-        # section headers with no bracket tokens that could appear in output.
         lines   = [
             f"# INTERNAL CONTEXT — Turn {self.turn_count} — {self._elapsed()} — DO NOT OUTPUT THIS BLOCK",
             f"Mood: {self.mood.summary()}  | Momentum: {self.emotional_momentum.label()}",
             f"Strategy: {self.current_strategy.value}  | "
-            f"Rel: {self.relationship.level.name}  | User: {name}",
+            f"Rel: {self.relationship.level.name}",
+            f"",
+            f"# CURRENT SPEAKER — IMPORTANT",
+            f"You are talking to: {identity_str}",
+            f"Their platform/Discord name: {platform_name or 'unknown'}",
+            f"Their preferred name (if told): {preferred_name or 'not yet given'}",
+            f"Call them by: {name}",
+            f"Do NOT confuse this person with other users. Each person in this chat has their own memory.",
+            f"",
             f"Playfulness: {self.playfulness.label()}  | "
             f"Sentiment: {self.sentiment_trend.label()}",
             "",
@@ -2098,15 +2444,43 @@ class ShiroInnerMind:
         # === Standard and Rich sections ===
         if verbosity in ("standard", "rich"):
             if memories:
-                lines.append("== Memory Echoes ==")
-                for m in memories[:3]:
-                    lines.append(f"  [{m.topic} | {m.emotional_tag}] {m.summary[:90]}")
+                lines.append("== Memory Echoes (past context) ==")
+                for m in memories[:4]:
+                    # FIX: 200 chars instead of 90 — summaries were too truncated to be useful
+                    lines.append(f"  [{m.topic} | {m.emotional_tag}] {m.summary[:200]}")
+                lines.append("")
+
+            # -- User facts block: always show what Shiro knows about this person --
+            # Pulls from both working_memory (real-time) and user_profile.preferences (persisted)
+            _known_facts = {}
+            # Start with persisted preferences (lower-priority base)
+            for k, v in self.user_profile.preferences.items():
+                _known_facts[k] = v
+            # Overlay working memory (higher-priority, recent)
+            for item in self.working_memory.values():
+                if item.strength > 0.15 and ":" in item.value:
+                    fact_type, _, fact_val = item.value.partition(":")
+                    _known_facts[fact_type.strip()] = fact_val.strip()
+            # Always show user name/age if known
+            if self.user_profile.name:
+                _known_facts["name"] = self.user_profile.name
+            if self.user_profile.known_interests:
+                _known_facts["known_interests"] = ", ".join(self.user_profile.known_interests[-8:])
+
+            if _known_facts:
+                lines.append(f"-- What I know about {name} --")
+                for fact_k, fact_v in list(_known_facts.items())[:10]:
+                    lines.append(f"  {fact_k}: {fact_v}")
+                lines.append(
+                    "  (Only reference these if they are naturally relevant. "
+                    "NEVER claim to know something not listed here.)"
+                )
                 lines.append("")
 
             wm = self._working_memory_snapshot()
             if wm:
-                lines.append("-- Working Memory --")
-                for item in wm[:4]:
+                lines.append("-- Working Memory (active this session) --")
+                for item in wm[:6]:  # FIX: show 6 instead of 4
                     lines.append(f"  [{item['strength']}] {item['key']}: {item['value']}")
                 lines.append("")
 
@@ -2263,6 +2637,7 @@ class ShiroInnerMind:
                     uid: {
                         "name": up.name,
                         "nickname": up.nickname,
+                        "platform_display_name": up.platform_display_name,
                         "known_interests": up.known_interests,
                         "emotional_moments": up.emotional_moments,
                         "preferences": up.preferences,
@@ -2352,6 +2727,7 @@ class ShiroInnerMind:
                     data = wrapper  # legacy v1/v2/v3
 
                 self.turn_count    = data.get("turn_count", 0)
+                self._session_summary_last_saved = self.turn_count  # avoid summary on first msg after load
                 self.last_active   = data.get("last_active", time.time())
                 self.session_start = datetime.fromisoformat(
                     data.get("session_start", datetime.now().isoformat()))
@@ -2390,9 +2766,10 @@ class ShiroInnerMind:
                 if up_data:
                     self.user_profiles = {}
                     for uid, up in up_data.items():
-                        self.user_profiles[uid] = UserProfile(
+                        self.user_profiles[uid] = CognitiveUserProfile(
                             name=up.get("name"),
                             nickname=up.get("nickname"),
+                            platform_display_name=up.get("platform_display_name"),
                             known_interests=up.get("known_interests", []),
                             emotional_moments=up.get("emotional_moments", []),
                             preferences=up.get("preferences", {}),
@@ -2404,9 +2781,10 @@ class ShiroInnerMind:
                 else:
                     # Legacy fallback
                     up = data.get("user_profile", {})
-                    legacy_up = UserProfile(
+                    legacy_up = CognitiveUserProfile(
                         name=up.get("name"),
                         nickname=up.get("nickname"),
+                        platform_display_name=up.get("platform_display_name"),
                         known_interests=up.get("known_interests", []),
                         emotional_moments=up.get("emotional_moments", []),
                         preferences=up.get("preferences", {}),
@@ -2415,7 +2793,7 @@ class ShiroInnerMind:
                         session_count=up.get("session_count", 0) + 1,
                         curiosity_journal=up.get("curiosity_journal", []),
                     )
-                    self.user_profiles = {self.active_user_id: legacy_up, "default": UserProfile()}
+                    self.user_profiles = {self.active_user_id: legacy_up, "default": CognitiveUserProfile()}
 
                 # Load multi-user relationships
                 rel_data = data.get("relationships")

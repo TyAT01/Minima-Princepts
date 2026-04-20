@@ -41,7 +41,7 @@ class PersonaManager:
                 if p.exists() and p.is_file():
                     found_path = p
                     break
-            except:
+            except OSError:
                 continue
 
         if not found_path:
@@ -82,6 +82,33 @@ class PersonaManager:
             temporal_context += f"Visit Pattern: {timing_obs}\n"
         if user_quirks:
             temporal_context += f"User Quirks: {', '.join(user_quirks)}\n"
+
+        # Session Status
+        _turns = context.get('session_turns', 0)
+        _relationship = context.get('relationship_tier', 'stranger').lower()
+        _status = "Ongoing" if _turns > 1 else "New Session (just started)"
+        temporal_context += f"Session Status: {_status} (Turn: {_turns})\n"
+        if _status == "Ongoing":
+            temporal_context += "Note: Greeted them already. Do not repeat introductory greetings.\n"
+
+        # ── First-contact tone guidance ───────────────────────────────────────
+        # The Modelfile bakes in "make new people feel welcomed immediately" which
+        # overrides the sheet's actual first-impression character: watchful, curious,
+        # slightly guarded. This block explicitly corrects that on new sessions so
+        # the greeting stays true to the persona rather than defaulting to host mode.
+        if _turns <= 1 and _relationship in ('stranger', 'acquaintance', ''):
+            # FIX: removed [FIRST CONTACT — READ THIS] bracket token — plain prose instead
+            temporal_context += (
+                "\nFirst contact — this person is new:\n"
+                "Your first-impression energy is: observant, curious, "
+                "slightly measured — not a host welcoming a guest, but a fox who noticed "
+                "someone walk in and is genuinely interested in what they are about.\n"
+                "Do NOT introduce yourself unless they ask, or unless it flows naturally.\n"
+                "Do NOT say 'welcome' or explain what you are.\n"
+                "Do NOT ask what brings them here like a service agent.\n"
+                "One short sentence. Your actual reaction to them showing up. That is all.\n"
+                "Warmth is present — it is just not performed. Let curiosity lead.\n"
+            )
 
         temporal_context += "\n"
 

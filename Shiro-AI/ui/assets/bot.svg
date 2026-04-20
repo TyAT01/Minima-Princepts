@@ -4,45 +4,24 @@
       <stop offset="0%" stop-color="#e8c49a"/>
       <stop offset="100%" stop-color="#d4a070"/>
     </linearGradient>
-    <linearGradient id="ear_g" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#f5e0c8"/>
-      <stop offset="100%" stop-color="#e0aa78"/>
+    <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff9a5c"/>
+      <stop offset="100%" stop-color="#e07030"/>
     </linearGradient>
-    <radialGradient id="cheek" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#f5a0a0" stop-opacity="0.7"/>
-      <stop offset="100%" stop-color="#f5a0a0" stop-opacity="0"/>
-    </radialGradient>
   </defs>
-  <!-- Left fox ear -->
-  <path d="M22 45 L16 14 L40 36 Z" fill="url(#ear_g)" stroke="#c08050" stroke-width="1.5"/>
-  <path d="M24 42 L20 20 L37 37 Z" fill="#e8a0a0" opacity="0.6"/>
-  <!-- Right fox ear -->
-  <path d="M78 45 L84 14 L60 36 Z" fill="url(#ear_g)" stroke="#c08050" stroke-width="1.5"/>
-  <path d="M76 42 L80 20 L63 37 Z" fill="#e8a0a0" opacity="0.6"/>
-  <!-- Face -->
-  <ellipse cx="50" cy="57" rx="28" ry="26" fill="url(#fg)" stroke="#c08050" stroke-width="1.5"/>
-  <!-- Cheek blush -->
-  <ellipse cx="33" cy="62" rx="8" ry="5" fill="url(#cheek)"/>
-  <ellipse cx="67" cy="62" rx="8" ry="5" fill="url(#cheek)"/>
-  <!-- Eyes — slightly lidded, cunning -->
-  <ellipse cx="38" cy="53" rx="6" ry="5" fill="#1a0a00"/>
-  <ellipse cx="62" cy="53" rx="6" ry="5" fill="#1a0a00"/>
-  <!-- Eye shine -->
-  <circle cx="36" cy="51" r="2" fill="white" opacity="0.9"/>
-  <circle cx="60" cy="51" r="2" fill="white" opacity="0.9"/>
-  <!-- Amber iris -->
-  <ellipse cx="38" cy="53" rx="4" ry="3.5" fill="#c07020" opacity="0.7"/>
-  <ellipse cx="62" cy="53" rx="4" ry="3.5" fill="#c07020" opacity="0.7"/>
-  <!-- Smug/sly eyebrow left -->
-  <path d="M32 47 Q38 44 44 46" stroke="#7a4020" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <!-- Smug/sly eyebrow right (slightly raised = smug) -->
-  <path d="M56 45 Q62 42 68 46" stroke="#7a4020" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <!-- Small foxy nose -->
-  <ellipse cx="50" cy="64" rx="3.5" ry="2.5" fill="#c07070"/>
-  <!-- Smug smirk -->
-  <path d="M42 70 Q50 75 62 69" stroke="#9a5040" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <!-- Short white hair fringe suggestion -->
-  <path d="M28 40 Q35 30 50 28 Q65 26 72 38" stroke="#f8f0e8" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.8"/>
-  <!-- Collar of oversized tee peeking in -->
-  <path d="M30 83 Q50 78 70 83 L75 90 L25 90 Z" fill="#e8e0d8" stroke="#c8bfb0" stroke-width="1"/>
+  <ellipse cx="50" cy="58" rx="26" ry="28" fill="url(#fg)" stroke="#c08050" stroke-width="1.5"/>
+  <path d="M24 42 Q20 10 38 18 Q44 30 50 32 Q56 30 62 18 Q80 10 76 42" fill="url(#fg)" stroke="#c08050" stroke-width="1.5"/>
+  <path d="M26 38 Q24 20 36 24 Q40 30 48 32" fill="#f0d8b8" stroke="none"/>
+  <path d="M74 38 Q76 20 64 24 Q60 30 52 32" fill="#f0d8b8" stroke="none"/>
+  <ellipse cx="50" cy="56" rx="18" ry="20" fill="#f8e8d0"/>
+  <ellipse cx="40" cy="50" rx="5" ry="6" fill="white" stroke="#d08050" stroke-width="1"/>
+  <ellipse cx="60" cy="50" rx="5" ry="6" fill="white" stroke="#d08050" stroke-width="1"/>
+  <circle cx="41" cy="51" r="3" fill="url(#eg)"/>
+  <circle cx="61" cy="51" r="3" fill="url(#eg)"/>
+  <circle cx="42" cy="50" r="1.2" fill="#1a0a00"/>
+  <circle cx="62" cy="50" r="1.2" fill="#1a0a00"/>
+  <path d="M44 62 Q50 67 56 62" stroke="#c08050" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <ellipse cx="50" cy="64" rx="3" ry="1.5" fill="#e89070" opacity="0.6"/>
+  <circle cx="37" cy="58" r="3" fill="#f0a080" opacity="0.4"/>
+  <circle cx="63" cy="58" r="3" fill="#f0a080" opacity="0.4"/>
 </svg>

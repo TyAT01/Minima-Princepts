@@ -5,6 +5,9 @@ import json
 from llm.client import LlamaClient
 from unittest.mock import patch, MagicMock, AsyncMock
 
+import pytest
+
+@pytest.mark.asyncio
 async def test_fallback_async():
     print("Testing Async Fallback...")
     client = LlamaClient(
