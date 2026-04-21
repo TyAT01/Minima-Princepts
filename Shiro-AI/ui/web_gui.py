@@ -89,6 +89,10 @@ class ShiroGUI:
         self.public_stop_cb:   Optional[Callable[[], None]] = None
         self.get_server_status_cb: Optional[Callable[[], dict]] = None
 
+        # LLM Model Selection — wired from main.py
+        self.llm_list_models_cb: Optional[Callable[[], List[str]]] = None
+        self.llm_set_model_cb: Optional[Callable[[str], None]] = None
+
         self.title = title
         self.theme = theme
         self.interface = None
@@ -282,6 +286,14 @@ class ShiroGUI:
                             with gr.Row():
                                 join_btn = gr.Button("Join", variant="secondary", size="sm")
                                 leave_btn = gr.Button("Leave", variant="stop", size="sm")
+                            gr.Markdown("### 🧠 Brain")
+                            llm_model_dropdown = gr.Dropdown(
+                                label="Llama Model",
+                                choices=["shiro:latest"],
+                                value="shiro:latest",
+                                interactive=True,
+                            )
+                            llm_refresh_btn = gr.Button("↻ Refresh Models", variant="secondary", size="sm")
                             gr.Markdown("### 🎙️ Mic")
                             mic_toggle = gr.Checkbox(label="Hands-Free Mode", value=False)
                             deafen_toggle = gr.Checkbox(
@@ -1233,6 +1245,25 @@ class ShiroGUI:
             speakers_refresh_btn.click(fn=_speakers_refresh, outputs=[speakers_profiles_df, speakers_queue_html])
             speakers_inspect_btn.click(fn=_speakers_inspect, inputs=[speakers_inspect_input], outputs=[speakers_detail_box])
             speakers_auto_timer.tick(fn=_speakers_auto_refresh, outputs=[speakers_profiles_df, speakers_queue_html])
+
+            # ── LLM handlers ──────────────────────────────────────────────────
+
+            def _llm_refresh():
+                choices = ["shiro:latest"]
+                if self.llm_list_models_cb:
+                    try:
+                        choices = self.llm_list_models_cb()
+                    except Exception as e:
+                        logger.error(f"UI failed to list models: {e}")
+                return gr.update(choices=choices)
+
+            def _llm_set_model(model_name):
+                if self.llm_set_model_cb:
+                    self.llm_set_model_cb(model_name)
+                return f"Model set to: {model_name}"
+
+            llm_refresh_btn.click(fn=_llm_refresh, outputs=[llm_model_dropdown])
+            llm_model_dropdown.change(fn=_llm_set_model, inputs=[llm_model_dropdown], outputs=[error_box])
 
             # ── Books handlers ────────────────────────────────────────────────
 

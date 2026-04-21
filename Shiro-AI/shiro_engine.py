@@ -612,6 +612,7 @@ class LoopDetector:
 
     # Hard-banned phrases that should NEVER recur (absolute prohibition)
     _HARD_BANNED = {
+        "tyler bo byler", "bo byler", "regret starting it",
         "greeting log", "lack of finesse", "sloppy greeting",
         "dramatic greeting", "won't let you get away",
         "fair chance",              # training artifact — sounds like a tic
@@ -1535,6 +1536,11 @@ class ShiroEngine:
         # These phrases were never said by any user but got stored via hallucination.
         # Running at boot ensures they're removed even from existing databases.
         _FALSE_MEMORY_PHRASES = [
+            "tyler bo byler",
+            "bo byler",
+            "don't make me regret starting it",
+            "live here this is my stream chat",
+            "she has never streamed",
             "bored at work",
             "stuck at work",
             "feeling stuck at work",
@@ -4164,6 +4170,10 @@ class ShiroEngine:
         # Re-append preserved goal tags at the end so process_shiro_reply() can find them
         if _preserved_goal_tags:
             text = text.rstrip() + " " + " ".join(_preserved_goal_tags)
+
+        # Return ellipsis if everything else was stripped to avoid UI "blinking" empty bubbles
+        if not text.strip():
+            return "..."
 
         # Strip inner mind boxes
         text = _INNER_MIND_BOX.sub('', text)
