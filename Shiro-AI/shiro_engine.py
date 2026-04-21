@@ -648,6 +648,10 @@ class LoopDetector:
         "genuinely": 3,        # same — real word, but becomes a verbal tic above 3
         "noted": 2,            # acknowledgement word, shouldn't appear more than 2x
         "interestingly": 2,    # sounds affected when repeated
+        "obviously": 2,        # overused in recent logs
+        "fair enough": 2,      # recurring pattern
+        "happy now": 1,        # seen looping
+        "go already": 1,       # seen looping
         "okay": 5,             # 39% opener rate seen in testing — hard cap total per window
     }
     # Track how many times each capped word has been used
