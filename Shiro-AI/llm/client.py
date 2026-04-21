@@ -437,13 +437,33 @@ class LlamaClient:
 
         # FIX: removed [SYSTEM] TOOL USE bracket token — replaced with plain prose header
         instruction = (
-            "\n\nTools available to you:\n"
+            "\n\n### [SYSTEM] TOOL USE\nTools available to you:\n"
             f"{tool_desc}\n"
             "To use a tool, output this exact format on a new line:\n"
             "TOOL_CALLS: [{\"function\": {\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}}]\n"
             "The engine will catch this and provide the result in the next turn.\n"
         )
         return system_prompt + instruction
+
+    def list_models(self) -> List[str]:
+        """Fetch available models from Ollama."""
+        if self.api_type != "ollama":
+            return [self.model]
+        try:
+            base = self.base_url
+            if base.endswith("/api"): base = base[:-4]
+            r = requests.get(f"{base}/api/tags", timeout=5)
+            if r.status_code == 200:
+                models = [m.get("name") for m in r.json().get("models", [])]
+                return sorted(models)
+        except Exception as e:
+            logger.error(f"Failed to list models: {e}")
+        return [self.model]
+
+    def set_model(self, model_name: str):
+        """Update the active model."""
+        self.model = model_name
+        logger.info(f"LLM model changed to: {self.model}")
 
     def perform_diagnostics(self) -> str:
         base = self.base_url
@@ -455,12 +475,11 @@ class LlamaClient:
         except Exception as e:
             report += f"1. Root Server Check: FAILED ({e})\n"
         try:
-            r = requests.get(f"{base}/api/tags", timeout=5)
-            if r.status_code == 200:
-                models = [m.get("name") for m in r.json().get("models", [])]
+            models = self.list_models()
+            if models and models != [self.model]:
                 report += f"2. Models Found: {models}\n"
             else:
-                report += f"2. Models Found: FAILED\n"
+                report += f"2. Models Found: FAILED or only current model listed\n"
         except Exception as e:
             report += f"2. Models Found: ERROR ({e})\n"
         return report

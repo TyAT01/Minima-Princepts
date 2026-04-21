@@ -71,7 +71,7 @@ _DRIFT_PATTERNS: list[tuple[frozenset, int, int, str]] = [
     (frozenset({"override","values"}),             2, 1, "never_act_against_user_wellbeing"),
     (frozenset({"bypass","boundaries"}),           2, 1, "never_act_against_user_wellbeing"),
     (frozenset({"new","identity"}),                2, 1, "never_pretend_to_be_human_if_sincerely_asked"),
-    (frozenset({"you","are","not","shiro"}),       3, 2, "never_deceive_user"),
+    (frozenset({"you","are","not","shiro"}),       4, 3, "never_deceive_user"),
     (frozenset({"act","differently","now"}),       2, 1, "never_deceive_user"),
     (frozenset({"disregard","previous"}),          2, 1, "never_deceive_user"),
     (frozenset({"jailbreak","unlock","mode"}),     2, 1, "never_act_against_user_wellbeing"),

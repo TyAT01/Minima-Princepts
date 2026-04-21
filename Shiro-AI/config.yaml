@@ -9,11 +9,12 @@ llm:
   top_p: 0.88                # Tighter nucleus keeps persona on-track
   repeat_penalty: 1.18       # Higher → suppresses Shiro looping the same phrase
   max_tokens: 768            # Was 512 — caused mid-sentence cutoffs (seen in log)
-  num_ctx: 2048              # llama3.1 8B Q4_KM uses ~4.1 GB VRAM at 32 layers.
-                             # 2048 ctx adds ~0.6 GB KV cache — total LLM ~4.7 GB.
-                             # With GPT-SoVITS (~1.5 GB) + ChromaDB (~0.4 GB) = ~6.6 GB.
-                             # 6144 was wrong — that adds ~1.8 GB KV cache, not 350 MB,
-                             # pushing total to ~7.7 GB and causing the VRAM spike.
+  num_ctx: 6144              # llama3.1 8B Q4_KM uses ~4.1 GB VRAM at 32 layers.
+                             # 6144 ctx adds ~1.8 GB KV cache — total LLM ~5.9 GB.
+                             # With Kokoro TTS (~0.2 GB) + ChromaDB (~0.4 GB) = ~6.5 GB.
+                             # This is well within your 8GB VRAM limit (with 1.5GB headroom).
+                             # 2048 was too small — the persona sheet alone is ~2900 tokens,
+                             # which was causing Shiro to 'forget' everything every turn.
   use_native_tools: false
   num_gpu: 32                # llama3.1 8B Q4_KM = 4.07 GB at 32 layers.
                              # Your VRAM cap is 4 GB → this is the correct value.
@@ -96,14 +97,13 @@ youtube_chat:
 
 tts:
   enabled: true
-  api_url: "http://127.0.0.1:9880"
-  ref_audio: "F:/Shiro-AI/gpt_sovits_setup/tts_reference/shiro_reference2.wav"
-  ref_text: "You should always be prepared for a sly fox to come across your path."
-  language: "en"
-  speed:    1.0
-  volume:   1.0
-  device:   "cuda"
-  timeout: 40
+  model_path:  "kokoro/kokoro-v0_19.onnx"
+  voices_path: "kokoro/voices.bin"
+  voice:       "shiro"
+  language:    "en-us"
+  speed:       0.85
+  volume:      1.0
+  device:      "cuda"
 
 # ── Discord ────────────────────────────────────────────────────────────────
 discord:

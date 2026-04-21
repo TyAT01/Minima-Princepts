@@ -81,10 +81,10 @@ class ShiroApp:
         tts_cfg = self.config.get('tts', {})
         self.tts = ShiroTTS(tts_cfg)
         if tts_cfg.get('enabled', False):
-            if not check_tts_server(tts_cfg.get('api_url', 'http://127.0.0.1:9880')):
+            if not check_tts_server(tts_cfg.get('model_path', 'kokoro/kokoro-v0_19.onnx')):
                 logging.warning(
-                    "⚠️  GPT-SoVITS server not reachable — Shiro will run text-only.\n"
-                    "    Make sure GPT-SoVITS\\start_api.bat has finished loading."
+                    "⚠️  Kokoro TTS model not found — Shiro will run text-only.\n"
+                    "    Check your config.yaml tts.model_path setting."
                 )
             self.tts.start()
         self.engine._tts_ref = self.tts
@@ -156,6 +156,10 @@ class ShiroApp:
         # Wire streaming callbacks into GUI
         self.gui.stream_set_cb    = self.engine.set_streaming
         self.gui.stream_status_cb = self.engine.get_streaming_status
+
+        # Wire LLM model selection callbacks into GUI
+        self.gui.llm_list_models_cb = self.engine.llm.list_models
+        self.gui.llm_set_model_cb    = self.engine.llm.set_model
 
         # Wire memory management callbacks into GUI
         self.gui.memory_summary_cb     = self.engine.get_memory_summary

@@ -1,0 +1,40 @@
+{
+  "goals": [
+    {
+      "id": "g186990",
+      "type": "long",
+      "text": "get to know the people I talk to \u2014 what makes them tick, what they care about",
+      "status": "active",
+      "created_at": 1776742186.9909785,
+      "deadline": null,
+      "progress": "",
+      "remind_after": 3600,
+      "last_reminded": 1776742186.990974,
+      "completed_at": null
+    },
+    {
+      "id": "g186991",
+      "type": "long",
+      "text": "develop my own sense of what I find genuinely interesting and keep track of it",
+      "status": "active",
+      "created_at": 1776742186.9910438,
+      "deadline": null,
+      "progress": "",
+      "remind_after": 3600,
+      "last_reminded": 1776742186.9910412,
+      "completed_at": null
+    },
+    {
+      "id": "g186991",
+      "type": "short",
+      "text": "pay attention to anything left unfinished in today's conversations and follow up",
+      "status": "active",
+      "created_at": 1776742186.9910502,
+      "deadline": null,
+      "progress": "",
+      "remind_after": 3600,
+      "last_reminded": 1776742186.9910493,
+      "completed_at": null
+    }
+  ]
+}
