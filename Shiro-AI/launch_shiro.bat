@@ -42,9 +42,11 @@ if %ERRORLEVEL%==0 (
 )
 
 :: ── 2. Kokoro TTS ─────────────────────────────────────────────────────────────
+set "SHIRO_VOICE_DISABLED=0"
 if not exist "%KOKORO_DIR%\kokoro-v0_19.onnx" (
     echo [2/3] WARNING: Kokoro model not found in %KOKORO_DIR%
     echo       Shiro will run in text-only mode.
+    set "SHIRO_VOICE_DISABLED=1"
 ) else (
     echo [2/3] Kokoro TTS engine located.
 )

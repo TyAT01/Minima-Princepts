@@ -627,8 +627,8 @@ class ShiroDiscordBridge:
     def _tts_callback(self, text: str) -> Optional[bytes]:
         """
         Get TTS audio bytes for speaking in Discord voice.
-        Tries to use GPT-SoVITS TTS if enabled.
-        Returns WAV bytes or None.
+        Uses ShiroTTS (Kokoro).
+        Returns PCM16 bytes or None.
         """
         try:
             if not self.tts or not hasattr(self.tts, "synthesize_to_bytes"):
