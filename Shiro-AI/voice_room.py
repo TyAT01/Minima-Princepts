@@ -498,28 +498,23 @@ class VoiceRoom:
             return ""
 
     def _synthesize(self, text: str) -> Optional[bytes]:
-        """Call GPT-SoVITS HTTP API to get WAV bytes for browser playback."""
+        """Synthesize speech using ShiroTTS (Kokoro)."""
         try:
             tts = getattr(self.shiro_app, 'tts', None)
-            if not tts:
+            if not tts or not tts.enabled:
                 return None
-            cfg = tts  # ShiroTTS object has api_url, ref_audio, etc.
-            # FIX: pass speed_factor as float, not string — SoVITS API type check
-            resp = requests.get(
-                f"{cfg.api_url}/tts",
-                params={
-                    "text": text,
-                    "text_lang": cfg.language,
-                    "ref_audio_path": cfg.ref_audio,
-                    "prompt_text": cfg.ref_text,
-                    "prompt_lang": cfg.language,
-                    "speed_factor": float(cfg.speed),
-                    "streaming_mode": False,
-                },
-                timeout=cfg.timeout,
-            )
-            if resp.ok:
-                return resp.content
+
+            # ShiroTTS.synthesize_to_bytes returns raw PCM16
+            pcm_bytes = tts.synthesize_to_bytes(text)
+            if not pcm_bytes:
+                return None
+
+            # Convert raw PCM16 to WAV bytes for browser playback
+            # Assuming sr=24000 from ShiroTTS implementation
+            with io.BytesIO() as wav_buf:
+                audio_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32767.0
+                sf.write(wav_buf, audio_np, 24000, format='WAV')
+                return wav_buf.getvalue()
         except Exception as e:
             logger.debug(f"[VoiceRoom] TTS error: {e}")
         return None

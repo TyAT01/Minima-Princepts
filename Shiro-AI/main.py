@@ -78,15 +78,23 @@ class ShiroApp:
         )
 
         # ── TTS ───────────────────────────────────────────────────────────────
-        tts_cfg = self.config.get('tts', {})
+        tts_cfg = self.config.get('tts', {}).copy()
+
+        # Override enabled state if SHIRO_VOICE_DISABLED environment variable is set
+        if os.environ.get("SHIRO_VOICE_DISABLED") == "1":
+            logging.info("[System] Voice disabled via environment variable (model missing).")
+            tts_cfg['enabled'] = False
+
         self.tts = ShiroTTS(tts_cfg)
         if tts_cfg.get('enabled', False):
             if not check_tts_server(tts_cfg.get('model_path', 'kokoro/kokoro-v0_19.onnx')):
                 logging.warning(
                     "⚠️  Kokoro TTS model not found — Shiro will run text-only.\n"
-                    "    Check your config.yaml tts.model_path setting."
+                    "    Check your kokoro/ directory or config.yaml tts.model_path."
                 )
-            self.tts.start()
+                self.tts.enabled = False
+            else:
+                self.tts.start()
         self.engine._tts_ref = self.tts
 
         # ── Discord ───────────────────────────────────────────────────────────
@@ -497,11 +505,8 @@ class ShiroApp:
         _was_interrupted = False
 
         # Interrupt any currently-playing TTS before starting the new response.
-        # GPT-SoVITS is single-threaded — letting old synthesis finish while new
-        # starts causes concurrent HTTP requests and corrupted audio.
-        if hasattr(self, 'tts') and self.tts and self.tts.is_active:
+        if hasattr(self, 'tts') and self.tts and self.tts.is_speaking:
             self.tts.interrupt()
-            self.tts.wait_until_done(timeout=1.5)
 
         try:
             for fragment in self.engine.process_text(processed_text, user_name, user_id=user_id, interrupt_event=self.interrupt_event):

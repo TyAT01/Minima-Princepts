@@ -26,7 +26,7 @@ def _build_payload(model, messages, temperature, top_p, repeat_penalty,
     Used to allow longer responses for complex/deep messages.
     num_ctx: context window size. Defaults to 4096 to match engine config default.
     Raising this increases KV-cache VRAM usage significantly — on a 4GB budget with
-    GPT-SoVITS taking 1.5-1.6GB, 4096 is the safe ceiling. Set via config.yaml
+    Kokoro taking ~0.2GB, 6144 is the safe ceiling. Set via config.yaml
     llm.num_ctx if you need more and have the headroom.
     FIX: was hardcoded to 6144 which ignored the engine's config value entirely,
     causing KV-cache to eat into TTS VRAM headroom on every request.
