@@ -14,6 +14,10 @@ pip install psutil
 
 # LLM / AI
 ollama
+kokoro-onnx
+onnxruntime-gpu
+sounddevice
+soundfile
 
 # Memory / Vector store
 chromadb>=0.4.0

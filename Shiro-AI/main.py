@@ -497,11 +497,8 @@ class ShiroApp:
         _was_interrupted = False
 
         # Interrupt any currently-playing TTS before starting the new response.
-        # GPT-SoVITS is single-threaded — letting old synthesis finish while new
-        # starts causes concurrent HTTP requests and corrupted audio.
-        if hasattr(self, 'tts') and self.tts and self.tts.is_active:
+        if hasattr(self, 'tts') and self.tts and self.tts.is_speaking:
             self.tts.interrupt()
-            self.tts.wait_until_done(timeout=1.5)
 
         try:
             for fragment in self.engine.process_text(processed_text, user_name, user_id=user_id, interrupt_event=self.interrupt_event):
